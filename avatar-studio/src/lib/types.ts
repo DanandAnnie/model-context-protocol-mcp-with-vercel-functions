@@ -1241,6 +1241,8 @@ export interface Translation extends TranslationRequest {
   proofreadToken?: string;
   /** When the dub of proofread lines was started; the provider may not know the job for a moment after. */
   dubStartedAt?: string;
+  /** When a failed dub was claimed to be tried again, so a second click (or tab) does not start a second dub. */
+  retriedAt?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;

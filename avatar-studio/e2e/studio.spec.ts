@@ -7534,6 +7534,46 @@ test("a translation is deleted from the list, and the focus moves to the next on
   expect(deletes).toHaveLength(2);
 });
 
+test("a failed dub is tried again with the same settings, in its place", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  // The demo provider refuses a source that asks for it, so this dub fails as it starts.
+  const made = await page.request.post("/api/translate", { data: { title: `Refused ${tag}`, sourceVideoUrl: "https://cdn.example.com/a.mp4?demo=refuse", targetLanguage: "German", quality: "precision", removeMusic: true } });
+  // None started, so the answer is a 502 that still carries the failed record.
+  expect(made.status()).toBe(502);
+  const failed = (await made.json()).translation as { id: string; status: string };
+  expect(failed.status).toBe("failed");
+  await page.goto("/translate");
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(tag);
+  const cards = page.locator('[data-testid="translation"]:visible');
+  await expect(cards).toHaveCount(1);
+  await expect(cards.getByText("The demo dubbing provider refused this video (demo=refuse)")).toBeVisible();
+  // Only a failed dub offers to be tried again.
+  const running = await page.request.post("/api/translate", { data: { title: `Running ${tag}`, sourceVideoUrl: "https://cdn.example.com/b.mp4", targetLanguage: "German" } });
+  const runningId = ((await running.json()).translation as { id: string }).id;
+  expect((await page.request.post(`/api/translate/${runningId}/retry`)).status()).toBe(409);
+  await page.getByRole("button", { name: `Try Refused ${tag} again` }).click();
+  // Refused again: the new attempt takes the old one's place, says so, and can be tried again in turn.
+  await expect(page.getByRole("status").filter({ hasText: `Refused ${tag} failed again` })).toHaveCount(1);
+  const refusedCards = cards.filter({ hasText: `Refused ${tag}` });
+  await expect(refusedCards).toHaveCount(1);
+  await expect(refusedCards.getByTestId("translation-meta")).toContainText("→ German · precision · no music");
+  await expect(page.getByRole("button", { name: `Try Refused ${tag} again` })).toBeFocused();
+  // The failed one is gone, not kept beside the new attempt.
+  expect((await page.request.get(`/api/translate/${failed.id}`)).status()).toBe(404);
+  // A source refused only the first time goes through when tried again: the new dub is under way, with nothing to try.
+  const once = await page.request.post("/api/translate", { data: { title: `Once ${tag}`, sourceVideoUrl: `https://cdn.example.com/${tag}.mp4?demo=refuse-once`, targetLanguage: "French" } });
+  expect(once.status()).toBe(502);
+  await page.reload();
+  await page.getByRole("searchbox", { name: "Search translations" }).fill(`Once ${tag}`);
+  await page.getByRole("button", { name: `Try Once ${tag} again` }).click();
+  await expect(page.getByRole("status").filter({ hasText: `Trying Once ${tag} again.` })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: `Try Once ${tag} again` })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: `Delete Once ${tag}` })).toBeFocused();
+  await expect(cards.filter({ hasText: `Once ${tag}` }).getByText("The demo dubbing provider refused this video (demo=refuse)")).toHaveCount(0);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("one video is dubbed into several languages in one go", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

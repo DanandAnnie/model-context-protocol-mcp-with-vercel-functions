@@ -167,7 +167,13 @@ export async function createTranslation(req: z.infer<typeof translationRequestSc
     base.status = "failed";
     base.error = err instanceof Error ? err.message : String(err);
   }
-  return shown(await getStore().put("translation", base));
+  try {
+    return shown(await getStore().put("translation", base));
+  } catch (err) {
+    // The provider may be dubbing already: its job is logged so it can be found in the provider's account.
+    if (base.providerJobId || base.providerProofreadId) console.error(`translation ${base.id} started at ${base.provider} (${base.providerJobId ?? base.providerProofreadId}) but could not be stored:`, err);
+    throw err;
+  }
 }
 
 /** How long a provider's expiring links (presigned video and subtitle URLs) are trusted before they are read again. */
@@ -303,9 +309,62 @@ export async function deleteTranslation(id: string, ownerId: string = LOCAL_OWNE
   const item = owned(await getStore().get<Translation>("translation", translationIdSchema.parse(id)), ownerId, `Translation ${id}`);
   // A dub being started is waited for: the provider may be taking it on, and its answer is written to this job.
   if (item.proofreadStage === "dubbing" && !stuck(item)) throw new ConflictError("This dub is being started; delete it once it shows as processing");
+  // A failed dub being tried again is waited for too: the new attempt takes its place, and that one can be deleted.
+  if (item.status === "failed" && retryClaimed(item)) throw new ConflictError("This dub is being tried again; delete the new attempt once it shows");
   await getStore().remove("translation", item.id);
   lastChecked.delete(item.id);
 }
+
+/** How long a failed dub claimed for a new try is held before it can be claimed again (a try that never finished). */
+const RETRY_CLAIM_MS = 2 * 60 * 1000;
+
+/**
+ * Tries a failed dub again: a new job from the same source, language, and options, with the brand glossary and fixed
+ * translations the failed one was made with (not the kit's current ones), in place of the failed one. The failed job
+ * is claimed first with a conditional write, so two clicks or tabs start one dub, not two; it is removed once the new
+ * job is stored, which carries the new outcome (its own error if the provider refuses again).
+ */
+export async function retryTranslation(id: string, ownerId: string = LOCAL_OWNER): Promise<Translation> {
+  const failed = owned(await getStore().get<Translation>("translation", translationIdSchema.parse(id)), ownerId, `Translation ${id}`);
+  if (failed.status !== "failed") throw new ConflictError("Only a dub that failed can be tried again");
+  if (retryClaimed(failed)) throw new ConflictError("This dub is already being tried again");
+  if (failed.providerProofreadId && failed.proofreadCues?.length) {
+    // A proofread dub that failed after its lines were approved: the same lines (with their corrections) open again to
+    // be approved and dubbed once more, rather than being translated afresh and the corrections lost.
+    const { providerJobId: _job, error: _error, dubStartedAt: _started, retriedAt: _retried, videoUrl: _video, captionUrls: _captions, ...rest } = failed;
+    const reopened: Translation = { ...rest, status: "processing", proofreadStage: "ready", updatedAt: after(failed.updatedAt) };
+    if (!(await getStore().putIf("translation", reopened, "updatedAt", failed.updatedAt))) throw new ConflictError("This dub changed meanwhile; reload and try again");
+    return shown(reopened);
+  }
+  if (failed.proofread) assertProofreadReachable(getTranslateProvider().name);
+  const claimed: Translation = { ...failed, retriedAt: nowIso(), updatedAt: after(failed.updatedAt) };
+  if (!(await getStore().putIf("translation", claimed, "updatedAt", failed.updatedAt))) throw new ConflictError("This dub changed meanwhile; reload and try again");
+  const next = await createTranslation(
+    {
+      title: failed.title,
+      sourceVideoUrl: failed.sourceVideoUrl,
+      targetLanguage: failed.targetLanguage,
+      ...setOptions(failed),
+      ...(failed.glossary?.length ? { glossary: failed.glossary } : {}),
+      ...(failed.forcedTranslations?.length ? { forcedTranslations: failed.forcedTranslations } : {}),
+    },
+    ownerId,
+  );
+  // The failed job goes only while it is still as claimed: one a late webhook moved on meanwhile (a job the provider
+  // was in fact still making) is kept. Either way the new job stands, so a failure here is logged, not reported.
+  try {
+    const current = await getStore().get<Translation>("translation", failed.id);
+    if (current && current.updatedAt === claimed.updatedAt) await getStore().remove("translation", failed.id);
+    else if (current) console.error(`translation ${failed.id} changed while it was tried again (now ${current.status}); kept beside ${next.id}`);
+    lastChecked.delete(failed.id);
+  } catch (err) {
+    console.error(`translation ${failed.id} was tried again as ${next.id} but could not be removed:`, err);
+  }
+  return next;
+}
+
+/** A failed dub claimed for a new try within the last two minutes. */
+const retryClaimed = (t: Translation) => !!t.retriedAt && Date.now() - Date.parse(t.retriedAt) < RETRY_CLAIM_MS;
 
 /** Corrected proofread lines: one text per line the provider translated, in order (the timing stays as translated). */
 export const proofreadLinesSchema = z.object({

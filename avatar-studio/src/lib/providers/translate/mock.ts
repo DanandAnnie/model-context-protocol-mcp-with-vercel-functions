@@ -12,9 +12,31 @@ const SAMPLE_LINES: Record<string, string[]> = {
   German: ["Hallo und willkommen bei Avatar Studio.", "In der nächsten Minute zeige ich dir, wie ein Video entsteht.", "Los geht's."],
 };
 
+/** Sources refused once already (`demo=refuse-once`), so the next try of each goes through. */
+const refusedOnce = new Set<string>();
+
+/**
+ * Whether the demo provider refuses a source: always for `demo=refuse`, the first time only for `demo=refuse-once`,
+ * so a failed dub, and trying it again, can be seen without a real provider.
+ */
+function refused(url: string): boolean {
+  let demo: string | null = null;
+  try {
+    demo = new URL(url).searchParams.get("demo");
+  } catch {
+    return false;
+  }
+  if (demo === "refuse") return true;
+  if (demo !== "refuse-once" || refusedOnce.has(url)) return false;
+  refusedOnce.add(url);
+  return true;
+}
+
 export class MockTranslateProvider implements TranslateProvider {
   readonly name = "mock";
-  async createTranslation() {
+  async createTranslation(input?: TranslationRequest) {
+    // A source whose address asks for it (`demo=refuse`) is refused, so a failed dub can be seen and tried again.
+    if (input && refused(input.sourceVideoUrl)) throw new Error("The demo dubbing provider refused this video (demo=refuse)");
     return { providerJobId: `mock_tr_${Date.now()}` };
   }
   async getStatus(providerJobId: string) {
@@ -23,7 +45,8 @@ export class MockTranslateProvider implements TranslateProvider {
     if (Date.now() - startedAt < 15_000) return { status: "processing" as const };
     return { status: "completed" as const, videoUrl: demoAssetUrl(SAMPLE_VIDEO) };
   }
-  async createProofread() {
+  async createProofread(input?: TranslationRequest) {
+    if (input && refused(input.sourceVideoUrl)) throw new Error("The demo dubbing provider refused this video (demo=refuse)");
     return { proofreadId: `mock_pr_${Date.now()}` };
   }
   async getProofread(proofreadId: string, input: TranslationRequest) {

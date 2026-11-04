@@ -1,7 +1,7 @@
 "use client";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useRef, useState } from "react";
-import { Check, Languages, Trash2 } from "lucide-react";
+import { Check, Languages, RotateCcw, Trash2 } from "lucide-react";
 import { refocusIfLost } from "@/lib/focus";
 import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -71,6 +71,8 @@ function TranslateInner() {
   const [listErr, setListErr] = useState<string | null>(null);
   // The translation being deleted: the Delete buttons wait for it, so a second click does not ask (and send) again.
   const [deleting, setDeleting] = useState<string | null>(null);
+  // The failed dub being tried again: its button waits, so a second click does not start a second dub.
+  const [retrying, setRetrying] = useState<string | null>(null);
   const filterBy = (f: TranslationFilter) => {
     setStatusFilter(f);
     // What was pinned stays in view until a filter changes, as with the search.
@@ -108,7 +110,7 @@ function TranslateInner() {
   const counts = translationCounts(found);
   const shown = statusFilter === "all" ? found : found.filter((t) => search.isPinned(t.id) || translationState(t) === statusFilter);
   async function remove(t: Translation) {
-    if (deleting) return;
+    if (deleting || retrying) return;
     const lose =
       t.status === "completed"
         ? "The dubbed video and its subtitle links go with it."
@@ -145,6 +147,37 @@ function TranslateInner() {
     // The focus moves to the next translation's Delete, or to the list's heading (also when that one went meanwhile),
     // rather than being lost with the button.
     focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-translation-delete="${next.id}"]:not([hidden] *)`) : null) ?? listHeading.current);
+  }
+
+  async function retry(t: Translation) {
+    if (retrying || deleting) return;
+    setListErr(null);
+    // Said at once: with the real provider the new attempt can take a few seconds to start.
+    setListNote(t.proofreadCues?.length ? `Opening the lines of ${t.title} again…` : `Trying ${t.title} again…`);
+    setRetrying(t.id);
+    try {
+      const { translation: next } = await api<{ translation: Translation }>(`/api/translate/${t.id}/retry`, { method: "POST" });
+      // The new dub takes the failed one's place, and stays in view whatever the search or filter says.
+      search.pin(next.id);
+      setData((prev) => (prev ? { ...prev, translations: prev.translations.map((x) => (x.id === t.id ? next : x)) } : prev));
+      setListNote(
+        next.status === "failed"
+          ? `${t.title} failed again: ${next.error ?? "the provider refused it"}.`
+          : next.proofreadStage === "ready"
+            ? `The lines of ${t.title} are open again, with your corrections, to approve.`
+            : `Trying ${t.title} again.`,
+      );
+      refetch();
+      // The focus moves to the new dub's Delete (its Try again went with the failed one), or to the list's heading.
+      focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(next.status === "failed" ? `[data-translation-retry="${next.id}"]` : `[data-translation-delete="${next.id}"]`) ?? listHeading.current);
+    } catch (e) {
+      setListNote(null);
+      setListErr(e instanceof Error ? e.message : "The dub could not be tried again");
+      // The list catches up whatever happened (a new attempt may have been stored before the error).
+      refetch();
+    } finally {
+      setRetrying(null);
+    }
   }
 
   const filterNote = found.length > 0 && shown.length === 0 ? TRANSLATION_FILTERS.find((f) => f.value === statusFilter)?.none : undefined;
@@ -316,8 +349,13 @@ function TranslateInner() {
                       ) : (
                         <StatusBadge status={t.status} />
                       )}
+                      {canEdit !== false && t.status === "failed" && (
+                        <button type="button" onClick={() => retry(t)} data-translation-retry={t.id} aria-disabled={!!retrying || !!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700 aria-disabled:opacity-50" aria-label={`Try ${t.title} again`} title="Try again">
+                          <RotateCcw className="h-4 w-4" aria-hidden />
+                        </button>
+                      )}
                       {canEdit !== false && (
-                        <button type="button" onClick={() => remove(t)} data-translation-delete={t.id} aria-disabled={!!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600 aria-disabled:opacity-50" aria-label={`Delete ${t.title}`} title="Delete">
+                        <button type="button" onClick={() => remove(t)} data-translation-delete={t.id} aria-disabled={!!deleting || !!retrying || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600 aria-disabled:opacity-50" aria-label={`Delete ${t.title}`} title="Delete">
                           <Trash2 className="h-4 w-4" aria-hidden />
                         </button>
                       )}

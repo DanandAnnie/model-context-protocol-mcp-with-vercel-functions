@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AudioLines, Clapperboard, Download, FileAudio, Image as ImageIcon, ImagePlus, Pencil, Trash2, Upload } from "lucide-react";
 import { Card, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api, formatDate, formatSeconds } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
-import { ASSET_SORTS, inRankOrder, inSortOrder, rankAssets, type AssetSort } from "@/lib/asset-sort";
+import { ASSETS_SORT_KEY, ASSET_SORTS, assetSortFrom, inRankOrder, inSortOrder, rankAssets, type AssetSort } from "@/lib/asset-sort";
 import { useListSearch } from "@/components/ListSearch";
 import { toUploadable } from "@/lib/image-upload";
 import { MAX_BACKDROPS, MAX_CLIPS, type AudioClip, type Backdrop } from "@/lib/types";
@@ -34,8 +34,22 @@ export default function AssetsPage() {
   // The order is worked out when a sort is chosen and when each list first loads, and then held: a rename does not
   // move its card, an upload appears first, and a delete leaves the rest where they are, so nothing moves out from
   // under the person (or their focus). "Sort again" shows once the held order no longer matches the sort.
+  // The sort chosen is remembered by this browser, read after the first render so the server's markup still matches.
   const [sort, setSort] = useState<AssetSort>("newest");
   const [sortRound, setSortRound] = useState(0);
+  useEffect(() => {
+    try {
+      const saved = assetSortFrom(window.localStorage.getItem(ASSETS_SORT_KEY));
+      if (saved !== "newest") {
+        setSort(saved);
+        setSortRound((n) => n + 1);
+      }
+    } catch {
+      // Storage blocked (a private window, say): newest first it is.
+    }
+  }, []);
+  // Sort again leaves once the lists are in order, so the focus goes to the sort select rather than the page.
+  const sortSelect = useRef<HTMLSelectElement>(null);
   const orderKey = `${sort}:${sortRound}:${!!clipsApi.data}:${!!picturesApi.data}`;
   const [order, setOrder] = useState<{ key: string; clips: Map<string, number>; pictures: Map<string, number> } | null>(null);
   if (order?.key !== orderKey) setOrder({ key: orderKey, clips: rankAssets(clips, sort), pictures: rankAssets(pictures, sort) });
@@ -59,6 +73,11 @@ export default function AssetsPage() {
   const sortBy = (next: AssetSort) => {
     setSort(next);
     setSortRound((n) => n + 1);
+    try {
+      window.localStorage.setItem(ASSETS_SORT_KEY, next);
+    } catch {
+      // Not remembered, but the order still holds for this visit.
+    }
     say(`Sorted: ${ASSET_SORTS.find((o) => o.value === next)!.label}.`);
   };
   const fail = (e: unknown, fallback: string) => {
@@ -233,7 +252,7 @@ export default function AssetsPage() {
       {(clipsApi.data || picturesApi.data) && (
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <input type="search" aria-label="Search assets" aria-describedby="assets-matches" className={`${inputClass} max-w-sm`} placeholder="Search by name or by what a clip says" value={q} onChange={(e) => search(e.target.value)} />
-          <select aria-label="Sort assets" value={sort} onChange={(e) => sortBy(e.target.value as AssetSort)} className={`${inputClass} w-auto`}>
+          <select ref={sortSelect} aria-label="Sort assets" value={sort} onChange={(e) => sortBy(assetSortFrom(e.target.value))} className={`${inputClass} w-auto`}>
             {ASSET_SORTS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -241,7 +260,14 @@ export default function AssetsPage() {
             ))}
           </select>
           {outOfOrder && (
-            <button type="button" onClick={() => sortBy(sort)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => {
+                sortBy(sort);
+                sortSelect.current?.focus();
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
               Sort again
             </button>
           )}

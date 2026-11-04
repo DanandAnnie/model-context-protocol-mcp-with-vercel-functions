@@ -14,6 +14,9 @@ export function assetSortFrom(value: string | null | undefined): AssetSort {
 /** Where this browser keeps the My templates sort. */
 export const TEMPLATE_SORT_KEY = "avatar-studio:templates-sort";
 
+/** Where this browser keeps the Assets page sort. */
+export const ASSETS_SORT_KEY = "avatar-studio:assets-sort";
+
 type Rankable = { id: string; name: string; createdAt: string };
 
 /**

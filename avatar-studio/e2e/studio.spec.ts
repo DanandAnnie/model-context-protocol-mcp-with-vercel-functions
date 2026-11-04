@@ -10527,10 +10527,18 @@ test("the Assets page keeps the account's audio clips and pictures: upload, word
   await page.getByRole("button", { name: "Sort again" }).click();
   await expect.poll(pictureOrder).toEqual([front, zebra]);
   await expect(page.getByRole("button", { name: "Sort again" })).toHaveCount(0);
+  // Sort again leaves once it has done its work, handing the focus to the sort select.
+  await expect(sortBy).toBeFocused();
   await expect(page.getByTestId("assets-note")).toHaveText("Sorted: Name A–Z.");
   page.once("dialog", (d) => d.accept());
   await pictures.getByRole("button", { name: `Delete ${zebra}`, exact: true }).click();
   await expect(pictures.getByRole("img", { name: zebra, exact: true })).toHaveCount(0);
+  // The browser remembers the sort.
+  await page.reload();
+  await expect(sortBy).toHaveValue("name");
+  // Restored quietly, in order: no "Sorted" note, nothing to sort again.
+  await expect(page.getByTestId("assets-note")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sort again" })).toHaveCount(0);
   await sortBy.selectOption("newest");
   await search.fill("");
   const pictureShown = await page.request.get(`/api/backdrops/${pictureId}`);

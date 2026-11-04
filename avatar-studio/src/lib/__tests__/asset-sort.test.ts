@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ASSET_SORTS, TEMPLATE_SORT_KEY, assetSortFrom, inRankOrder, inSortOrder, rankAssets } from "../asset-sort";
+import { ASSETS_SORT_KEY, ASSET_SORTS, TEMPLATE_SORT_KEY, assetSortFrom, inRankOrder, inSortOrder, rankAssets } from "../asset-sort";
 
 const items = [
   { id: "c", name: "Take 10", createdAt: "2026-10-30T10:00:02.000Z" },
@@ -64,5 +64,6 @@ describe("assetSortFrom", () => {
     for (const o of ASSET_SORTS) assert.equal(assetSortFrom(o.value), o.value);
     for (const v of [null, undefined, "", "Name", "title", "random"]) assert.equal(assetSortFrom(v), "newest");
     assert.equal(TEMPLATE_SORT_KEY, "avatar-studio:templates-sort");
+    assert.equal(ASSETS_SORT_KEY, "avatar-studio:assets-sort");
   });
 });

@@ -25,3 +25,37 @@ describe("Find a member or invite", () => {
     assert.equal(peopleMatchLine({ members: [0, 7], pending: [0, 0], expired: [0, 0] }, "zed", { invites: false }), "No member matches “zed”.");
   });
 });
+
+describe("people download", () => {
+  it("lists members, then pending, then expired invites, with no invite tokens", async () => {
+    const { PEOPLE_CSV_COLUMNS, peopleRows } = await import("../invite-text");
+    const { parseCsv, toCsv } = await import("../csv");
+    const rows = peopleRows(
+      {
+        members: [
+          { userId: "u_1", email: "ann@example.com", role: "owner", joinedAt: "2026-10-01T00:00:00.000Z" },
+          { userId: "u_2", role: "viewer", joinedAt: "2026-10-02T00:00:00.000Z" },
+        ],
+        // Listed latest first here, as one store does: the file puts the soonest to expire first.
+        invites: [{ role: "viewer", expiresAt: "2026-11-11T00:00:00.000Z" }, { email: "=cmd@example.com", role: "editor", expiresAt: "2026-11-10T00:00:00.000Z", token: "secret_token" } as never],
+        expiredInvites: [{ email: "eve@example.com", role: "viewer", expiresAt: "2026-10-20T00:00:00.000Z" }],
+      },
+      { u_1: "2026-11-03T12:00:00.000Z" },
+    );
+    assert.deepEqual(
+      rows.map((r) => [r.email, r.user_id, r.role, r.status, r.joined, r.expires, r.last_active]),
+      [
+        ["ann@example.com", "u_1", "owner", "member", "2026-10-01T00:00:00.000Z", "", "2026-11-03T12:00:00.000Z"],
+        ["", "u_2", "viewer", "member", "2026-10-02T00:00:00.000Z", "", ""],
+        ["=cmd@example.com", "", "editor", "pending invite", "", "2026-11-10T00:00:00.000Z", ""],
+        ["Link invite", "", "viewer", "pending invite", "", "2026-11-11T00:00:00.000Z", ""],
+        ["eve@example.com", "", "viewer", "expired invite", "", "2026-10-20T00:00:00.000Z", ""],
+      ],
+    );
+    const csv = toCsv(PEOPLE_CSV_COLUMNS, rows);
+    assert.equal(csv.includes("secret_token"), false, "an invite's token never reaches the file");
+    // A cell a spreadsheet would run as a formula is defused, as in the other downloads.
+    assert.equal(parseCsv(csv).rows[2].email, "'=cmd@example.com");
+    assert.deepEqual(parseCsv(csv).columns, ["email", "user_id", "role", "status", "joined", "expires", "last_active"]);
+  });
+});

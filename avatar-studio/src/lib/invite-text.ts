@@ -108,3 +108,28 @@ export function peopleMatchLine(m: PeopleMatches, query: string, { invites = tru
   const one = parts.length === 1 && m.members[0] + m.pending[0] + m.expired[0] === 1;
   return `${listed} ${one ? "matches" : "match"} ${q}.`;
 }
+
+/** The columns of the Workspace page's people download. */
+export const PEOPLE_CSV_COLUMNS = ["email", "user_id", "role", "status", "joined", "expires", "last_active"];
+
+/** What a people download is made from: the workspace as its reader sees it (invites only for owners). */
+export interface PeopleSheet {
+  members: Array<{ userId: string; email?: string; role: string; joinedAt: string }>;
+  invites: Array<{ email?: string; role: string; expiresAt: string }>;
+  expiredInvites?: Array<{ email?: string; role: string; expiresAt: string }>;
+}
+
+/**
+ * The people of a workspace as spreadsheet rows: members first (with when they joined and, from the kept
+ * activity, when they last did something there), then pending invites, then expired ones. A link invite has no
+ * address, so its email cell reads "Link invite". Pending invites come soonest to expire first and expired ones most
+ * recently lapsed first. Invite tokens are never included: the file is for records.
+ */
+export function peopleRows(sheet: PeopleSheet, lastActive: Record<string, string> = {}): Array<Record<string, string>> {
+  return [
+    ...sheet.members.map((m) => ({ email: m.email ?? "", user_id: m.userId, role: m.role, status: "member", joined: m.joinedAt, expires: "", last_active: lastActive[m.userId] ?? "" })),
+    // Invites soonest to expire first, whatever order the store lists them in.
+    ...[...sheet.invites].sort((a, b) => a.expiresAt.localeCompare(b.expiresAt)).map((i) => ({ email: i.email ?? "Link invite", user_id: "", role: i.role, status: "pending invite", joined: "", expires: i.expiresAt, last_active: "" })),
+    ...[...(sheet.expiredInvites ?? [])].sort((a, b) => b.expiresAt.localeCompare(a.expiresAt)).map((i) => ({ email: i.email ?? "Link invite", user_id: "", role: i.role, status: "expired invite", joined: "", expires: i.expiresAt, last_active: "" })),
+  ];
+}

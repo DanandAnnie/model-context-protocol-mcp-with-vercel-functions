@@ -6980,6 +6980,52 @@ test("the Workspace page finds a member or invite by email once there are enough
   }
 });
 
+test("the Workspace page downloads its members and invites as CSV", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `People CSV ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const dan = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "dan@example.com", role: "viewer" } })).json()) as { invite: { token: string; expiresAt: string } };
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "editor" } })).status()).toBe(201);
+    await page.goto("/workspace");
+    const link = page.getByRole("link", { name: "Download CSV of the members and invites" });
+    await expect(link).toHaveAttribute("href", `/api/workspaces/${ws.id}/people`);
+    // The link downloads the file the route answers.
+    const download = page.waitForEvent("download");
+    await link.click();
+    expect((await download).suggestedFilename()).toMatch(/^people-people-csv-[a-z0-9]+-\d{4}-\d\d-\d\d\.csv$/);
+
+    const res = await page.request.get(`/api/workspaces/${ws.id}/people`);
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("text/csv");
+    const text = await res.text();
+    expect(text).not.toContain(dan.invite.token);
+    const csv = parseCsv(text);
+    expect(csv.columns).toEqual(["email", "user_id", "role", "status", "joined", "expires", "last_active"]);
+    expect(csv.rows.map((r) => [r.email, r.user_id, r.role, r.status])).toEqual([
+      ["", "local", "owner", "member"],
+      ["dan@example.com", "", "viewer", "pending invite"],
+      ["Link invite", "", "editor", "pending invite"],
+    ]);
+    expect(csv.rows[1].expires).toBe(dan.invite.expiresAt);
+    expect(Date.parse(csv.rows[0].joined)).toBeGreaterThan(0);
+    // Not a workspace you belong to, and not for a script: a key is not a person who could be an owner.
+    expect((await page.request.get("/api/workspaces/ws_not_mine/people")).status()).toBe(404);
+    const key = (await (await page.request.post("/api/keys", { data: { name: "People reader" } })).json()) as { key: { id: string }; secret: string };
+    try {
+      const asScript = await page.request.get(`/api/workspaces/${ws.id}/people`, { headers: { Authorization: `Bearer ${key.secret}` } });
+      expect(asScript.status()).toBe(403);
+      expect(await asScript.text()).not.toContain("dan@example.com");
+    } finally {
+      await page.request.delete(`/api/keys/${key.key.id}`);
+    }
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("the workspace activity feed shows more, a page at a time, up to all kept", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Feed ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

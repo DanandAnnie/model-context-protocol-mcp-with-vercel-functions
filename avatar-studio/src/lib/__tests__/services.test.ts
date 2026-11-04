@@ -2754,6 +2754,20 @@ describe("workspaces", () => {
     assert.deepEqual(forViewer.activity.map((e) => [e.kind, e.subject ?? null, e.count ?? null]), [["invite.sent", null, 1]]);
   });
 
+  it("gives a member who is not an owner a people list with no invites", async () => {
+    const { peopleRows } = await import("../invite-text");
+    const ws = await createWorkspace("People rows", alice);
+    const join = await createInvite(ws.id, { role: "viewer" }, alice);
+    await acceptInvite(join.token, bob);
+    await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
+    const fresh = (await listWorkspaces(alice.id)).find((w) => w.id === ws.id)!;
+    const forOwner = peopleRows(await workspaceView(fresh, alice));
+    assert.deepEqual(forOwner.map((r) => [r.email, r.status]), [["alice@example.com", "member"], ["bob@example.com", "member"], ["dan@example.com", "pending invite"]]);
+    const forViewer = peopleRows(await workspaceView(fresh, bob));
+    assert.deepEqual(forViewer.map((r) => r.status), ["member", "member"], "a viewer gets the members only");
+    assert.equal(JSON.stringify(forViewer).includes("dan@example.com"), false);
+  });
+
   it("invites several addresses at once: one link each, skipping members, pending invites, and repeats, with room checked first", async () => {
     const ws = await createWorkspace("Batch", alice);
     const join = await createInvite(ws.id, { role: "editor" }, alice);

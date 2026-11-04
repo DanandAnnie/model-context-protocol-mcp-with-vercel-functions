@@ -373,6 +373,18 @@ export default function WorkspacePage() {
         }
       />
       <ErrorBanner message={error ?? err} />
+      <div className="mb-2 flex justify-end">
+        {/* Members (and, for owners, invites) as a spreadsheet, for records. */}
+        <a
+          href={`/api/workspaces/${ws.id}/people`}
+          download
+          data-testid="people-csv"
+          aria-label={isOwner ? "Download CSV of the members and invites" : "Download CSV of the members"}
+          className="inline-flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+        >
+          <Download className="h-3.5 w-3.5" aria-hidden /> Download CSV
+        </a>
+      </div>
       {searchable && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <input

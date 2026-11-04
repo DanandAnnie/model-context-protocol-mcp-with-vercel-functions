@@ -225,6 +225,61 @@ test("a video can be saved as a template, reopened from it, renamed, and duplica
   expect(((await (await page.request.get("/api/templates")).json()).templates as unknown[]).length).toBe(0);
 });
 
+test("My templates sorts newest, oldest, or by name, holds its order through a rename, and remembers the sort", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const v = await createVideoViaApi(page, `Sort source ${tag}`);
+  const ids: string[] = [];
+  try {
+    // Saved in this order, so newest first is Bravo, Charlie, Alpha 10, Alpha 2; by name Alpha 2, Alpha 10, Bravo, Charlie.
+    // Each a few milliseconds apart, so no two share a saved time.
+    const times: string[] = [];
+    for (const title of [`Alpha 2 ${tag}`, `Alpha 10 ${tag}`, `Charlie ${tag}`, `Bravo ${tag}`]) {
+      const made = await page.request.post("/api/templates", { data: { fromVideoId: v.id, title } });
+      expect(made.status()).toBe(201);
+      const { template } = await made.json();
+      ids.push(template.id);
+      times.push(template.createdAt);
+      await page.waitForTimeout(5);
+    }
+    expect(new Set(times).size).toBe(4);
+    await page.goto("/templates");
+    const mine = page.getByTestId("my-templates");
+    await page.getByRole("searchbox", { name: "Search my templates and script templates" }).fill(tag);
+    const titles = mine.getByRole("button", { name: /^Edit template / });
+    const order = async () => (await titles.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? ""))).map((l) => l.replace(/^Edit template /, "").replace(` ${tag}`, ""));
+    const sort = page.getByLabel("Sort my templates");
+    await expect(sort.locator("option:checked")).toHaveText("Newest first");
+    await expect.poll(order).toEqual(["Bravo", "Charlie", "Alpha 10", "Alpha 2"]);
+    await sort.selectOption("oldest");
+    await expect.poll(order).toEqual(["Alpha 2", "Alpha 10", "Charlie", "Bravo"]);
+    await sort.selectOption("name");
+    await expect.poll(order).toEqual(["Alpha 2", "Alpha 10", "Bravo", "Charlie"]);
+    await expect(page.getByTestId("templates-note")).toHaveText("Sorted: Name A–Z.");
+    await expect(mine.getByRole("button", { name: "Sort again" })).toHaveCount(0);
+
+    // A rename keeps the card where it is, with its Edit button focused; Sort again puts it in its place.
+    await mine.getByRole("button", { name: `Edit template Alpha 2 ${tag}`, exact: true }).click();
+    await mine.getByLabel("Template name").fill(`Zulu ${tag}`);
+    await mine.getByRole("button", { name: "Save" }).click();
+    await expect(mine.getByRole("button", { name: `Edit template Zulu ${tag}` })).toBeFocused();
+    await expect.poll(order).toEqual(["Zulu", "Alpha 10", "Bravo", "Charlie"]);
+    await mine.getByRole("button", { name: "Sort again" }).click();
+    await expect.poll(order).toEqual(["Alpha 10", "Bravo", "Charlie", "Zulu"]);
+    await expect(mine.getByRole("button", { name: "Sort again" })).toHaveCount(0);
+    await expect(sort).toBeFocused();
+
+    // The browser remembers the sort.
+    await page.reload();
+    await page.getByRole("searchbox", { name: "Search my templates and script templates" }).fill(tag);
+    await expect(sort.locator("option:checked")).toHaveText("Name A–Z");
+    await expect.poll(order).toEqual(["Alpha 10", "Bravo", "Charlie", "Zulu"]);
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+  } finally {
+    for (const id of ids) await page.request.delete(`/api/templates/${id}`);
+  }
+});
+
 test("one search looks through the saved templates and the script templates", async ({ page }) => {
   const tag = Date.now().toString(36);
   const v = await createVideoViaApi(page, `Search source ${tag}`, {

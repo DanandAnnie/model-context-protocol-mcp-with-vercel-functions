@@ -14,6 +14,10 @@ import { useListSearch } from "@/components/ListSearch";
 import { MAX_TEMPLATES, type VideoTemplate } from "@/lib/types";
 import { stripPauses } from "@/lib/pauses";
 import { StudioTemplates } from "@/components/StudioTemplates";
+import { ASSET_SORTS, TEMPLATE_SORT_KEY, assetSortFrom, inRankOrder, inSortOrder, rankAssets, type AssetSort } from "@/lib/asset-sort";
+
+/** A saved template as the sort reads it: by its name, and by when it was saved (a rename does not change that). */
+const rankable = (t: VideoTemplate) => ({ id: t.id, name: t.title, createdAt: t.createdAt });
 
 const CATEGORIES = ["All", ...Array.from(new Set(SCRIPT_TEMPLATES.map((t) => t.category)))];
 /** Each script template's words for the search, folded once: they never change. */
@@ -45,9 +49,44 @@ export default function TemplatesPage() {
   const [focusEdit, setFocusEdit] = useState<string | null>(null);
   const [copying, setCopying] = useState<string | null>(null);
   const atLimit = (mine?.templates.length ?? 0) >= MAX_TEMPLATES;
+  // The order of My templates is worked out when a sort is chosen and when the list first loads, and then held, as on
+  // the Assets page: a rename does not move its card, a copy appears first, and a delete leaves the rest in place, so
+  // nothing moves out from under the person (or their focus). "Sort again" shows once the held order no longer matches.
+  // The sort chosen is remembered by this browser, read after the first render so the server's markup still matches.
+  const [sort, setSort] = useState<AssetSort>("newest");
+  const [sortRound, setSortRound] = useState(0);
+  useEffect(() => {
+    try {
+      const saved = assetSortFrom(window.localStorage.getItem(TEMPLATE_SORT_KEY));
+      if (saved !== "newest") {
+        setSort(saved);
+        setSortRound((n) => n + 1);
+      }
+    } catch {
+      // Storage blocked (a private window, say): newest first it is.
+    }
+  }, []);
+  const orderKey = `${sort}:${sortRound}:${!!mine}`;
+  const [order, setOrder] = useState<{ key: string; rank: Map<string, number> } | null>(null);
+  if (order?.key !== orderKey) setOrder({ key: orderKey, rank: rankAssets((mine?.templates ?? []).map(rankable), sort) });
+  const orderedMine = inRankOrder(mine?.templates ?? [], order?.rank);
+  // Sort again leaves once the list is in order, so the focus goes to the sort select rather than the page.
+  const sortSelect = useRef<HTMLSelectElement>(null);
+  function sortBy(next: AssetSort) {
+    setSort(next);
+    setSortRound((n) => n + 1);
+    try {
+      window.localStorage.setItem(TEMPLATE_SORT_KEY, next);
+    } catch {
+      // Not remembered, but the order still holds for this visit.
+    }
+    announce(`Sorted: ${ASSET_SORTS.find((o) => o.value === next)!.label}.`);
+  }
   // Each saved template's words folded once per list read, not on every key.
   const mineHaystack = useMemo(() => new Map((mine?.templates ?? []).map((t) => [t.id, foldTerm(savedTemplateTexts(t).join("\n"))])), [mine]);
-  const shownMine = (mine?.templates ?? []).filter((t) => editingIds.has(t.id) || search.matchesFolded(t.id, mineHaystack.get(t.id) ?? ""));
+  const shownMine = orderedMine.filter((t) => editingIds.has(t.id) || search.matchesFolded(t.id, mineHaystack.get(t.id) ?? ""));
+  // Judged on the cards shown: a template the search hides being out of place is nothing to sort again for.
+  const mineOutOfOrder = !inSortOrder(shownMine.map(rankable), sort);
   const mineMatches = (mine?.templates ?? []).filter((t) => search.finds(mineHaystack.get(t.id) ?? "")).length;
   const scriptMatches = inCategory.filter((t) => search.finds(SCRIPT_HAYSTACK.get(t.id)!)).length;
   const counts = search.needle
@@ -136,6 +175,28 @@ export default function TemplatesPage() {
       <section className="mb-8" data-testid="my-templates">
         <h2 ref={mineHeading} tabIndex={-1} className="mb-1 text-sm font-semibold text-slate-900 focus:outline-none">My templates</h2>
         <p className="mb-4 text-xs text-slate-500">Save any video as a template from its page: scenes, presenter, voice, and settings come along.</p>
+        {mine && mine.templates.length > 1 && (
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <select ref={sortSelect} aria-label="Sort my templates" value={sort} onChange={(e) => sortBy(assetSortFrom(e.target.value))} data-testid="template-sort" className={`${inputClass} w-auto`}>
+              {ASSET_SORTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {mineOutOfOrder && (
+              <button
+                type="button"
+                onClick={() => {
+                  sortBy(sort);
+                  sortSelect.current?.focus();
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                Sort again
+              </button>
+            )}
+          </div>
+        )}
         {atLimit && canEdit === true && (
           <p id="templates-limit" className="-mt-2 mb-4 text-xs text-slate-600">
             {MAX_TEMPLATES} of {MAX_TEMPLATES} templates: delete one to make a copy.

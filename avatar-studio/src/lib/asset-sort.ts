@@ -6,6 +6,14 @@ export const ASSET_SORTS: ReadonlyArray<{ value: AssetSort; label: string }> = [
   { value: "name", label: "Name A–Z" },
 ];
 
+/** A sort remembered by this browser (or typed anywhere): one of the sorts, or newest first for anything else. */
+export function assetSortFrom(value: string | null | undefined): AssetSort {
+  return ASSET_SORTS.some((o) => o.value === value) ? (value as AssetSort) : "newest";
+}
+
+/** Where this browser keeps the My templates sort. */
+export const TEMPLATE_SORT_KEY = "avatar-studio:templates-sort";
+
 type Rankable = { id: string; name: string; createdAt: string };
 
 /**

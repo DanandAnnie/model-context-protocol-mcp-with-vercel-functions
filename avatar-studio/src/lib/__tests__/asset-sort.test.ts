@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { inRankOrder, inSortOrder, rankAssets } from "../asset-sort";
+import { ASSET_SORTS, TEMPLATE_SORT_KEY, assetSortFrom, inRankOrder, inSortOrder, rankAssets } from "../asset-sort";
 
 const items = [
   { id: "c", name: "Take 10", createdAt: "2026-10-30T10:00:02.000Z" },
@@ -56,5 +56,13 @@ describe("rankAssets", () => {
 
   it("is empty for no assets", () => {
     assert.equal(rankAssets([], "name").size, 0);
+  });
+});
+
+describe("assetSortFrom", () => {
+  it("reads back each sort, and anything else as newest first", () => {
+    for (const o of ASSET_SORTS) assert.equal(assetSortFrom(o.value), o.value);
+    for (const v of [null, undefined, "", "Name", "title", "random"]) assert.equal(assetSortFrom(v), "newest");
+    assert.equal(TEMPLATE_SORT_KEY, "avatar-studio:templates-sort");
   });
 });

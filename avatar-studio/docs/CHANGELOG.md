@@ -1471,3 +1471,22 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **API:** `DELETE /api/translate/:id` (editors only) → `{ ok: true }`. It answers `404` when the translation is not there or is another account's, and `400` for an id that is not a translation's.
   - **Code:** `deleteTranslation` and `translationIdSchema` in `src/lib/services/translations.ts`, and `writeClaimed` for a proofread start's outcome.
   - **Reviews:** the first independent review found, as blocking, that a status check, a webhook, or a dub start in flight during a delete wrote the translation back. All three are fixed, and unit tests hold a provider call open, delete meanwhile, and check that the job stays gone. One existing test that failed the store's writes now fails its conditional writes too. From that review's optional findings: the busy state, the focus fallback, the confirm text for proofread lines, and a browser test that checks nothing is sent when the question is cancelled. A second review found nothing blocking. From its optional findings: the retried start's recognition by job id, a log line when a later start replaces an earlier one's job, and all Delete buttons marked as waiting.
+- Try again on a failed dub (`df08e99`). A dub the provider refused, or that failed while being made, could only be set up again by hand: the source pasted again and the language, speakers, quality, music, speech, and proofread options picked again. A failed card now has a Try again button for editors.
+  - **New attempt:** the new dub keeps the same source, language, and options. It also keeps the brand glossary and fixed translations the failed one was made with, so a retry dubs what was asked for. It takes the failed card's place and stays in view under the search and the status filter. "Trying … again…" is read out at once, then the outcome: under way, or failed again with the provider's reason. The focus moves to the new dub's Delete, or to its Try again if it failed again.
+  - **Proofread dubs:** a proofread dub that failed after its lines were approved is not translated afresh. The same lines, with their corrections, open again to approve and dub once more, so no correction is lost.
+  - **One dub per try:** the failed job is claimed with a conditional write before the provider is asked, so two clicks or two tabs start one dub (the other answers `409`). The claim is freed after two minutes if a try never finished. A delete waits while a try is claimed, and on the page each card's Try again and Delete wait for each other.
+  - **Clean-up:** the failed job is removed only while it is as claimed. One a late webhook moved on is kept, and a failed removal is logged rather than reported, since the new job stands. A dub the provider accepted but the store could not record now logs the provider's job id. The route gets the same 60-second limit as starting a dub.
+  - **API:** `POST /api/translate/:id/retry` (editors only) → `201 { translation }`.
+  - **Demo mode:** the demo provider refuses a source with `demo=refuse` every time and one with `demo=refuse-once` the first time only, so a failed dub and a new try can be seen without HeyGen.
+  - **Code:** `retryTranslation` in `src/lib/services/translations.ts`.
+  - **Review:** an independent review found, as blocking, that trying a failed proofread dub again translated its lines afresh and deleted the only copy of the corrections. Those lines now open again instead, and a unit test covers it. From its optional findings:
+    - the conditional, best-effort removal of the failed job
+    - delete refused during a try, and the two buttons waiting for each other
+    - the logged job id
+    - the route's time limit
+    - the immediate announcement, and every Try again marked as waiting
+    - the refetch after any error
+    - `demo=refuse` for proofreads too
+    - notes on the provider and shared glossary
+    - unit tests that check every setting reaching the provider and wait on a signal rather than a timer
+    - a browser test of the success path

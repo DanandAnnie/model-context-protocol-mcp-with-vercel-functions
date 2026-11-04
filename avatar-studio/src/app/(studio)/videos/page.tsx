@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, AtSign, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { CREATED_WITHIN_DAYS, LIBRARY_FILTER_PARAMS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, withoutLibraryFilters } from "@/lib/client";
+import { CREATED_WITHIN_DAYS, LIBRARY_FILTER_PARAMS, SHAPE_FILTERS, SHARE_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, withoutLibraryFilters } from "@/lib/client";
 import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { useMobileNav } from "@/components/MobileNav";
 import { fileToCover } from "@/lib/image-upload";
@@ -64,7 +64,8 @@ function VideosInner() {
   const failedCount = Number(params.get("failed") ?? 0);
   const [q, setQ] = useState("");
   const [needle, setNeedle] = useState("");
-  // Home's notices open the library at `?share=`, `?status=`, `?created=`, `?review=`, and `?comments=` (`open` or `mentions`), and
+  // Home's notices open the library at `?share=`, `?status=`, `?created=`, `?review=`, and `?comments=` (`open` or `mentions`), `?shape=`
+  // (landscape, portrait, or square) works the same way, and
   // the video page's presenter and voice links at `?presenter=` (an avatar id) and `?voice=` (a voice id), read
   // too), again whenever the address changes (the sidebar's My videos goes back to every video); a value the library does
   // not know is ignored.
@@ -95,12 +96,15 @@ function VideosInner() {
   const [commentFilter, setCommentFilter] = useState<CommentFilter>(() => commentFilterFrom(params.get("comments")));
   // When the videos were made: a campaign's renders of this week or month, whatever folder they went to.
   const [created, setCreated] = useState<VideoQuery["created"]>(() => fromAddress(params.get("created"), CREATED_FILTERS));
+  // The shape a video was made in: the portrait cuts for social, say, apart from the landscape ones.
+  const [shape, setShape] = useState<VideoQuery["shape"]>(() => fromAddress(params.get("shape"), SHAPE_FILTERS));
   const [filtersAsked, setFiltersAsked] = useState(askedFilters);
   if (askedFilters !== filtersAsked) {
     setFiltersAsked(askedFilters);
     setShare(fromAddress(params.get("share"), SHARE_FILTERS));
     setStatus(fromAddress(params.get("status"), STATUSES));
     setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
+    setShape(fromAddress(params.get("shape"), SHAPE_FILTERS));
     setReview(fromAddress(params.get("review"), REVIEW_FILTERS));
     setCommentFilter(commentFilterFrom(params.get("comments")));
     setPresenter(presenterFrom(params.get("presenter")));
@@ -130,7 +134,7 @@ function VideosInner() {
   }, [q]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created, presenter, voice].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created, shape, presenter, voice].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -147,10 +151,11 @@ function VideosInner() {
     if (starred) params.set("starred", "1");
     if (commentFilter !== "all") params.set("comments", commentFilter);
     if (created !== "all") params.set("created", created);
+    if (shape !== "all") params.set("shape", shape);
     if (presenter !== "all") params.set("presenter", presenter);
     if (voice !== "all") params.set("voice", voice);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, presenter, voice]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, shape, presenter, voice]);
   // The share analytics of what the library shows now, every match rather than the page loaded, in the same order.
   const analyticsHref = useMemo(() => {
     const params = new URLSearchParams(path.split("?")[1]);
@@ -201,7 +206,7 @@ function VideosInner() {
   // The on/off filters an empty list names, so the way back is said.
   const toggledOn = [starred && "Starred", commentFilter === "open" && "Open comments", commentFilter === "mentions" && "Mentions me"].filter((t): t is string => !!t);
   // Whether a filter other than Starred, Open comments, and Mentions me narrows the list, for the empty state's advice.
-  const narrowed = !!needle || status !== "all" || folder !== "all" || presenter !== "all" || voice !== "all" || review !== "all" || share !== "all" || created !== "all" || !!batch;
+  const narrowed = !!needle || status !== "all" || folder !== "all" || presenter !== "all" || voice !== "all" || review !== "all" || share !== "all" || created !== "all" || shape !== "all" || !!batch;
   // Any filter at all, a search being typed included: what Clear filters takes back. The sort, the layout, and the trash
   // view are not filters, so they stay.
   const filtersOn = narrowed || toggledOn.length > 0 || q.trim() !== "";
@@ -216,6 +221,7 @@ function VideosInner() {
     setReview("all");
     setShare("all");
     setCreated("all");
+    setShape("all");
     setStarred(false);
     setCommentFilter("all");
     // Filters the address asked for (Home's notices, the video page's links, a batch) leave it too, so a reload or the
@@ -416,7 +422,7 @@ function VideosInner() {
     setCoverDraft(null);
     coverPick.current += 1;
     setCoverReading(false);
-  }, [q, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, presenter, voice]);
+  }, [q, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, shape, presenter, voice]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -1462,6 +1468,12 @@ function VideosInner() {
             <option value="30d">Made in the last 30 days</option>
             <option value="90d">Made in the last 90 days</option>
           </select>
+          <select aria-label="Filter by shape" value={shape} onChange={(e) => setShape(e.target.value as VideoQuery["shape"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+            <option value="all">Any shape</option>
+            <option value="landscape">Landscape 16:9</option>
+            <option value="portrait">Portrait 9:16</option>
+            <option value="square">Square 1:1</option>
+          </select>
           {filtersOn && (
             <button type="button" onClick={clearFilters} data-testid="clear-filters" title="Show every video again: the search and every filter back to their start" className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-slate-100">
               <X className="h-3.5 w-3.5" aria-hidden /> Clear filters
@@ -1529,7 +1541,7 @@ function VideosInner() {
             trash
               ? // Trashed videos the filters hide are still counted on the toggle, so say what hides them.
                 trashed && (narrowed || toggledOn.length > 0)
-                ? `Try a different search, status, folder, presenter, voice, or date${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
+                ? `Try a different search, status, folder, presenter, voice, date, or shape${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
                 : `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.`
               : hasAny
                 ? !narrowed && toggledOn.length === 1
@@ -1538,7 +1550,7 @@ function VideosInner() {
                     : commentFilter === "mentions"
                       ? "No open comment mentions you."
                       : "No video has an open comment."
-                  : `Try a different search, status, folder, presenter, voice, date, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
+                  : `Try a different search, status, folder, presenter, voice, date, shape, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
                 : "Your rendered videos will show up here."
           }
         />

@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * The library's share analytics as a CSV download: one row per video, newest first. Owner only. Takes the library's own
- * query (search, status, folder, presenter, voice, batch, review, share link, star, date made, and sort), so the file can hold what the
+ * query (search, status, folder, presenter, voice, batch, review, share link, star, date made, shape, and sort), so the file can hold what the
  * library shows; `limit` is ignored, as the file holds every match.
  */
 export async function GET(req: Request) {

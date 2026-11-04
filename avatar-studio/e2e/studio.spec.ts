@@ -3975,7 +3975,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Search videos").fill(tag);
   await expect(notedCard).toHaveCount(0);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, share link, or turn off Open comments.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, share link, or turn off Open comments.")).toBeVisible();
   await page.getByTestId("open-comments-toggle").click();
   await expect(notedCard).toBeVisible();
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
@@ -10678,7 +10678,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.
@@ -10726,6 +10726,49 @@ test("the library filters by when videos were made", async ({ page }) => {
   await expect(card).toBeVisible();
   await filter.selectOption("all");
   await expect(card).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
+});
+
+test("the library filters by shape: landscape, portrait, or square", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const wide = await createVideoViaApi(page, `Wide ${tag}`, { aspect: "16:9" });
+  const tall = await createVideoViaApi(page, `Tall ${tag}`, { aspect: "9:16" });
+  const box = await createVideoViaApi(page, `Box ${tag}`, { aspect: "1:1" });
+  // The server filters, so the API answers the same as the page; an aspect ratio is not a shape name.
+  const listed = async (shape: string) => ((await (await page.request.get(`/api/videos?q=${tag}&shape=${shape}`)).json()).videos as { id: string }[]).map((v) => v.id);
+  expect(await listed("portrait")).toEqual([tall.id]);
+  expect(await listed("landscape")).toEqual([wide.id]);
+  expect(await listed("square")).toEqual([box.id]);
+  expect((await page.request.get("/api/videos?shape=9:16")).status()).toBe(400);
+  // The analytics CSV follows the filter too.
+  const csv = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${tag}&shape=portrait`)).text());
+  expect(csv.rows.map((r) => r.title)).toEqual([`Tall ${tag}`]);
+
+  // The address can ask for a shape, as for the other filters.
+  await page.goto(`/videos?shape=portrait`);
+  const filter = page.getByLabel("Filter by shape");
+  await expect(filter.locator("option:checked")).toHaveText("Portrait 9:16");
+  await page.getByLabel("Search videos").fill(tag);
+  const card = (v: { id: string }) => page.locator(`a[href="/videos/${v.id}"]`);
+  await expect(card(tall)).toBeVisible();
+  await expect(card(wide)).toHaveCount(0);
+  await expect(card(box)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Download analytics/ })).toHaveAttribute("href", new RegExp(`shape=portrait`));
+  await filter.selectOption("square");
+  await expect(card(box)).toBeVisible();
+  await expect(card(tall)).toHaveCount(0);
+  // A shape that hides every match is named in the empty state's advice.
+  await page.getByLabel("Search videos").fill(`Tall ${tag}`);
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, or share link.")).toBeVisible();
+  // Clear filters takes the shape back to any, and off the address.
+  await page.getByTestId("clear-filters").click();
+  await expect(filter.locator("option:checked")).toHaveText("Any shape");
+  await expect(page).not.toHaveURL(/shape=/);
+  await page.getByLabel("Search videos").fill(tag);
+  await expect(card(wide)).toBeVisible();
+  await expect(card(tall)).toBeVisible();
+  await expect(card(box)).toBeVisible();
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
 });

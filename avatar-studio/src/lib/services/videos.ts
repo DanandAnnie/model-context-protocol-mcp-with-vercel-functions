@@ -27,7 +27,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, readCover, setCover } from "../cover";
-import { SHARE_FILTERS, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
+import { SHAPE_FILTERS, SHARE_FILTERS, inShape, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
@@ -2104,6 +2104,8 @@ export const videoQuerySchema = z.object({
    * render was asked for), in the trash view too.
    */
   created: z.enum(["all", "7d", "30d", "90d"]).default("all"),
+  /** Only the videos made in one shape: `landscape` (16:9), `portrait` (9:16), or `square` (1:1), in the trash too. */
+  shape: z.enum(["all", ...SHAPE_FILTERS]).default("all"),
   /**
    * `open`: only the videos with a review thread no one has resolved yet; `mentions`: only those with an open thread that
    * names the reader (in the trash too).
@@ -2230,6 +2232,7 @@ export function filterVideos(
       if (query.comments === "open" && !openComments!.get(v.id)) return false;
       if (query.comments === "mentions" && !mentions!.get(v.id)) return false;
       if (query.created !== "all" && !madeWithin(v, query.created, now)) return false;
+      if (query.shape !== "all" && !inShape(v, query.shape)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;

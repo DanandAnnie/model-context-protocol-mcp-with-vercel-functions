@@ -208,6 +208,15 @@ export function shareAttention(videos: { shareDisabled?: boolean; shareExpiresAt
 /** The library's "made within" windows, in days: rolling windows of 24-hour days counted back from `now`. */
 export const CREATED_WITHIN_DAYS = { "7d": 7, "30d": 30, "90d": 90 } as const;
 
+/** The library's shape filter, by the aspect ratio a video was made in: landscape 16:9, portrait 9:16, square 1:1. */
+export const SHAPE_ASPECT = { landscape: "16:9", portrait: "9:16", square: "1:1" } as const;
+export const SHAPE_FILTERS = Object.keys(SHAPE_ASPECT) as (keyof typeof SHAPE_ASPECT)[];
+
+/** Whether a video was made in a shape; one stored without an aspect ratio was made in the 16:9 default. */
+export function inShape(video: { aspect?: string }, shape: keyof typeof SHAPE_ASPECT): boolean {
+  return (video.aspect ?? "16:9") === SHAPE_ASPECT[shape];
+}
+
 export type CreatedWithin = keyof typeof CREATED_WITHIN_DAYS;
 
 /** Whether a video was made within `created` of `now`; an unreadable creation time (NaN) is in no window. */
@@ -370,7 +379,7 @@ export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: 
 }
 
 /** The library address's filter parameters (the ones the library reads, and a batch's results), which Clear filters takes off. */
-export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice"] as const;
+export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape"] as const;
 
 /**
  * The library address's query without its filter parameters, as "?…" or "" when nothing else is left, or null when it

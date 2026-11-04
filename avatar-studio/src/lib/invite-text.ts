@@ -2,6 +2,9 @@
 
 export type InviteSkipReason = "member" | "pending" | "repeated";
 
+/** How long an expired invite stays on the owner's list, to be sent again or dismissed. */
+export const EXPIRED_INVITE_DAYS = 30;
+
 export interface BulkInviteAnswer {
   invites: Array<{ invite: { email?: string }; emailed: boolean; emailError?: string }>;
   skipped: Array<{ email: string; reason: InviteSkipReason }>;

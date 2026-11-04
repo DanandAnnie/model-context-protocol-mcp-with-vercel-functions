@@ -60,7 +60,7 @@ import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
-import { acceptInvite, bulkInviteSchema, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { deliverInvite } from "../invite-mail";
 import { bulkInviteSummary, splitEmails } from "../invite-text";
 import { LimitError as InviteLimitError } from "../errors";
@@ -2722,6 +2722,79 @@ describe("workspaces", () => {
     const mixed = await createInvites(full.id, bulkInviteSchema.parse({ emails: ["s0@example.com", "s1@example.com", ...Array.from({ length: 8 }, (_, n) => `y${n}@example.com`)] }), alice);
     assert.equal(mixed.invites.length, 8);
     assert.equal(mixed.skipped.length, 2);
+  });
+
+  it("lists recently expired invites for owners and invites them again with a new link", async () => {
+    const ws = await createWorkspace("Lapsed", alice);
+    const store = globalThis.__avatarStudioStore!;
+    const lapse = async (inv: { id: string }, daysAgo: number) => {
+      const row = (await store.get<{ id: string; expiresAt: string }>("invite", inv.id))!;
+      await store.put("invite", { ...row, expiresAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString() });
+    };
+    const dan = await createInvite(ws.id, { email: "dan@example.com", role: "viewer" }, alice);
+    const link = await createInvite(ws.id, { role: "editor" }, alice);
+    const old = await createInvite(ws.id, { email: "old@example.com", role: "editor" }, alice);
+    const live = await createInvite(ws.id, { email: "live@example.com", role: "editor" }, alice);
+    await lapse(dan, 1);
+    await lapse(link, 3);
+    await lapse(old, EXPIRED_INVITE_DAYS + 1);
+    const view = await workspaceView(ws, alice);
+    assert.deepEqual(view.invites.map((i) => i.token), [live.token], "the pending list keeps only live invites");
+    assert.deepEqual(view.expiredInvites.map((i) => [i.email, i.role]), [["dan@example.com", "viewer"], [undefined, "editor"]], "lapsed in the last 30 days, the latest first");
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    assert.deepEqual((await workspaceView(ws, bob)).expiredInvites, [], "only owners see them");
+
+    // Invite again: a new link, same address and role, a full week; the old token stays dead.
+    const before = Date.now();
+    const again = await reinviteExpired(ws.id, dan.token, alice);
+    assert.notEqual(again.token, dan.token);
+    assert.deepEqual([again.email, again.role], ["dan@example.com", "viewer"]);
+    assert.ok(Date.parse(again.expiresAt) - before >= 7 * 86_400_000 - 1000);
+    assert.equal(await store.get("invite", dan.token), null, "the lapsed one is gone");
+    assert.equal(await findInvite(dan.token), null);
+    assert.equal((await findInvite(again.token))?.invite.email, "dan@example.com");
+    const after = await workspaceView(ws, alice);
+    assert.ok(after.invites.some((i) => i.token === again.token) && !after.expiredInvites.some((i) => i.token === dan.token));
+
+    // Refused: a live invite, another space's, a stranger or editor, the allowance, and an address that has a pending invite or joined.
+    await assert.rejects(reinviteExpired(ws.id, live.token, alice), /Expired invite not found/);
+    const other = await createWorkspace("Elsewhere", alice);
+    await assert.rejects(reinviteExpired(other.id, link.token, alice), /Expired invite not found/);
+    await assert.rejects(reinviteExpired(ws.id, link.token, bob), /Only workspace owners/);
+    await assert.rejects(reinviteExpired(ws.id, link.token, alice, () => false), (e: unknown) => e instanceof InviteLimitError);
+    assert.ok(await store.get("invite", link.token), "a refused one is kept");
+    const twice = await createInvite(ws.id, { email: "live@example.com", role: "viewer" }, alice);
+    await lapse(twice, 2);
+    await assert.rejects(reinviteExpired(ws.id, twice.token, alice), /already has a pending invite/);
+    const joined = await createInvite(ws.id, { email: "bob@example.com", role: "viewer" }, alice);
+    await lapse(joined, 2);
+    await assert.rejects(reinviteExpired(ws.id, joined.token, alice), /already a member/);
+    // Past the 30 days it is no longer on the list, and cannot be invited again either.
+    await assert.rejects(reinviteExpired(ws.id, old.token, alice), /Expired invite not found/);
+    // A link-only invite comes back as a new link-only invite.
+    const fresh = await reinviteExpired(ws.id, link.token, alice);
+    assert.deepEqual([fresh.email, fresh.role], [undefined, "editor"]);
+    // Two clicks at once make one new invite: the second finds the lapsed one already claimed.
+    const racy = await createInvite(ws.id, { email: "eve@example.com", role: "viewer" }, alice);
+    await lapse(racy, 1);
+    const realGet = store.get.bind(store);
+    let seen = 0;
+    store.get = (async (kind: string, key: string) => {
+      const row = await realGet(kind as never, key);
+      if (kind === "invite" && key === racy.token) seen++;
+      return row;
+    }) as typeof store.get;
+    try {
+      const results = await Promise.allSettled([reinviteExpired(ws.id, racy.token, alice), reinviteExpired(ws.id, racy.token, alice)]);
+      assert.equal(seen, 2, "both read the lapsed invite");
+      assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal((await workspaceView(ws, alice)).invites.filter((i) => i.email === "eve@example.com").length, 1);
+    // A single invite draws on the allowance too.
+    await assert.rejects(createInvite(ws.id, { email: "zed@example.com", role: "viewer" }, alice, () => false), (e: unknown) => e instanceof InviteLimitError);
   });
 
   it("reads pasted addresses and sums up a batch", () => {

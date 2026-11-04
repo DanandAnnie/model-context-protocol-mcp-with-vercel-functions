@@ -1,6 +1,7 @@
 // The link and email for a workspace invite, shared by creating an invite and resending one.
 import { config } from "./config";
 import { getEmailProvider, inviteEmail } from "./providers/email";
+import { reserveRateLimit } from "./rate-limit";
 import type { WorkspaceInvite } from "./types";
 import { getWorkspace, type User } from "./workspaces";
 
@@ -25,4 +26,12 @@ export async function deliverInvite(req: Request, invite: WorkspaceInvite, user:
   } catch (err) {
     return { url, emailed: false, emailError: err instanceof Error ? err.message : "Email could not be sent" };
   }
+}
+
+/** Invites a workspace can send in an hour, each able to send an email. */
+export const INVITES_PER_HOUR = 100;
+
+/** The workspace's hourly invite allowance, for createInvites and reinviteExpired: `count` slots taken whole or not at all. */
+export function inviteAllowance(workspaceId: string): (count: number) => boolean {
+  return (count) => reserveRateLimit(`invites:${workspaceId}`, count, INVITES_PER_HOUR, 3_600_000).allowed;
 }

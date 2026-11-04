@@ -7,7 +7,7 @@ import { LimitError, NotFoundError, ValidationError } from "./errors";
 import { assertNoRenewingPlan } from "./billing";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
-import type { InviteSkipReason } from "./invite-text";
+import { EXPIRED_INVITE_DAYS, type InviteSkipReason } from "./invite-text";
 import type { Membership, Workspace, WorkspaceInvite, WorkspaceRole } from "./types";
 import { roleCanEdit, roleSchema } from "./roles";
 
@@ -78,6 +78,24 @@ async function listInvites(workspaceId: string): Promise<WorkspaceInvite[]> {
   return (await getStore().list<WorkspaceInvite>("invite", workspaceId)).filter((i) => Date.parse(i.expiresAt) > now);
 }
 
+export { EXPIRED_INVITE_DAYS };
+
+/** Whether an invite lapsed within the last EXPIRED_INVITE_DAYS: shown to owners, and the only kind that can be invited again. */
+function recentlyExpired(invite: WorkspaceInvite, now = Date.now()): boolean {
+  const at = Date.parse(invite.expiresAt);
+  return at <= now && at > now - EXPIRED_INVITE_DAYS * 86_400_000;
+}
+
+/** A workspace's live invites and those that lapsed recently (the latest first), from one read of the store. */
+async function listAllInvites(workspaceId: string): Promise<{ pending: WorkspaceInvite[]; expired: WorkspaceInvite[] }> {
+  const now = Date.now();
+  const all = await getStore().list<WorkspaceInvite>("invite", workspaceId);
+  return {
+    pending: all.filter((i) => Date.parse(i.expiresAt) > now),
+    expired: all.filter((i) => recentlyExpired(i, now)).sort((a, b) => b.expiresAt.localeCompare(a.expiresAt)),
+  };
+}
+
 export async function getWorkspace(id: string): Promise<Workspace> {
   const ws = await getStore().get<Workspace>("workspace", id);
   if (!ws) throw new NotFoundError("Workspace not found");
@@ -146,10 +164,11 @@ function putInvite(id: string, email: string | undefined, role: WorkspaceRole): 
   return getStore().put("invite", invite);
 }
 
-export async function createInvite(id: string, input: z.infer<typeof inviteSchema>, user: User): Promise<WorkspaceInvite> {
+export async function createInvite(id: string, input: z.infer<typeof inviteSchema>, user: User, reserve: (count: number) => boolean = () => true): Promise<WorkspaceInvite> {
   const ws = await requireRole(id, user, ["owner"]);
   const pending = await listInvites(id);
   if (ws.members.length + pending.length >= MAX_MEMBERS) throw new ValidationError(`At most ${MAX_MEMBERS} members per workspace`);
+  if (!reserve(1)) throw new LimitError("Too many invites from this workspace in the last hour; try again later");
   return putInvite(id, input.email, input.role);
 }
 
@@ -218,6 +237,29 @@ export async function renewInvite(id: string, token: string, user: User): Promis
   return next;
 }
 
+/**
+ * Sends an expired invite again: a new link, with the same address and role and a full 7 days,
+ * replaces the lapsed one, whose old link stays dead. Refused when the address has joined or has
+ * another pending invite meanwhile, or when the workspace has no room left. `reserve` is the send
+ * allowance the route passes in, taken only once every check has passed.
+ */
+export async function reinviteExpired(id: string, token: string, user: User, reserve: (count: number) => boolean = () => true): Promise<WorkspaceInvite> {
+  const ws = await requireRole(id, user, ["owner"]);
+  const old = token && token.length <= 64 ? await getStore().get<WorkspaceInvite>("invite", token) : null;
+  if (!old || old.ownerId !== id || !recentlyExpired(old)) throw new NotFoundError("Expired invite not found");
+  const pending = await listInvites(id);
+  const key = old.email?.toLowerCase();
+  if (key && ws.members.some((m) => m.email?.toLowerCase() === key)) throw new ValidationError(`${old.email} is already a member`);
+  if (key && pending.some((i) => i.email?.toLowerCase() === key)) throw new ValidationError(`${old.email} already has a pending invite; resend that one`);
+  if (ws.members.length + pending.length >= MAX_MEMBERS) throw new ValidationError(`At most ${MAX_MEMBERS} members per workspace`);
+  if (!reserve(1)) throw new LimitError("Too many invites from this workspace in the last hour; try again later");
+  // Claim the lapsed one first (it drops off the list), so two clicks, or a Dismiss at the same moment, make no second invite.
+  if (!(await getStore().putIf("invite", { ...old, expiresAt: new Date(0).toISOString() }, "expiresAt", old.expiresAt))) throw new NotFoundError("Expired invite not found");
+  const fresh = await putInvite(id, old.email, old.role);
+  await getStore().remove("invite", old.id);
+  return fresh;
+}
+
 /** Looks an invite up by token (for the join page): one get. Expired invites read as not found. */
 export async function findInvite(token: string): Promise<{ workspace: Workspace; invite: WorkspaceInvite } | null> {
   if (!token || token.length > 64) return null;
@@ -273,10 +315,11 @@ export async function setMemberRole(id: string, userId: string, role: WorkspaceR
   return next;
 }
 
-/** Public view: member emails only for members, invite tokens only for owners. */
+/** Public view: member emails only for members, invite tokens (pending and recently expired) only for owners. */
 export async function workspaceView(ws: Workspace, user: User) {
   const me = memberOf(ws, user.id);
-  const invites = me?.role === "owner" ? await listInvites(ws.id) : [];
+  const owner = me?.role === "owner";
+  const { pending: invites, expired } = owner ? await listAllInvites(ws.id) : { pending: [], expired: [] };
   return {
     id: ws.id,
     name: ws.name,
@@ -284,5 +327,6 @@ export async function workspaceView(ws: Workspace, user: User) {
     createdAt: ws.createdAt,
     members: ws.members.map((m) => ({ userId: m.userId, email: m.email, role: m.role, joinedAt: m.joinedAt, you: m.userId === user.id })),
     invites: invites.map((i) => ({ token: i.token, email: i.email, role: i.role, expiresAt: i.expiresAt })),
+    expiredInvites: expired.map((i) => ({ token: i.token, email: i.email, role: i.role, expiresAt: i.expiresAt })),
   };
 }

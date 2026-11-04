@@ -6585,6 +6585,60 @@ test("workspace owners invite several people at once and copy each pending link"
   }
 });
 
+test("expired workspace invites are listed for owners, to invite again or dismiss", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Lapsed ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    const sent = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "dan@example.com", role: "viewer" } })).json()) as { invite: { token: string } };
+    // The server's clock cannot be moved from here, so a live invite is answered as one that lapsed yesterday;
+    // the service itself (what lapses, the 30 days, the new link) is covered by the unit tests.
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+    await page.route("**/api/workspaces", async (route) => {
+      const res = await route.fetch();
+      const body = (await res.json()) as { workspaces: Array<{ id: string; invites: Array<{ token: string; expiresAt: string }>; expiredInvites?: unknown[] }> };
+      for (const w of body.workspaces) {
+        if (w.id !== ws.id) continue;
+        w.expiredInvites = w.invites.filter((i) => i.token === sent.invite.token).map((i) => ({ ...i, expiresAt: yesterday }));
+        w.invites = w.invites.filter((i) => i.token !== sent.invite.token);
+      }
+      await route.fulfill({ response: res, json: body });
+    });
+    const again = { token: "tok_new", url: "http://localhost:3100/invite/tok_new" };
+    let asked = 0;
+    await page.route(`**/api/workspaces/${ws.id}/invites/${sent.invite.token}/again`, (route) => {
+      asked++;
+      return route.fulfill({ status: 201, json: { invite: { token: again.token, email: "dan@example.com", role: "viewer", expiresAt: new Date(Date.now() + 7 * 86_400_000).toISOString() }, url: again.url, emailed: false } });
+    });
+
+    await page.goto("/workspace");
+    const card = page.getByTestId("expired-invites");
+    await expect(card).toContainText("dan@example.com · viewer · expired ");
+    await expect(page.getByText("Pending invites")).toHaveCount(0);
+    await card.getByRole("button", { name: /^Invite again: dan@example\.com, expired / }).click();
+    const box = page.getByTestId("invite-link");
+    await expect(box.locator("code")).toHaveText(again.url);
+    expect(asked).toBe(1);
+    // The row is gone with the answer; the focus is on the new link's Copy button.
+    await expect(box.getByRole("button", { name: "Copy link" })).toBeFocused();
+    await expect(box).toContainText("Invited dan@example.com again; email sending is not configured, so share the new link. The new link expires ");
+    await expect(page.getByTestId("invite-status")).toHaveText(/^Invited dan@example\.com again;/);
+
+    // The real server refuses to "invite again" a live invite, and Dismiss removes it.
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites/${sent.invite.token}/again`)).status()).toBe(404);
+    await card.getByRole("button", { name: /^Dismiss the expired invite to dan@example\.com, expired / }).click();
+    await expect(card).toHaveCount(0);
+    await expect(page.getByTestId("invite-status")).toHaveText("Expired invite to dan@example.com dismissed");
+    await expect(page.getByTestId("create-invite")).toBeFocused();
+    expect((await page.request.get(`/api/invites/${sent.invite.token}`)).status()).toBe(404);
+  } finally {
+    await page.unroute("**/api/workspaces");
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("pending workspace invites can be resent or renewed: same link, a fresh week", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Invites ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_KEPT, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
-import { bulkInviteSummary, splitEmails, type BulkInviteAnswer } from "@/lib/invite-text";
+import { EXPIRED_INVITE_DAYS, bulkInviteSummary, splitEmails, type BulkInviteAnswer } from "@/lib/invite-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -18,6 +18,8 @@ interface View {
   role: WorkspaceRole | null;
   members: Array<{ userId: string; email?: string; role: WorkspaceRole; joinedAt: string; you: boolean }>;
   invites: Array<{ token: string; email?: string; role: WorkspaceRole; expiresAt: string }>;
+  /** Invites that lapsed in the last 30 days, for owners to send again or dismiss. */
+  expiredInvites?: Array<{ token: string; email?: string; role: WorkspaceRole; expiresAt: string }>;
 }
 interface Summary {
   personalId: string;
@@ -166,6 +168,45 @@ export default function WorkspacePage() {
       setMailNote(note);
       setResent({ token: i.token, text: res.emailed ? "Sent again" : "Renewed" });
       setInviteStatus(note);
+    });
+  }
+
+  /** Sends an expired invite again: a new link with the same address and role, and the email when it names one. */
+  async function inviteAgain(i: { token: string; email?: string; role: WorkspaceRole }) {
+    if (!ws || busy) return;
+    setInviteStatus("");
+    setBatchNote(null);
+    await run(async () => {
+      const res = await api<{ url: string; emailed: boolean; emailError?: string; invite: { token: string; expiresAt: string } }>(`/api/workspaces/${ws.id}/invites/${i.token}/again`, { method: "POST" });
+      const until = `The new link expires ${formatDate(res.invite.expiresAt)}.`;
+      const note = res.emailed
+        ? `Invited ${i.email} again. ${until}`
+        : res.emailError
+          ? `Email failed (${res.emailError}); share the new link instead. ${until}`
+          : i.email
+            ? `Invited ${i.email} again; email sending is not configured, so share the new link. ${until}`
+            : `New ${i.role} link made. ${until}`;
+      setLink(res.url);
+      setCopied(false);
+      setMailNote(note);
+      setResent({ token: res.invite.token, text: res.emailed ? "Sent again" : "New link" });
+      setInviteStatus(note);
+    });
+    // The row is gone; the new link's Copy button is where the focus goes next.
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-testid="invite-link"] button')?.focus());
+  }
+
+  /** Takes an expired invite off the list, says so, and moves the focus to the next one (or the invite button). */
+  async function dismissExpired(i: { token: string; email?: string; role: WorkspaceRole }, next?: string) {
+    if (!ws || busy) return;
+    setInviteStatus("");
+    await run(async () => {
+      await api(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "DELETE" });
+      setInviteStatus(`Expired invite ${i.email ? `to ${i.email}` : `(${i.role} link)`} dismissed`);
+    });
+    requestAnimationFrame(() => {
+      const target = (next && document.querySelector<HTMLButtonElement>(`[data-again="${next}"]`)) || document.querySelector<HTMLButtonElement>('[data-testid="create-invite"]');
+      target?.focus();
     });
   }
 
@@ -363,7 +404,7 @@ export default function WorkspacePage() {
                     <option value="owner">Owner: also manage members</option>
                   </select>
                 </Field>
-                <Button onClick={invite} loading={busy}>
+                <Button onClick={invite} loading={busy} data-testid="create-invite">
                   <Link2 className="h-4 w-4" /> {pasted.length > 1 ? `Invite ${pasted.length} people` : "Create invite link"}
                 </Button>
                 {batchNote && (
@@ -417,6 +458,42 @@ export default function WorkspacePage() {
                         </button>
                         <button type="button" disabled={busy} onClick={() => run(async () => { await api(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "DELETE" }); })} className="text-slate-500 hover:text-rose-700">
                           Revoke
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+            {(ws.expiredInvites?.length ?? 0) > 0 && (
+              <Card className="p-5" data-testid="expired-invites">
+                <h3 className="text-sm font-semibold text-slate-900">Expired invites</h3>
+                <p className="mt-1 text-xs text-slate-500">Links that lapsed in the last {EXPIRED_INVITE_DAYS} days. Invite again sends a new link; the old one stays dead.</p>
+                <ul className="mt-2 divide-y divide-slate-100 text-xs">
+                  {ws.expiredInvites!.map((i, n, all) => (
+                    <li key={i.token} className="flex items-center justify-between gap-2 py-2">
+                      <span className="truncate text-slate-500">
+                        {i.email ?? "Link invite"} · {i.role} · expired {formatDate(i.expiresAt)}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-3">
+                        <button
+                          type="button"
+                          aria-disabled={busy}
+                          data-again={i.token}
+                          onClick={() => inviteAgain(i)}
+                          aria-label={`Invite again: ${i.email ?? `${i.role} link invite`}, expired ${formatDate(i.expiresAt)}`}
+                          className="text-slate-500 hover:text-indigo-700 aria-disabled:cursor-wait aria-disabled:opacity-60"
+                        >
+                          Invite again
+                        </button>
+                        <button
+                          type="button"
+                          aria-disabled={busy}
+                          onClick={() => dismissExpired(i, (all[n + 1] ?? all[n - 1])?.token)}
+                          aria-label={`Dismiss the expired invite ${i.email ? `to ${i.email}` : `(${i.role} link)`}, expired ${formatDate(i.expiresAt)}`}
+                          className="text-slate-500 hover:text-rose-700 aria-disabled:cursor-wait aria-disabled:opacity-60"
+                        >
+                          Dismiss
                         </button>
                       </span>
                     </li>

@@ -87,7 +87,8 @@ describe("the presenter filter", () => {
       { id: "ben", name: "Ben", count: 2 },
     ]);
     // The trash is its own view, with its own counts, and the filter works there too.
-    await getStore().put("video", made("trashed-ben", "2026-10-04T00:00:00Z", { avatarId: "ben", avatarName: "Ben", deletedAt: "2026-10-05T00:00:00Z" }));
+    // Trashed yesterday: a fixed date would be purged, and leave the trash view, once the retention window passed it.
+    await getStore().put("video", made("trashed-ben", "2026-10-04T00:00:00Z", { avatarId: "ben", avatarName: "Ben", deletedAt: new Date(Date.now() - 86_400_000).toISOString() }));
     const trash = await queryVideos(OWNER, videoQuerySchema.parse({ trash: "true", presenter: "ben" }));
     assert.deepEqual(trash.presenters, [{ id: "ben", name: "Ben", count: 1 }]);
     assert.deepEqual(trash.videos.map((v) => v.id), ["trashed-ben"]);

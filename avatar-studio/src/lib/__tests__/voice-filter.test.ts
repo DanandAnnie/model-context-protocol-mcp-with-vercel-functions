@@ -83,7 +83,8 @@ describe("the voice filter", () => {
     ]);
 
     for (const v of videos) await getStore().put("video", v);
-    await getStore().put("video", made("trashed-james", "2026-10-04T00:00:00Z", { voiceId: "james", voiceName: "James", deletedAt: "2026-10-05T00:00:00Z" }));
+    // Trashed yesterday: a fixed date would be purged, and leave the trash view, once the retention window passed it.
+    await getStore().put("video", made("trashed-james", "2026-10-04T00:00:00Z", { voiceId: "james", voiceName: "James", deletedAt: new Date(Date.now() - 86_400_000).toISOString() }));
     const page = await queryVideos(OWNER, videoQuerySchema.parse({ voice: "james", folder: "Launch" }));
     assert.equal(page.matched, 0);
     assert.deepEqual(page.voices, [

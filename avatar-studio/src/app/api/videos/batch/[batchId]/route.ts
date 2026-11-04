@@ -2,16 +2,27 @@ import { errorResponse } from "@/lib/api-utils";
 import { publicOrigin } from "@/lib/config";
 import { toCsv } from "@/lib/csv";
 import { requireOwner } from "@/lib/owner";
-import { BATCH_LINK_COLUMNS, batchLinkRows, batchVideos } from "@/lib/services";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchVideos, selectionLinkText } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
-/** One personalized batch's videos as a CSV for a mail merge: row, recipient, status, and the share link once it can be sent. */
+/**
+ * One personalized batch's videos as a CSV for a mail merge: row, recipient, status, and the share link once it can be
+ * sent. With `?format=text`, only the links that can be sent now, one a line in the CSV's order, for the clipboard; the
+ * `X-Links` and `X-Unsendable` headers count the lines and the recipients left out.
+ */
 export async function GET(req: Request, ctx: { params: Promise<{ batchId: string }> }) {
   try {
     const { batchId } = await ctx.params;
     const videos = await batchVideos(batchId, await requireOwner());
-    return new Response(toCsv([...BATCH_LINK_COLUMNS], batchLinkRows(videos, publicOrigin(req))), {
+    const rows = batchLinkRows(videos, publicOrigin(req));
+    if (new URL(req.url).searchParams.get("format") === "text") {
+      const { text, links, unsendable } = selectionLinkText(rows);
+      return new Response(text, {
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Links": String(links), "X-Unsendable": String(unsendable) },
+      });
+    }
+    return new Response(toCsv([...BATCH_LINK_COLUMNS], rows), {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="links-${batchId.replace(/[^a-z0-9_-]/gi, "")}.csv"`,

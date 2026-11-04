@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Layers3, RotateCcw, Upload } from "lucide-react";
+import { Copy, Layers3, RotateCcw, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -77,8 +77,9 @@ export default function BatchPage() {
   // being made, so the counts move as they finish.
   const { data: batchData, refetch: refetchBatches } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch", { pollMs: 8000, pollWhile: (d) => d.batches.some((b) => b.making > 0) });
   const [retrying, setRetrying] = useState<string | null>(null);
-  /** What the last Retry failed did, said under that batch. */
-  const [retryNote, setRetryNote] = useState<{ batchId: string; text: string; error?: boolean } | null>(null);
+  const [copying, setCopying] = useState<string | null>(null);
+  /** What the last Retry failed or Copy links did, said under that batch. */
+  const [batchNote, setBatchNote] = useState<{ batchId: string; text: string; error?: boolean } | null>(null);
   const focusNote = useRef<string | null>(null);
   const brandApplied = useRef(false);
   // Settings changed by hand before the kit arrived keep the hand's choice.
@@ -103,12 +104,12 @@ export default function BatchPage() {
   /** Start a batch's failed renders again with the same settings, up to the most one request takes, and say what happened. */
   async function retryBatch(b: BatchSummary) {
     const ids = b.failedIds.slice(0, MAX_RETRY_AT_ONCE);
-    if (!ids.length || retrying) return;
+    if (!ids.length || retrying || copying) return;
     const over = b.failedIds.length - ids.length;
     const what = ids.length === 1 ? "1 failed render" : `${ids.length} failed renders`;
     if (!window.confirm(`Start ${what} of “${b.title}” again with the same settings?${over ? ` Only the first ${MAX_RETRY_AT_ONCE} are started now; retry again for the other ${over}.` : ""} Each counts toward this month's renders.`)) return;
     setRetrying(b.batchId);
-    setRetryNote(null);
+    setBatchNote(null);
     try {
       const r = await api<{ started: Array<{ from: string; id: string }>; failedAgain: Array<{ from: string; id?: string; reason: string }>; skipped: Array<{ id: string; code: string }>; missing: string[] }>("/api/videos/retry", { method: "POST", body: JSON.stringify({ ids }) });
       const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("#", String(k)));
@@ -126,9 +127,9 @@ export default function BatchPage() {
       // Past the allowance a second click starts nothing either, so only the cap's leftovers are pointed at.
       if (over && !allowance) notes.push(`${over} more failed ${over === 1 ? "render was" : "renders were"} left for the next retry, as one retry starts up to ${MAX_RETRY_AT_ONCE}.`);
       // Nothing started only reads as a problem when something stood in the way; renders already restarted are not one.
-      setRetryNote({ batchId: b.batchId, text: notes.join(" "), error: !r.started.length && (allowance > 0 || r.failedAgain.length > 0) });
+      setBatchNote({ batchId: b.batchId, text: notes.join(" "), error: !r.started.length && (allowance > 0 || r.failedAgain.length > 0) });
     } catch (e) {
-      setRetryNote({ batchId: b.batchId, text: e instanceof Error ? e.message : "Could not start the renders again", error: true });
+      setBatchNote({ batchId: b.batchId, text: e instanceof Error ? e.message : "Could not start the renders again", error: true });
     } finally {
       // Some may have started before a request failed; the list shows them, so the next click does not start them twice.
       // The button goes once the batch has no failed render left, so focus is held for the note (moved there below).
@@ -145,6 +146,48 @@ export default function BatchPage() {
     if (batchData?.batches.find((x) => x.batchId === id)?.failed) return;
     document.getElementById(`batch-note-${id}`)?.focus();
   }, [batchData, retrying]);
+  /** Put a batch's links that can be sent now on the clipboard, one a line in the CSV's order, and say how many were left out. */
+  async function copyBatchLinks(b: BatchSummary) {
+    // One note per batch says what the last action did, so a copy and a retry wait for each other.
+    if (copying || retrying) return;
+    setCopying(b.batchId);
+    setBatchNote(null);
+    const counts = { links: 0, unsendable: 0 };
+    // Fetched inside the clipboard write rather than before it, so a browser that only lets a click copy at once (Safari)
+    // still counts the copy as the click's, as the library's Copy links does.
+    const text = fetch(`/api/videos/batch/${encodeURIComponent(b.batchId)}?format=text`)
+      .catch(() => {
+        throw new Error("Could not reach the server to copy the links");
+      })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not copy the links");
+        counts.links = Number(res.headers.get("X-Links") ?? 0);
+        counts.unsendable = Number(res.headers.get("X-Unsendable") ?? 0);
+        if (!counts.links) throw new Error("None of this batch's videos has a link that can be sent yet: each is still rendering, failed, or has its share link switched off, expired, or not live until later.");
+        return res.text();
+      });
+    try {
+      if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+        const blob = text.then((t) => new Blob([t], { type: "text/plain" }));
+        // The item may be refused before it reads the text; the failure is reported from `text` below.
+        blob.catch(() => {});
+        await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
+      } else {
+        await navigator.clipboard.writeText(await text);
+      }
+      const left = counts.unsendable ? `; left out: ${counts.unsendable} ${counts.unsendable === 1 ? "has" : "have"} no link that can be sent yet` : "";
+      setBatchNote({ batchId: b.batchId, text: `Copied ${counts.links} ${counts.links === 1 ? "link" : "links"}${left}.` });
+    } catch {
+      // The server's answer says what went wrong if it was the problem; otherwise the browser refused the copy.
+      const failed = await text.then(
+        () => null,
+        (err: unknown) => (err instanceof Error ? err.message : "Could not copy the links"),
+      );
+      setBatchNote({ batchId: b.batchId, text: failed ?? "The browser did not let the page copy to the clipboard; Download links gives the same links as a file.", error: true });
+    } finally {
+      setCopying(null);
+    }
+  }
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(id: string) {
     setAvatarId(id);
@@ -409,7 +452,7 @@ export default function BatchPage() {
       {!!batchData?.batches.length && (
         <Card className="mt-6 p-4">
           <h2 className="text-sm font-semibold text-slate-900">Recent batches</h2>
-          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, or download its links for a mail merge.</p>
+          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, copy the links that can be sent now, or download them all for a mail merge.</p>
           <ul className="mt-3 divide-y divide-slate-100" data-testid="recent-batches">
             {batchData.batches.map((b) => (
               <li key={b.batchId} className="flex flex-wrap items-center justify-between gap-2 py-2.5" data-testid="recent-batch">
@@ -423,18 +466,23 @@ export default function BatchPage() {
                     {b.failed ? ` · ${b.failed} failed` : ""} · started {formatDate(b.startedAt)}
                   </div>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                   {b.failed > 0 && canEdit !== false && (
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryBatch(b)} disabled={retrying !== null && retrying !== b.batchId} loading={retrying === b.batchId} aria-label={`Retry failed (${b.failed}) in ${b.title}, started ${formatDate(b.startedAt)}`} title={`Start this batch's failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryBatch(b)} disabled={(retrying !== null && retrying !== b.batchId) || copying !== null} loading={retrying === b.batchId} aria-label={`Retry failed (${b.failed}) in ${b.title}, started ${formatDate(b.startedAt)}`} title={`Start this batch's failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
                       <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({b.failed})
+                    </Button>
+                  )}
+                  {b.ready > 0 && (
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void copyBatchLinks(b)} disabled={(copying !== null && copying !== b.batchId) || retrying !== null} loading={copying === b.batchId} aria-label={`Copy links of ${b.title}, started ${formatDate(b.startedAt)}`} title="Copy this batch's share links that can be sent now, one a line in the CSV's order">
+                      <Copy className="h-3.5 w-3.5" /> Copy links
                     </Button>
                   )}
                   <a href={`/api/videos/batch/${encodeURIComponent(b.batchId)}`} download className="text-xs font-medium text-brand-700 hover:underline" aria-label={`Download links of ${b.title}, started ${formatDate(b.startedAt)}`}>
                     Download links
                   </a>
                 </div>
-                <p role="status" id={`batch-note-${b.batchId}`} tabIndex={-1} className={retryNote?.batchId === b.batchId ? `w-full text-xs ${retryNote.error ? "text-red-700" : "text-slate-600"}` : "sr-only"} data-testid="recent-batch-note">
-                  {retryNote?.batchId === b.batchId ? retryNote.text : ""}
+                <p role="status" id={`batch-note-${b.batchId}`} tabIndex={-1} className={batchNote?.batchId === b.batchId ? `w-full text-xs ${batchNote.error ? "text-red-700" : "text-slate-600"}` : "sr-only"} data-testid="recent-batch-note">
+                  {batchNote?.batchId === b.batchId ? batchNote.text : ""}
                 </p>
               </li>
             ))}

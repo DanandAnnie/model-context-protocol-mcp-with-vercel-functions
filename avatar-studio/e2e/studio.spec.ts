@@ -5802,6 +5802,41 @@ test("Retry failed on a recent batch starts its failed renders again and says wh
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("Copy links on a recent batch copies its sendable share links in the CSV's order", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Copy batch ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAda\nBo\nCy", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId, videos } = (await made.json()) as { batchId: string; videos: Array<{ id: string }> };
+  const status = async (id: string) => ((await (await page.request.get(`/api/videos/${id}`)).json()) as { video: { status: string } }).video.status;
+  await expect.poll(async () => (await Promise.all(videos.map((v) => status(v.id)))).join(","), { timeout: 30_000 }).toBe("completed,completed,completed");
+  // Bo's link is switched off, so it cannot be sent.
+  expect((await page.request.patch(`/api/videos/${videos[1].id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  // The API gives the links one a line in the CSV's order, counting the one left out; an unknown batch is not found.
+  const res = await page.request.get(`/api/videos/batch/${batchId}?format=text`);
+  expect(res.headers()["x-links"]).toBe("2");
+  expect(res.headers()["x-unsendable"]).toBe("1");
+  expect((await page.request.get("/api/videos/batch/batch_nope?format=text")).status()).toBe(404);
+
+  await page.goto("/batch");
+  const row = page.getByTestId("recent-batch").filter({ hasText: `Copy batch ${tag}` });
+  const copy = row.getByRole("button", { name: new RegExp(`^Copy links of Copy batch ${tag}, started `) });
+  await copy.click();
+  await expect(row.getByTestId("recent-batch-note")).toHaveText("Copied 2 links; left out: 1 has no link that can be sent yet.");
+  await expect(copy).toBeFocused();
+  const origin = new URL(page.url()).origin;
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe([videos[0].id, videos[2].id].map((id) => `${origin}/share/${id}`).join("\n"));
+  // With no link left that can be sent, the note says so instead of copying nothing.
+  for (const v of [videos[0], videos[2]]) expect((await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  await copy.click();
+  await expect(row.getByTestId("recent-batch-note")).toHaveText(/^None of this batch's videos has a link that can be sent yet/);
+  await expect(row.getByTestId("recent-batch-note")).toHaveClass(/text-red-700/);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("personalized batch creates one video per CSV row", async ({ page }) => {
   await page.goto("/batch");
   await expect(page.getByText(/2 rows · columns: name, property, move_in/)).toBeVisible();

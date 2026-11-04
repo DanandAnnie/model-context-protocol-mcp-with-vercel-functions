@@ -338,11 +338,11 @@ export function selectionLinkRows(videos: Video[], base: string, now = Date.now(
 }
 
 /**
- * The links of those rows a viewer can open now, one a line in the order given, for pasting into an email or a chat, and
+ * The links of those rows (a selection's, or a batch's) a viewer can open now, one a line in the order given, for pasting into an email or a chat, and
  * how many rows had none (not ready, failed, off, expired, or scheduled), so the page can say they were left out.
  */
-export function selectionLinkText(rows: ReturnType<typeof selectionLinkRows>): { text: string; links: number; unsendable: number } {
-  const links = rows.flatMap((r) => (r.share_link ? [r.share_link] : []));
+export function selectionLinkText(rows: Array<{ share_link?: string | number }>): { text: string; links: number; unsendable: number } {
+  const links = rows.flatMap((r) => (r.share_link ? [String(r.share_link)] : []));
   return { text: links.join("\n"), links: links.length, unsendable: rows.length - links.length };
 }
 

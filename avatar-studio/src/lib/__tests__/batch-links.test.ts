@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, retryVideo } from "../services";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, retryVideo, selectionLinkText } from "../services";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
@@ -82,5 +82,27 @@ describe("batch links", () => {
     await getStore().put("video", { ...(await getStore().get<Video>("video", failed.id))!, createdAt: retried.createdAt });
     assert.deepEqual([retried.batchId, retried.rowLabel, retried.batchRow, retried.retryOf], ["batch_y", "Gus", 7, failed.id]);
     assert.deepEqual(batchLinkRows(await batchVideos("batch_y", OWNER), "https://s").map((r) => r.video_id), [retried.id]);
+  });
+
+  it("copies only the links that can be sent, one a line in the CSV's order, and counts the recipients left out", () => {
+    const at = "2026-01-01T00:00:00.000Z";
+    const v = (id: string, batchRow: number, extra: Partial<Video>) =>
+      ({ id, title: `Hi – ${id}`, script: "Hi", avatarId: "a", voiceId: "v", aspect: "16:9", status: "completed", provider: "mock", createdAt: at, updatedAt: at, batchId: "batch_c", batchRow, rowLabel: id, ...extra }) as Video;
+    const rows = batchLinkRows([v("c", 3, {}), v("a", 1, {}), v("b", 2, { status: "processing" }), v("d", 4, { shareDisabled: true })], "https://studio.example/");
+    assert.deepEqual(selectionLinkText(rows), { text: "https://studio.example/share/a\nhttps://studio.example/share/c", links: 2, unsendable: 2 });
+    assert.deepEqual(selectionLinkText([]), { text: "", links: 0, unsendable: 0 });
+    // Failed, expired, and not yet live are left out too; a failed row with a ready retry is one recipient, sent the retry.
+    const later = new Date(Date.now() + 86_400_000).toISOString();
+    const more = batchLinkRows(
+      [
+        v("e", 1, { status: "failed" }),
+        v("f", 2, { shareExpiresAt: "2020-01-01T00:00:00.000Z" }),
+        v("g", 3, { shareStartsAt: later }),
+        v("h", 4, { status: "failed" }),
+        v("h2", 4, { retryOf: "h" }),
+      ],
+      "https://studio.example",
+    );
+    assert.deepEqual(selectionLinkText(more), { text: "https://studio.example/share/h2", links: 1, unsendable: 3 });
   });
 });

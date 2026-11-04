@@ -7410,6 +7410,40 @@ test("workspace videos go through review: ask, request changes, ask again, appro
   }
 });
 
+test("the translations list is searched by title, language, or the source video's site", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  expect((await page.request.post("/api/translate", { data: { title: `Tour ${tag}`, sourceVideoUrl: "https://cdn.example.com/tour.mp4", targetLanguages: ["German", "Japanese"] } })).status()).toBe(201);
+  expect((await page.request.post("/api/translate", { data: { title: `Welcome ${tag}`, sourceVideoUrl: "https://media.acme-homes.test/welcome.mp4", targetLanguages: ["German"] } })).status()).toBe(201);
+  await page.goto("/translate");
+  const search = page.getByRole("searchbox", { name: "Search translations" });
+  const cards = page.getByTestId("translation");
+  const titles = () => page.locator('[data-testid="translation"]:visible [data-testid="translation-title"]').allTextContents();
+  await search.fill(tag);
+  await expect.poll(async () => (await titles()).sort()).toEqual([`Tour ${tag} (German)`, `Tour ${tag} (Japanese)`, `Welcome ${tag}`]);
+  await expect(page.getByTestId("list-matches")).toHaveText(/^3 of \d+ translations$/);
+  // By language, as the card shows it, and by the site the source video is on.
+  await search.fill(`${tag} (japanese`);
+  await expect.poll(titles).toEqual([`Tour ${tag} (Japanese)`]);
+  // A card the search leaves out is hidden, not removed, so a proofread in progress in it is kept.
+  const german = cards.filter({ hasText: `Tour ${tag} (German)` });
+  await expect(german).toHaveCount(1);
+  await expect(german).toBeHidden();
+  await search.fill("acme-homes.test");
+  await expect.poll(async () => (await titles()).filter((t) => t.includes(tag))).toEqual([`Welcome ${tag}`]);
+  await search.fill(`nothing like ${tag}`);
+  await expect(page.getByText(`Nothing here matches “nothing like ${tag}”.`)).toBeVisible();
+  // A dub started while a search is typed stays in view, whatever its title.
+  await page.getByPlaceholder("https://…/video.mp4").fill("https://cdn.example.com/new.mp4");
+  await page.getByLabel("Title (optional)").fill(`Started ${tag}`);
+  await page.getByRole("button", { name: "Translate video" }).click();
+  const started = cards.filter({ hasText: `Started ${tag}` });
+  await expect(started).toHaveCount(1);
+  await expect(started).toBeVisible();
+  await expect(search).toHaveValue(`nothing like ${tag}`);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("one video is dubbed into several languages in one go", async ({ page }) => {
   const tag = Date.now().toString(36);
   await page.goto("/translate");

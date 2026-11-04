@@ -7,6 +7,7 @@ import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
 import { ApiError, api, formatDate } from "@/lib/client";
 import { MAX_TRANSLATION_SPEAKERS, type BrandKit, type Translation, type TranslationQuality } from "@/lib/types";
 
@@ -15,6 +16,17 @@ const moving = (t: Translation) => (t.status === "processing" || t.status === "q
 
 /** A line's start as m:ss. */
 const at = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
+
+/** What the search looks through for a translation: its title, its language, and the site its source video is on. */
+function translationTexts(t: Translation): string[] {
+  let host = "";
+  try {
+    host = new URL(t.sourceVideoUrl).hostname;
+  } catch {
+    // A source that does not parse is not searched by site.
+  }
+  return [t.title, t.targetLanguage, host];
+}
 
 /** Matches the server's limit per request. */
 const MAX_LANGUAGES = 5;
@@ -55,6 +67,8 @@ function TranslateInner() {
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // A search over the translations below: by title, language, or the source video's site.
+  const search = useListSearch();
   // Once a dub starts the form is cleared and its button disabled; the focus moves to the URL field for the next one.
   const sourceInput = useRef<HTMLInputElement>(null);
   async function submit() {
@@ -62,7 +76,9 @@ function TranslateInner() {
     setErr(null);
     try {
       const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
-      await api("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}), ...(keepGlossary ? { keepGlossary: true } : {}) }) });
+      const made = await api<{ translations?: Translation[] }>("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}), ...(keepGlossary ? { keepGlossary: true } : {}) }) });
+      // Dubs just started stay in view whatever the search says, so the person sees them start.
+      for (const t of made.translations ?? []) search.pin(t.id);
       setSource("");
       setTitle("");
       // The next video may have a different cast; the lip-sync choice is a preference and stays.
@@ -70,6 +86,8 @@ function TranslateInner() {
       refetch();
       refocusIfLost(sourceInput.current);
     } catch (e) {
+      // Dubs that failed to start still come back as records; they stay in view the same way.
+      if (e instanceof ApiError) for (const t of (e.body?.translations as Translation[] | undefined) ?? []) search.pin(t.id);
       setErr(e instanceof Error ? e.message : "Translation failed");
       refetch();
     } finally {
@@ -78,6 +96,9 @@ function TranslateInner() {
   }
 
   const items = data?.translations ?? [];
+  const shown = items.filter((t) => search.matches(t.id, ...translationTexts(t)));
+  // Cards a search leaves out are hidden rather than removed, so corrections being proofread in one are kept.
+  const shownIds = new Set(shown.map((t) => t.id));
 
   return (
     <>
@@ -179,15 +200,16 @@ function TranslateInner() {
 
         <div>
           <h2 className="mb-3 text-sm font-semibold text-slate-900">Translations</h2>
-          {items.length === 0 ? (
+          {data && (items.length > 0 || search.q) && <ListSearch search={search} label="Search translations" placeholder="Search by title, language, or site" maxLength={200} shown={shown.length} total={items.length} noun="translations" />}
+          {!data ? null : items.length === 0 ? (
             <EmptyState icon={<Languages className="h-8 w-8" />} title="No translations yet" body="Submit a video on the left to get started." />
           ) : (
             <div className="space-y-3">
               {items.map((t) => (
-                <Card key={t.id} className="p-4" data-testid="translation">
+                <Card key={t.id} className="p-4" data-testid="translation" hidden={!shownIds.has(t.id)}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
+                      <div className="truncate text-sm font-medium text-slate-900" data-testid="translation-title">{t.title}</div>
                       <div className="mt-0.5 text-xs text-slate-500" data-testid="translation-meta">
                         → {t.targetLanguage}
                         {t.audioOnly ? " · voice only" : ""}

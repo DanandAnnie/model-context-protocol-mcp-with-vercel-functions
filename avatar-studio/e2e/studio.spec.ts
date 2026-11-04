@@ -986,6 +986,67 @@ test("one scene's on-screen text style is given to every scene's text in one und
   await page.evaluate(() => localStorage.removeItem("avatar-studio:draft"));
 });
 
+test("the brand kit downloads as a file and loads back into the form for review, leaving out what is not here", async ({ page }) => {
+  const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
+  const tag = Date.now().toString(36);
+  try {
+    // No kit, no file.
+    await page.request.delete("/api/brand");
+    expect((await page.request.get("/api/brand?format=json")).status()).toBe(404);
+    expect((await page.request.put("/api/brand", { data: { name: `Acme ${tag}`, primaryColor: "#0f766e", glossary: ["Acme"], writingStyle: "Warm and plain." } })).ok()).toBe(true);
+    const download = await page.request.get("/api/brand?format=json");
+    expect(download.status()).toBe(200);
+    expect(download.headers()["content-disposition"]).toBe(`attachment; filename="brand-kit-acme-${tag}.json"`);
+    const file = await download.json();
+    expect(file.kind).toBe("avatar-studio.brand-kit");
+    expect(file.kit).toMatchObject({ name: `Acme ${tag}`, primaryColor: "#0f766e", glossary: ["Acme"], writingStyle: "Warm and plain." });
+    expect(file.kit.id).toBeUndefined();
+    expect(file.kit.ownerId).toBeUndefined();
+
+    await page.goto("/brand");
+    await expect(page.getByPlaceholder("Acme Realty")).toHaveValue(`Acme ${tag}`);
+    // The page's button saves the same file, under its name.
+    const saving = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download brand kit" }).click();
+    const saved1 = await saving;
+    expect(saved1.suggestedFilename()).toBe(`brand-kit-acme-${tag}.json`);
+    await expect(page.getByTestId("brand-import-status")).toHaveText(`Downloaded brand-kit-acme-${tag}.json. Load it from the Brand page of another workspace to use the kit there.`);
+    // A file from another space: a new name, and a presenter this one does not have.
+    const other = { ...file, kit: { ...file.kit, name: `Imported ${tag}`, primaryColor: "#b91c1c", defaultAvatarId: "av_not_here" } };
+    const input = page.getByTestId("brand-file-input");
+    const status = page.getByTestId("brand-import-status");
+    page.once("dialog", (d) => void d.accept());
+    await input.setInputFiles({ name: "kit.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(other)) });
+    await expect(status).toHaveText(`Loaded “Imported ${tag}” from kit.json, without the default presenter (not available here). Check it, then save the brand kit.`);
+    await expect(page.getByPlaceholder("Acme Realty")).toHaveValue(`Imported ${tag}`);
+    await expect(page.getByLabel("Primary color", { exact: true })).toHaveValue("#b91c1c");
+    // Nothing is saved until Save.
+    expect(((await (await page.request.get("/api/brand")).json()).brand as { name: string }).name).toBe(`Acme ${tag}`);
+    // A file that is not a brand kit, or not JSON, is refused and the form left alone.
+    await input.setInputFiles({ name: "notes.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ hello: 1 })) });
+    await expect(status).toHaveText("This is not a brand kit file: download one from the Brand page");
+    await input.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not json") });
+    await expect(status).toHaveText("notes.txt is not a brand kit file.");
+    await expect(page.getByPlaceholder("Acme Realty")).toHaveValue(`Imported ${tag}`);
+    // Declining the replace keeps the form as it was.
+    page.once("dialog", (d) => void d.dismiss());
+    await input.setInputFiles({ name: "kit.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(file)) });
+    await expect(status).toHaveText("Kept the form as it was.");
+    await expect(page.getByPlaceholder("Acme Realty")).toHaveValue(`Imported ${tag}`);
+    await page.getByRole("button", { name: "Save brand kit" }).click();
+    await expect.poll(async () => ((await (await page.request.get("/api/brand")).json()).brand as { name: string }).name).toBe(`Imported ${tag}`);
+    const saved = (await (await page.request.get("/api/brand")).json()).brand as { primaryColor: string; glossary?: string[]; defaultAvatarId?: string };
+    expect(saved.primaryColor).toBe("#b91c1c");
+    expect(saved.glossary).toEqual(["Acme"]);
+    expect(saved.defaultAvatarId).toBeUndefined();
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+  } finally {
+    const restored = before ? await page.request.put("/api/brand", { data: before }) : await page.request.delete("/api/brand");
+    expect(restored.ok()).toBe(true);
+  }
+});
+
 test("the brand kit's opening scene is set on the brand page and added at the start of a video in one click", async ({ page }) => {
   const before = (await (await page.request.get("/api/brand")).json()).brand as Record<string, unknown> | null;
   try {

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Globe, Palette, Trash2, Upload } from "lucide-react";
+import { Download, FileUp, Globe, Palette, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -16,6 +16,9 @@ import type { BrandSuggestion } from "@/lib/brand-import";
 import { DEFAULT_CAPTION_STYLE, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, backdropIdOf, isDefaultCaptionStyle, type CaptionStyle, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
+
+/** A brand kit's settings, as the server keeps them or a brand kit file holds them. */
+type BrandKitFields = Omit<BrandKit, "id" | "ownerId" | "updatedAt">;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /** Brand kit: logo, colors, and defaults applied to every new video and the public share page. */
@@ -86,18 +89,16 @@ export default function BrandPage() {
   const [importErr, setImportErr] = useState<string | null>(null);
   const hydrated = useRef(false);
 
-  // Load the saved kit into the form once.
-  useEffect(() => {
-    if (hydrated.current || !brandData) return;
-    hydrated.current = true;
-    const b = brandData.brand;
-    if (!b) return;
+  /** Puts a kit into the form, every field (what the kit leaves out goes back to its default): the saved one, or one from a file. */
+  function fillForm(b: BrandKitFields) {
     setName(b.name);
     // A logo saved before only displayable types were accepted is left out (and said so), so the rest of the kit can still be saved.
     if (b.logoUrl?.startsWith("data:") && !logoDataUrlValid(b.logoUrl)) {
+      setLogoUrl("");
       setLogoNotice("The saved logo is in a format or encoding the share page cannot show, so saving will remove it. Upload a PNG, JPEG, WebP, GIF, SVG, AVIF, BMP, or ICO logo to replace it.");
     } else {
       setLogoUrl(b.logoUrl ?? "");
+      setLogoNotice(null);
     }
     setPrimary(b.primaryColor);
     setAccent(b.accentColor ?? "");
@@ -119,7 +120,18 @@ export default function BrandPage() {
     setOpeningText(b.openingScene?.text ?? "");
     setClosingScript(b.closingScene?.script ?? "");
     setClosingText(b.closingScene?.text ?? "");
+  }
+
+  // Load the saved kit into the form once.
+  useEffect(() => {
+    if (hydrated.current || !brandData) return;
+    hydrated.current = true;
+    const b = brandData.brand;
+    if (!b) return;
+    fillForm(b);
     setSavedAt(b.updatedAt);
+    // fillForm only sets state; it is the same function on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandData]);
 
   function onFile(file: File | undefined) {
@@ -143,8 +155,86 @@ export default function BrandPage() {
   }
 
   // The form as it stands now, read when the website's answer arrives (the person may have typed meanwhile).
-  const formNow = useRef({ name, logoUrl, primary, accent, writingStyle });
-  formNow.current = { name, logoUrl, primary, accent, writingStyle };
+  const formNow = useRef({ name, logoUrl, primary, accent, writingStyle, filled: false });
+  // Anything a loaded file would replace: a saved kit, or a field the person has filled in.
+  const filled =
+    !!savedAt ||
+    [name, logoUrl, accent, writingStyle, pronunciations, glossary, forced, openingScript, openingText, closingScript, closingText].some((v) => v.trim() !== "") ||
+    primary.toLowerCase() !== DEFAULT_PRIMARY ||
+    [avatarId, voiceId, bgUrl, aspect, resolution, watermark].some((v) => v !== "") ||
+    captions ||
+    bgWhole ||
+    !isDefaultCaptionStyle(captionStyle);
+  formNow.current = { name, logoUrl, primary, accent, writingStyle, filled };
+  const kitFileRef = useRef<HTMLInputElement>(null);
+  const [downloading, setDownloading] = useState(false);
+
+  /**
+   * Saves the brand kit as a file. Fetched first rather than linked, so a signed-out session or a kit removed in
+   * another tab says so here instead of saving the error as the "brand kit".
+   */
+  async function downloadKit() {
+    if (downloading) return;
+    setDownloading(true);
+    setImportErr(null);
+    setImportNote(null);
+    try {
+      const res = await fetch("/api/brand?format=json", { cache: "no-store" });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? "The brand kit could not be downloaded");
+      }
+      const fileName = /filename="([^"]+)"/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "brand-kit.json";
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setImportNote(`Downloaded ${fileName}. Load it from the Brand page of another workspace to use the kit there.`);
+    } catch (e) {
+      setImportErr(e instanceof Error ? e.message : "The brand kit could not be downloaded");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  /**
+   * Fills the form from a brand kit file (one downloaded from this page, here or in another space), for review: the
+   * server checks it as a save would and leaves out the presenter, voice, or background this space does not have.
+   */
+  async function loadKitFile(file: File | undefined) {
+    if (kitFileRef.current) kitFileRef.current.value = "";
+    if (!file || importing) return;
+    setImportErr(null);
+    setImportNote(null);
+    setErr(null);
+    if (file.size > 4_000_000) return setImportErr("The brand kit file is too large: use a smaller logo.");
+    let body: unknown;
+    try {
+      body = JSON.parse(await file.text());
+    } catch {
+      return setImportErr(`${file.name} is not a brand kit file.`);
+    }
+    setImporting(true);
+    try {
+      const { kit, leftOut } = await api<{ kit: BrandKitFields; leftOut: string[] }>("/api/brand/file", { method: "POST", body: JSON.stringify(body) });
+      if (formNow.current.filled && !window.confirm(`Replace what the form holds with the brand kit from ${file.name}? Nothing is saved until you save.`)) {
+        setImportNote("Kept the form as it was.");
+        return;
+      }
+      fillForm(kit);
+      setStyleDraftFrom(null);
+      const without = leftOut.length ? `, without ${leftOut.join(", ").replace(/, ([^,]*)$/, " and $1")} (not available here)` : "";
+      setImportNote(`Loaded ${kit.name ? `“${kit.name}”` : "the brand kit"} from ${file.name}${without}. Check it, then save the brand kit.`);
+    } catch (e) {
+      setImportErr(e instanceof Error ? e.message : "The brand kit file could not be read");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function importSite() {
     if (!site.trim() || importing) return;
@@ -336,7 +426,7 @@ export default function BrandPage() {
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <Card className="space-y-5 p-5">
           <section aria-labelledby="brand-import-title">
-            <h3 id="brand-import-title" className="mb-1.5 block text-sm font-medium text-slate-700">Fill from a website</h3>
+            <h3 id="brand-import-title" className="mb-1.5 block text-sm font-medium text-slate-700">Fill from a website or a file</h3>
             <form
               className="flex gap-2"
               onSubmit={(e) => {
@@ -353,6 +443,19 @@ export default function BrandPage() {
               {importErr ? <span className="text-rose-700">{importErr}</span> : importNote ? <span className="text-emerald-700">{importNote}</span> : null}
             </span>
             <p className="mt-1 text-xs text-slate-500">Reads the brand name, logo, and colours your website declares, for you to check before saving.</p>
+            {/* A kit moves between workspaces (or accounts) as a file: download it here, load it there, check it, save. */}
+            <p className="mt-3 text-xs text-slate-500">Or move a brand kit between workspaces: download it from one, load it in another, check it, and save.</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <input ref={kitFileRef} type="file" accept="application/json,.json" className="sr-only" tabIndex={-1} aria-hidden data-testid="brand-file-input" onChange={(e) => void loadKitFile(e.target.files?.[0])} />
+              <Button type="button" variant="secondary" onClick={() => kitFileRef.current?.click()} loading={importing} disabled={loading || canEdit === false} title="Fill the form from a brand kit file downloaded from this page; nothing is saved until you save">
+                <FileUp className="h-4 w-4" /> Load from file
+              </Button>
+              {savedAt && (
+                <Button type="button" variant="secondary" onClick={() => void downloadKit()} loading={downloading} title="The saved brand kit as a file, to load into another workspace or keep">
+                  <Download className="h-4 w-4" /> Download brand kit
+                </Button>
+              )}
+            </div>
           </section>
           <Field label="Brand name" hint="Shown in the header of shared videos.">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme Realty" maxLength={80} className={inputClass} disabled={loading} />

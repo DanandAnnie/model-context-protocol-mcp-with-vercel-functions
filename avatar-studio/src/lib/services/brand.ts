@@ -6,7 +6,7 @@ import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, WATERMARK_CORNER
 import { silentProblem } from "../pauses";
 import { graphemes } from "../text";
 import { LOCAL_OWNER } from "../owner-id";
-import { ValidationError } from "../errors";
+import { NotFoundError, ValidationError } from "../errors";
 import { getAvatar } from "./avatars";
 import { listVoices } from "./voices";
 import { getBackdrop } from "./backdrops";
@@ -159,6 +159,70 @@ export async function saveBrandKit(input: z.infer<typeof brandKitSchema>, ownerI
     updatedAt: nowIso(),
   };
   return getStore().put("brand", kit);
+}
+
+/** What a brand kit file says it is, so a file of anything else is refused by name. */
+export const BRAND_FILE_KIND = "avatar-studio.brand-kit";
+export const BRAND_FILE_VERSION = 1;
+
+/**
+ * A brand kit as a file to keep, or to load into another workspace or account: everything the Brand page sets, without
+ * where it is kept or when it was saved.
+ */
+export function brandKitFile(kit: BrandKit) {
+  const { id: _id, ownerId: _ownerId, updatedAt: _updatedAt, ...rest } = kit;
+  return { kind: BRAND_FILE_KIND, version: BRAND_FILE_VERSION, kit: rest };
+}
+
+/** The download's file name: the brand's name in plain letters and digits, or "brand-kit" for a kit with none. */
+export function brandKitFileName(kit: Pick<BrandKit, "name">): string {
+  const slug = kit.name.toLowerCase().normalize("NFKD").replace(/\p{M}/gu, "").replace(/[^a-z0-9]+/g, "-").slice(0, 40).replace(/^-+|-+$/g, "");
+  return slug ? `brand-kit-${slug}.json` : "brand-kit.json";
+}
+
+/**
+ * Reads a brand kit file for this space, nothing saved: the kit as the Brand page would save it, checked with the same
+ * rules, with what this space does not have (its default presenter, voice, or uploaded or generated background, kept by
+ * id in the file's space) left out and named, so loading it and saving never fails on them.
+ */
+export async function readBrandKitFile(body: unknown, ownerId: string = LOCAL_OWNER): Promise<{ kit: z.infer<typeof brandKitSchema>; leftOut: string[] }> {
+  const file = body as { kind?: unknown; version?: unknown; kit?: unknown } | null;
+  if (!file || typeof file !== "object" || file.kind !== BRAND_FILE_KIND) throw new ValidationError("This is not a brand kit file: download one from the Brand page");
+  if (file.version !== BRAND_FILE_VERSION) {
+    throw new ValidationError(typeof file.version === "number" && file.version > BRAND_FILE_VERSION ? "This brand kit file is from a newer version of the studio" : "This is not a brand kit file: download one from the Brand page");
+  }
+  const parsed = brandKitSchema.safeParse(file.kit);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new ValidationError(`The file's brand kit cannot be used${issue?.path.length ? ` (${issue.path.join(".")})` : ""}: ${issue?.message ?? "it is not valid"}`);
+  }
+  const kit = { ...parsed.data };
+  const leftOut: string[] = [];
+  /** Whether `check` finds the thing in this space: not found is false, anything else is the error it is. */
+  const has = async (check: () => Promise<unknown>) => {
+    try {
+      await check();
+      return true;
+    } catch (err) {
+      if (err instanceof NotFoundError) return false;
+      throw err;
+    }
+  };
+  if (kit.defaultAvatarId && !(await has(() => getAvatar(kit.defaultAvatarId!, ownerId)))) {
+    kit.defaultAvatarId = undefined;
+    leftOut.push("the default presenter");
+  }
+  if (kit.defaultVoiceId && !(await listVoices(ownerId)).some((v) => v.id === kit.defaultVoiceId)) {
+    kit.defaultVoiceId = undefined;
+    leftOut.push("the default voice");
+  }
+  const backdropId = backdropIdOf(kit.defaultBackground);
+  const footageId = footageIdOf(kit.defaultBackground);
+  if ((backdropId && !(await has(() => getBackdrop(backdropId, ownerId)))) || (footageId && !(await has(() => getFootage(footageId, ownerId))))) {
+    kit.defaultBackground = undefined;
+    leftOut.push(backdropId ? "the default background picture" : "the default background clip");
+  }
+  return { kit, leftOut };
 }
 
 export async function deleteBrandKit(ownerId: string = LOCAL_OWNER): Promise<void> {

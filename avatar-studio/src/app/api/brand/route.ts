@@ -1,14 +1,25 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
 import { requireEditor, requireOwner } from "@/lib/owner";
-import { brandKitSchema, deleteBrandKit, getBrandKit, saveBrandKit } from "@/lib/services";
+import { brandKitFile, brandKitFileName, brandKitSchema, deleteBrandKit, getBrandKit, saveBrandKit } from "@/lib/services";
+import { NotFoundError } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
-/** The signed-in owner's brand kit (null until one is saved). */
-export async function GET() {
+/**
+ * The signed-in owner's brand kit (null until one is saved), or with `?format=json` the kit as a file to keep or to load
+ * into another space (404 while none is saved).
+ */
+export async function GET(req: Request) {
   try {
-    return json({ brand: await getBrandKit(await requireOwner()) });
+    const brand = await getBrandKit(await requireOwner());
+    if (new URL(req.url).searchParams.get("format") === "json") {
+      if (!brand) throw new NotFoundError("No brand kit is saved yet");
+      return new Response(`${JSON.stringify(brandKitFile(brand), null, 2)}\n`, {
+        headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="${brandKitFileName(brand)}"`, "Cache-Control": "no-store" },
+      });
+    }
+    return json({ brand });
   } catch (err) {
     return errorResponse(err);
   }

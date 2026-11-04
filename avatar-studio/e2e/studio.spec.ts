@@ -6562,9 +6562,9 @@ test("workspace owners invite several people at once and copy each pending link"
     await expect(page.getByTestId("invite-link")).toHaveCount(0);
 
     // Each pending invite's link can be copied from its row: the same link its email carries.
-    const ana = page.locator("li", { hasText: "ana@example.com · viewer" });
-    await expect(ana).toBeVisible();
-    await expect(page.locator("li", { hasText: "ben@example.com · viewer" })).toBeVisible();
+    const ana = page.locator("li", { hasText: "ana@example.com" });
+    await expect(ana.getByTestId("invite-role")).toHaveValue("viewer");
+    await expect(page.locator("li", { hasText: "ben@example.com" }).getByTestId("invite-role")).toHaveValue("viewer");
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     const copy = ana.getByRole("button", { name: /^Copy the invite link for ana@example\.com, expiring / });
     await copy.click();
@@ -6706,8 +6706,8 @@ test("pending workspace invites can be resent or renewed: same link, a fresh wee
     const linkOnly = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "editor" } })).json()) as Sent;
 
     await page.goto("/workspace");
-    const pending = page.locator("li", { hasText: "dan@example.com · viewer" });
-    await expect(pending).toBeVisible();
+    const pending = page.locator("li", { hasText: "dan@example.com" });
+    await expect(pending.getByTestId("invite-role")).toHaveValue("viewer");
     // Resending the emailed invite keeps its link; email is not set up here, so it says to share the link.
     const resent = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/invites/${emailed.invite.token}`));
     const resendButton = page.getByRole("button", { name: /^Resend the invite to dan@example\.com, expiring / });
@@ -6736,7 +6736,7 @@ test("pending workspace invites can be resent or renewed: same link, a fresh wee
     await expect(box.locator("code")).toHaveText(linkOnly.url);
     await expect(box).toContainText("Link renewed. The link now expires ");
     await expect(box).not.toContainText("Email sending");
-    await expect(page.locator("li", { hasText: "Link invite · editor" }).getByTestId("invite-resent")).toHaveText("· Renewed");
+    await expect(page.locator("li", { hasText: "Link invite" }).getByTestId("invite-resent")).toHaveText("· Renewed");
     await expect(pending.getByTestId("invite-resent")).toHaveCount(0);
 
     // Only this space's pending invites: not a made-up token, and not one revoked.
@@ -6745,6 +6745,66 @@ test("pending workspace invites can be resent or renewed: same link, a fresh wee
     expect((await page.request.post(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`)).status()).toBe(404);
     // The renewed link still joins.
     expect((await page.request.get(`/api/invites/${emailed.invite.token}`)).status()).toBe(200);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
+test("a pending invite's role can be changed before it is accepted: same link, joins with the new role", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Invite roles ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    type Sent = { invite: { token: string; email?: string; role: string; expiresAt: string }; url: string };
+    const emailed = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "dan@example.com", role: "editor" } })).json()) as Sent;
+    const linkOnly = (await (await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { role: "editor" } })).json()) as Sent;
+    const long = "firstname.middlename.lastname@a-rather-long-company-name.example.com";
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: long, role: "viewer" } })).status()).toBe(201);
+
+    await page.goto("/workspace");
+    // A long address truncates on its own: the select beside it is never clipped, at desktop or phone width.
+    for (const width of [1280, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      const longSelect = page.getByRole("combobox", { name: new RegExp(`^Role for the invite to ${long.replace(/\./g, "\\.")}, expiring `) });
+      await longSelect.scrollIntoViewIfNeeded();
+      const hit = await longSelect.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === el && r.width > 30;
+      });
+      expect(hit, `the select is shown whole at ${width}px`).toBe(true);
+    }
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const select = page.getByRole("combobox", { name: /^Role for the invite to dan@example\.com, expiring / });
+    await expect(select).toHaveValue("editor");
+    const patched = page.waitForResponse((r) => r.request().method() === "PATCH" && r.url().endsWith(`/invites/${emailed.invite.token}`));
+    // Chosen from the keyboard, as a reader would: the select has the focus while it changes.
+    await select.focus();
+    await select.selectOption("viewer");
+    const body = (await (await patched).json()) as Sent;
+    expect(body.invite).toEqual({ token: emailed.invite.token, email: "dan@example.com", role: "viewer", expiresAt: emailed.invite.expiresAt });
+    // Announced, kept on the row after the list reloads, and the focus stays on the select.
+    await expect(page.getByTestId("invite-status")).toHaveText("dan@example.com will join as a viewer.");
+    await expect(select).toHaveValue("viewer");
+    await expect(select).toBeFocused();
+    // No new link is made and nothing is emailed: the link box stays closed.
+    await expect(page.getByTestId("invite-link")).toHaveCount(0);
+
+    // A link invite says who it lets in.
+    await page.getByRole("combobox", { name: /^Role for the invite link, expiring / }).selectOption("owner");
+    await expect(page.getByTestId("invite-status")).toHaveText("The link invite now joins people as an owner.");
+    await expect(page.getByTestId("invite-role")).toHaveCount(3);
+
+    // The join page and the stored invite both carry the new role.
+    expect(((await (await page.request.get(`/api/invites/${emailed.invite.token}`)).json()) as { role: string }).role).toBe("viewer");
+
+    // Only a role, only this space's pending invites, never one revoked.
+    const bad = await page.request.patch(`/api/workspaces/${ws.id}/invites/${emailed.invite.token}`, { data: { role: "admin" } });
+    expect(bad.status()).toBe(400);
+    expect((await page.request.patch(`/api/workspaces/${ws.id}/invites/not-a-token`, { data: { role: "viewer" } })).status()).toBe(404);
+    expect((await page.request.delete(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`)).status()).toBe(204);
+    expect((await page.request.patch(`/api/workspaces/${ws.id}/invites/${linkOnly.invite.token}`, { data: { role: "viewer" } })).status()).toBe(404);
   } finally {
     await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
     expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);

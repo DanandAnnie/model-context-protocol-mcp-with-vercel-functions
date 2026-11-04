@@ -1,7 +1,9 @@
-import { errorResponse, json } from "@/lib/api-utils";
+import { z } from "zod";
+import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { deliverInvite } from "@/lib/invite-mail";
 import { currentUser } from "@/lib/owner";
-import { renewInvite, revokeInvite } from "@/lib/workspaces";
+import { roleSchema } from "@/lib/roles";
+import { renewInvite, revokeInvite, setInviteRole } from "@/lib/workspaces";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +17,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string; to
     const { id, token } = await ctx.params;
     const invite = await renewInvite(id, token, user);
     return json({ invite, ...(await deliverInvite(req, invite, user)) });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Changes the role a pending invite will grant ({ role }); its link, address, and expiry stay. No email is sent. */
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string; token: string }> }) {
+  try {
+    const user = await currentUser();
+    const { id, token } = await ctx.params;
+    const { role } = z.object({ role: roleSchema }).parse(await readJson(req));
+    const invite = await setInviteRole(id, token, role, user);
+    return json({ invite: { token: invite.token, email: invite.email, role: invite.role, expiresAt: invite.expiresAt } });
   } catch (err) {
     return errorResponse(err);
   }

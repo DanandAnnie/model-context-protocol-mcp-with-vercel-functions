@@ -120,6 +120,8 @@ export default function WorkspacePage() {
   // What the last batch of invites did, and which pending invite's link was just copied.
   const [batchNote, setBatchNote] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  // A pending invite's role while its change is being saved, by token.
+  const [pendingRole, setPendingRole] = useState<Record<string, WorkspaceRole>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
@@ -185,6 +187,22 @@ export default function WorkspacePage() {
       setResent({ token: i.token, text: res.emailed ? "Sent again" : "Renewed" });
       setInviteStatus(note);
     });
+  }
+
+  /** Changes the role a pending invite will grant; its link, address, and expiry stay, and nothing is emailed. */
+  async function changeInviteRole(i: { token: string; email?: string; role: WorkspaceRole }, next: WorkspaceRole) {
+    // aria-disabled rather than disabled while busy, so the select keeps the focus; the value stays as it was.
+    if (!ws || busy || next === i.role) return;
+    setInviteStatus("");
+    setBatchNote(null);
+    // Shown while it saves, so the select does not snap back to the old role until the list reloads.
+    setPendingRole((p) => ({ ...p, [i.token]: next }));
+    await run(async () => {
+      await api(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "PATCH", body: JSON.stringify({ role: next }) });
+      setInviteStatus(i.email ? `${i.email} will join as ${roleArticle(next)}.` : `The link invite now joins people as ${roleArticle(next)}.`);
+    });
+    // Saved (and reloaded) or refused: either way the row shows the stored role again.
+    setPendingRole(({ [i.token]: _done, ...rest }) => rest);
   }
 
   /** Sends an expired invite again: a new link with the same address and role, and the email when it names one. */
@@ -461,14 +479,32 @@ export default function WorkspacePage() {
                 <h3 className="text-sm font-semibold text-slate-900">Pending invites</h3>
                 <ul className="mt-2 divide-y divide-slate-100 text-xs">
                   {ws.invites.map((i) => (
-                    <li key={i.token} className="flex items-center justify-between gap-2 py-2">
-                      <span className="truncate text-slate-700">
-                        {i.email ?? "Link invite"} · {i.role} · expires {formatDate(i.expiresAt)}
-                        {resent?.token === i.token && (
-                          <span className="ml-1 font-medium text-emerald-700" data-testid="invite-resent">
-                            · {resent.text}
-                          </span>
-                        )}
+                    <li key={i.token} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 py-2">
+                      {/* Only the address truncates: the select sits outside it, so a long address never clips it. */}
+                      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 text-slate-700">
+                        <span className="min-w-0 max-w-full truncate">{i.email ?? "Link invite"}</span>
+                        <span aria-hidden="true">·</span>
+                        <select
+                          aria-label={`Role for the invite ${i.email ? `to ${i.email}` : "link"}, expiring ${formatDate(i.expiresAt)}`}
+                          title="The role this invite gives when it is accepted"
+                          value={pendingRole[i.token] ?? i.role}
+                          aria-disabled={busy || undefined}
+                          onChange={(e) => changeInviteRole(i, e.target.value as WorkspaceRole)}
+                          data-testid="invite-role"
+                          className="shrink-0 rounded border border-slate-200 bg-white px-1 py-0.5 text-xs text-slate-700 aria-disabled:cursor-wait aria-disabled:opacity-60"
+                        >
+                          <option value="editor">editor</option>
+                          <option value="viewer">viewer</option>
+                          <option value="owner">owner</option>
+                        </select>
+                        <span className="whitespace-nowrap">
+                          · expires {formatDate(i.expiresAt)}
+                          {resent?.token === i.token && (
+                            <span className="ml-1 font-medium text-emerald-700" data-testid="invite-resent">
+                              · {resent.text}
+                            </span>
+                          )}
+                        </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-3">
                         <button

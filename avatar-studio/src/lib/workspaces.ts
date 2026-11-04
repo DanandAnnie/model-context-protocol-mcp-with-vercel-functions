@@ -238,6 +238,25 @@ export async function renewInvite(id: string, token: string, user: User): Promis
 }
 
 /**
+ * Changes the role a pending invite will grant, keeping its link, address and expiry, so an owner
+ * who picked the wrong role need not revoke it and send another. An invite that has expired, been
+ * accepted or been revoked reads as not found. Written only over the record read (compared on its
+ * expiry), so one accepted or revoked meanwhile is not brought back, and a resend that landed first
+ * makes the change refuse rather than undo the new expiry. Like the other invite writes this is not
+ * a full transaction: a resend read just before the change, or an accept at the same moment, can
+ * still go ahead with the old role.
+ */
+export async function setInviteRole(id: string, token: string, role: WorkspaceRole, user: User): Promise<WorkspaceInvite> {
+  await requireRole(id, user, ["owner"]);
+  const invite = token && token.length <= 64 ? await getStore().get<WorkspaceInvite>("invite", token) : null;
+  if (!invite || invite.ownerId !== id || Date.parse(invite.expiresAt) <= Date.now()) throw new NotFoundError("Invite not found or already expired");
+  if (invite.role === role) return invite;
+  const next: WorkspaceInvite = { ...invite, role };
+  if (!(await getStore().putIf("invite", next, "expiresAt", invite.expiresAt))) throw new NotFoundError("Invite not found or already expired");
+  return next;
+}
+
+/**
  * Sends an expired invite again: a new link, with the same address and role and a full 7 days,
  * replaces the lapsed one, whose old link stays dead. Refused when the address has joined or has
  * another pending invite meanwhile, or when the workspace has no room left. `reserve` is the send

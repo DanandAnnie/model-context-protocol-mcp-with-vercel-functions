@@ -60,7 +60,7 @@ import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
-import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setInviteRole, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { deliverInvite } from "../invite-mail";
 import { bulkInviteSummary, seatLine, seatsLeft, splitEmails } from "../invite-text";
 import { LimitError as InviteLimitError } from "../errors";
@@ -2677,6 +2677,52 @@ describe("workspaces", () => {
     await store.put("invite", { ...again, renewedAt: undefined, expiresAt: new Date(Date.now() - 1000).toISOString() });
     await assert.rejects(renewInvite(ws.id, inv.token, alice), /already expired/);
     assert.equal(Date.parse((await store.get<{ expiresAt: string }>("invite", inv.token))!.expiresAt) < Date.now(), true, "a refused renew writes nothing");
+  });
+
+  it("changes the role a pending invite grants: same link, address and expiry, owners only, never an expired, used, or another space's invite", async () => {
+    const ws = await createWorkspace("Roles", alice);
+    const other = await createWorkspace("Elsewhere", alice);
+    const store = globalThis.__avatarStudioStore!;
+    const inv = await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
+    const changed = await setInviteRole(ws.id, inv.token, "viewer", alice);
+    assert.deepEqual({ ...changed }, { ...inv, role: "viewer" }, "only the role changes");
+    assert.equal((await findInvite(inv.token))?.invite.role, "viewer", "the stored invite carries the new role");
+    // The same role again is a no-op that still answers with the invite.
+    assert.equal((await setInviteRole(ws.id, inv.token, "viewer", alice)).role, "viewer");
+    // Whoever joins with the link joins with the role it grants now.
+    const joined = await acceptInvite(inv.token, { id: "dan", email: "dan@example.com" });
+    assert.equal(joined.members.find((m) => m.userId === "dan")?.role, "viewer");
+    // The used invite is gone, so changing it reads as not found and writes nothing back.
+    await assert.rejects(setInviteRole(ws.id, inv.token, "owner", alice), /Invite not found/);
+    assert.equal(await store.get("invite", inv.token), null);
+
+    // An invite accepted or revoked between the read and the write stays gone.
+    const raced = await createInvite(ws.id, { role: "editor" }, alice);
+    const realGet = store.get.bind(store);
+    store.get = (async (kind: string, id: string) => {
+      const row = await realGet(kind as never, id);
+      if (kind === "invite" && id === raced.token) await store.remove("invite", id);
+      return row;
+    }) as typeof store.get;
+    try {
+      await assert.rejects(setInviteRole(ws.id, raced.token, "viewer", alice), /Invite not found/);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal(await store.get("invite", raced.token), null, "the used invite is not written back");
+
+    // Owners only; not another space's invite, a made-up or over-long token, or one already expired.
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    const link = await createInvite(ws.id, { role: "editor" }, alice);
+    await assert.rejects(setInviteRole(ws.id, link.token, "owner", bob), /Only workspace owners/);
+    await assert.rejects(setInviteRole(ws.id, link.token, "owner", { id: "eve" }), /Workspace not found/);
+    await assert.rejects(setInviteRole(other.id, link.token, "viewer", alice), /Invite not found/);
+    await assert.rejects(setInviteRole(ws.id, "nope", "viewer", alice), /Invite not found/);
+    await assert.rejects(setInviteRole(ws.id, "x".repeat(65), "viewer", alice), /Invite not found/);
+    await store.put("invite", { ...link, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    await assert.rejects(setInviteRole(ws.id, link.token, "viewer", alice), /already expired/);
+    assert.equal((await store.get<{ role: string }>("invite", link.token))?.role, "editor", "a refused change writes nothing");
   });
 
   it("invites several addresses at once: one link each, skipping members, pending invites, and repeats, with room checked first", async () => {

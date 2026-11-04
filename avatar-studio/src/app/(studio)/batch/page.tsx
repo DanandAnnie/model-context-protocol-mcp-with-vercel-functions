@@ -2,16 +2,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Copy, Layers3, QrCode, RotateCcw, Upload } from "lucide-react";
+import { Copy, Layers3, QrCode, RotateCcw, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { BATCH_NOTHING_TO_SEND, api, formatDate } from "@/lib/client";
+import { ApiError, BATCH_NOTHING_TO_SEND, api, formatDate } from "@/lib/client";
 import type { BatchSummary } from "@/lib/services/batches";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
 import { restoredCaptionStyle } from "@/lib/caption-style";
-import { MAX_RETRY_AT_ONCE, VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { MAX_RETRY_AT_ONCE, TRASH_RETENTION_DAYS, VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -77,12 +77,16 @@ export default function BatchPage() {
   // being made, so the counts move as they finish.
   const { data: batchData, refetch: refetchBatches } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch", { pollMs: 8000, pollWhile: (d) => d.batches.some((b) => b.making > 0) });
   // One action at a time across the list (Retry failed, Copy links, QR codes), since they share the note under a batch.
-  const [batchBusy, setBatchBusy] = useState<{ batchId: string; action: "retry" | "copy" | "qr" } | null>(null);
+  const [batchBusy, setBatchBusy] = useState<{ batchId: string; action: "retry" | "copy" | "qr" | "trash" } | null>(null);
   const retrying = batchBusy?.action === "retry" ? batchBusy.batchId : null;
-  const busyWith = (batchId: string, action: "retry" | "copy" | "qr") => batchBusy?.batchId === batchId && batchBusy.action === action;
+  const busyWith = (batchId: string, action: "retry" | "copy" | "qr" | "trash") => batchBusy?.batchId === batchId && batchBusy.action === action;
   /** What the last Retry failed, Copy links, or QR codes did, said under that batch. */
   const [batchNote, setBatchNote] = useState<{ batchId: string; text: string; error?: boolean } | null>(null);
   const focusNote = useRef<string | null>(null);
+  /** What the last Move to trash did, said for the whole list since that batch is no longer in it. */
+  const [listNote, setListNote] = useState<{ text: string; error?: boolean } | null>(null);
+  const batchesHeading = useRef<HTMLHeadingElement>(null);
+  const focusHeading = useRef(false);
   const brandApplied = useRef(false);
   // Settings changed by hand before the kit arrived keep the hand's choice.
   const touched = useRef(new Set<"aspect" | "resolution" | "captions">());
@@ -112,6 +116,7 @@ export default function BatchPage() {
     if (!window.confirm(`Start ${what} of “${b.title}” again with the same settings?${over ? ` Only the first ${MAX_RETRY_AT_ONCE} are started now; retry again for the other ${over}.` : ""} Each counts toward this month's renders.`)) return;
     setBatchBusy({ batchId: b.batchId, action: "retry" });
     setBatchNote(null);
+    setListNote(null);
     try {
       const r = await api<{ started: Array<{ from: string; id: string }>; failedAgain: Array<{ from: string; id?: string; reason: string }>; skipped: Array<{ id: string; code: string }>; missing: string[] }>("/api/videos/retry", { method: "POST", body: JSON.stringify({ ids }) });
       const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("#", String(k)));
@@ -153,6 +158,7 @@ export default function BatchPage() {
     if (batchBusy) return;
     setBatchBusy({ batchId: b.batchId, action: "copy" });
     setBatchNote(null);
+    setListNote(null);
     const counts = { links: 0, unsendable: 0 };
     // Fetched inside the clipboard write rather than before it, so a browser that only lets a click copy at once (Safari)
     // still counts the copy as the click's, as the library's Copy links does.
@@ -194,6 +200,7 @@ export default function BatchPage() {
     if (batchBusy) return;
     setBatchBusy({ batchId: b.batchId, action: "qr" });
     setBatchNote(null);
+    setListNote(null);
     try {
       const res = await fetch(`/api/videos/batch/${encodeURIComponent(b.batchId)}?format=qr`).catch(() => {
         throw new Error("Could not reach the server to save the QR codes");
@@ -217,6 +224,41 @@ export default function BatchPage() {
       setBatchBusy(null);
     }
   }
+  /** Move every video of a batch to the trash (each can be restored from the library's Trash), then say so for the list. */
+  async function trashBatch(b: BatchSummary) {
+    if (batchBusy) return;
+    const what = b.videos === 1 ? "its video" : `its ${b.videos} videos`;
+    if (!window.confirm(`Move “${b.title}” to the trash: ${what} (and any failed renders a retry replaced)? Each can be restored from the library's Trash for ${TRASH_RETENTION_DAYS} days.`)) return;
+    setBatchBusy({ batchId: b.batchId, action: "trash" });
+    setBatchNote(null);
+    setListNote(null);
+    // Said for the whole list, set before the list is read again so the card (and its heading) stays while the row goes.
+    const forList = (text: string, error = false) => {
+      setListNote({ text, error });
+      focusHeading.current = true;
+    };
+    try {
+      const r = await api<{ moved: number; failed: number }>(`/api/videos/batch/${encodeURIComponent(b.batchId)}`, { method: "DELETE" });
+      const moved = `Moved ${r.moved} ${r.moved === 1 ? "video" : "videos"} of “${b.title}” to the trash.`;
+      if (r.failed) {
+        // Some are left out of the trash, so the batch's row stays, and the note is said there.
+        setBatchNote({ batchId: b.batchId, text: `${moved} ${r.failed} could not be moved; try again.`, error: true });
+      } else forList(`${moved} Restore them from the library's Trash within ${TRASH_RETENTION_DAYS} days.`);
+    } catch (e) {
+      // Not found: another tab or a teammate trashed or deleted it first, so its row goes with the re-read list.
+      if (e instanceof ApiError && e.status === 404) forList(`“${b.title}” was already moved to the trash or deleted, so there was nothing left to move.`);
+      else setBatchNote({ batchId: b.batchId, text: e instanceof Error ? e.message : "Could not move the batch to the trash", error: true });
+    } finally {
+      await refetchBatches();
+      setBatchBusy(null);
+    }
+  }
+  // After a Move to trash said for the list, the list's heading takes focus, the batch's row (and its button) being gone.
+  useEffect(() => {
+    if (!focusHeading.current || batchBusy) return;
+    focusHeading.current = false;
+    batchesHeading.current?.focus();
+  }, [batchBusy, listNote]);
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(id: string) {
     setAvatarId(id);
@@ -478,12 +520,18 @@ export default function BatchPage() {
           )}
         </Card>
       </div>
-      {!!batchData?.batches.length && (
+      {(!!batchData?.batches.length || listNote) && (
         <Card className="mt-6 p-4">
-          <h2 className="text-sm font-semibold text-slate-900">Recent batches</h2>
-          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, copy the links that can be sent now or save their QR codes for print, or download them all for a mail merge.</p>
+          <h2 ref={batchesHeading} tabIndex={-1} className="rounded text-sm font-semibold text-slate-900 focus-visible:outline-2 focus-visible:outline-brand-600">
+            Recent batches
+          </h2>
+          <p role="status" className={listNote ? `mt-1 text-xs ${listNote.error ? "text-red-700" : "text-slate-600"}` : "sr-only"} data-testid="recent-batches-note">
+            {listNote?.text ?? ""}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, copy the links that can be sent now or save their QR codes for print, download them all for a mail merge, or move the whole batch to the trash.</p>
+          {!batchData?.batches.length && <p className="mt-3 text-sm text-slate-500">No batches left. Batches you start here are listed.</p>}
           <ul className="mt-3 divide-y divide-slate-100" data-testid="recent-batches">
-            {batchData.batches.map((b) => (
+            {(batchData?.batches ?? []).map((b) => (
               <li key={b.batchId} className="flex flex-wrap items-center justify-between gap-2 py-2.5" data-testid="recent-batch">
                 <div className="min-w-0">
                   <Link href={`/videos?batch=${encodeURIComponent(b.batchId)}`} className="block truncate text-sm font-medium text-slate-900 hover:text-brand-700 hover:underline" aria-label={`${b.title}, started ${formatDate(b.startedAt)}`}>
@@ -514,6 +562,11 @@ export default function BatchPage() {
                   <a href={`/api/videos/batch/${encodeURIComponent(b.batchId)}`} download className="text-xs font-medium text-brand-700 hover:underline" aria-label={`Download links of ${b.title}, started ${formatDate(b.startedAt)}`}>
                     Download links
                   </a>
+                  {canEdit !== false && (
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void trashBatch(b)} disabled={batchBusy !== null && !busyWith(b.batchId, "trash")} loading={busyWith(b.batchId, "trash")} aria-label={`Move to trash: ${b.title}, started ${formatDate(b.startedAt)}`} title={`Move every video of this batch to the trash, where each can be restored for ${TRASH_RETENTION_DAYS} days`}>
+                      <Trash2 className="h-3.5 w-3.5" /> Move to trash
+                    </Button>
+                  )}
                 </div>
                 <p role="status" id={`batch-note-${b.batchId}`} tabIndex={-1} className={batchNote?.batchId === b.batchId ? `w-full text-xs ${batchNote.error ? "text-red-700" : "text-slate-600"}` : "sr-only"} data-testid="recent-batch-note">
                   {batchNote?.batchId === b.batchId ? batchNote.text : ""}

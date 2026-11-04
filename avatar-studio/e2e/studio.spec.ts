@@ -5855,6 +5855,48 @@ test("Copy links and QR codes on a recent batch give its sendable share links in
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("Move to trash on a recent batch moves all its videos to the trash and says where to restore them", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Trash batch ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAna\nBen", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  const dialogs: string[] = [];
+  page.on("dialog", (d) => {
+    dialogs.push(d.message());
+    void d.accept();
+  });
+  await page.goto("/batch");
+  const row = page.getByTestId("recent-batch").filter({ hasText: `Trash batch ${tag}` });
+  await row.getByRole("button", { name: new RegExp(`^Move to trash: Trash batch ${tag}, started `) }).click();
+  await expect(page.getByTestId("recent-batches-note")).toHaveText(`Moved 2 videos of “Trash batch ${tag}” to the trash. Restore them from the library's Trash within 30 days.`);
+  expect(dialogs).toEqual([`Move “Trash batch ${tag}” to the trash: its 2 videos (and any failed renders a retry replaced)? Each can be restored from the library's Trash for 30 days.`]);
+  // Its row is gone, so focus is on the list's heading.
+  await expect(row).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Recent batches" })).toBeFocused();
+  // The videos are in the trash, out of the library and the batch's links.
+  const inTrash = ((await (await page.request.get(`/api/videos?trash=true&q=${encodeURIComponent(`Trash batch ${tag}`)}`)).json()) as { videos: Array<{ id: string }> }).videos;
+  expect(inTrash).toHaveLength(2);
+  expect((await page.request.get(`/api/videos/batch/${batchId}`)).status()).toBe(404);
+  expect((await page.request.delete(`/api/videos/batch/${batchId}`)).status()).toBe(404);
+  // A batch trashed elsewhere while the page was open: the note says so for the list, and focus is kept on the heading.
+  const stale = await page.request.post("/api/videos/batch", {
+    data: { title: `Stale batch ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nCy", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  const staleId = ((await stale.json()) as { batchId: string }).batchId;
+  await page.reload();
+  const staleRow = page.getByTestId("recent-batch").filter({ hasText: `Stale batch ${tag}` });
+  await expect(staleRow).toHaveCount(1);
+  expect(await (await page.request.delete(`/api/videos/batch/${staleId}`)).json()).toEqual({ moved: 1, failed: 0 });
+  await staleRow.getByRole("button", { name: /^Move to trash: / }).click();
+  await expect(page.getByTestId("recent-batches-note")).toHaveText(`“Stale batch ${tag}” was already moved to the trash or deleted, so there was nothing left to move.`);
+  await expect(staleRow).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Recent batches" })).toBeFocused();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("personalized batch creates one video per CSV row", async ({ page }) => {
   await page.goto("/batch");
   await expect(page.getByText(/2 rows · columns: name, property, move_in/)).toBeVisible();

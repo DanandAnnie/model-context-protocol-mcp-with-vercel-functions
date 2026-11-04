@@ -1,11 +1,12 @@
 import { strToU8, zipSync } from "fflate";
-import { errorResponse } from "@/lib/api-utils";
+import { errorResponse, json } from "@/lib/api-utils";
 import { BATCH_NOTHING_TO_SEND } from "@/lib/client";
 import { publicOrigin } from "@/lib/config";
 import { toCsv } from "@/lib/csv";
 import { ConflictError } from "@/lib/errors";
-import { requireOwner } from "@/lib/owner";
-import { BATCH_LINK_COLUMNS, batchLinkRows, batchVideos, selectionLinkText, selectionQrFiles } from "@/lib/services";
+import { recordRequestActivity } from "@/lib/activity-request";
+import { requireEditor, requireOwner } from "@/lib/owner";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchVideos, selectionLinkText, selectionQrFiles, trashBatch } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,19 @@ export async function GET(req: Request, ctx: { params: Promise<{ batchId: string
         "Cache-Control": "no-store",
       },
     });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Move every video of one batch to the trash (editors only), where each can be restored; `{ moved }` counts them. */
+export async function DELETE(_req: Request, ctx: { params: Promise<{ batchId: string }> }) {
+  try {
+    const owner = await requireEditor();
+    const { batchId } = await ctx.params;
+    const result = await trashBatch(batchId, owner);
+    if (result.moved > 0) await recordRequestActivity(owner, "video.trashed", { count: result.moved });
+    return json(result);
   } catch (err) {
     return errorResponse(err);
   }

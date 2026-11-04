@@ -9,7 +9,7 @@ import { BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { sendableShareLink, shareOffline, shareState } from "../client";
-import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, deleteVideo, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 import { qrFileNames, qrSvg, qrWording, uniqueFileNames } from "../qr";
@@ -411,6 +411,32 @@ export async function batchVideos(batchId: string, ownerId: string = LOCAL_OWNER
   const videos = (await listVideos(ownerId, false)).filter((v) => v.batchId === batchId);
   if (!videos.length) throw new NotFoundError("Batch not found");
   return refreshPending(videos);
+}
+
+/**
+ * Move every video of one batch to the trash (each recipient's, and the failed renders a retry replaced), as the library's
+ * Move to trash does one at a time, so each can be restored from the trash until it is deleted for good. `moved` counts
+ * the videos this call moved (one trashed in the meantime is not counted twice), and `failed` the ones the store would
+ * not take, left out of the trash; the rest are still moved. A batch with nothing out of the trash, or with nothing
+ * moved because another request trashed or deleted it all first, or another owner's, is not found.
+ */
+export async function trashBatch(batchId: string, ownerId: string = LOCAL_OWNER): Promise<{ moved: number; failed: number }> {
+  const videos = (await listVideos(ownerId, false)).filter((v) => v.batchId === batchId);
+  let moved = 0;
+  let failed = 0;
+  for (const v of videos) {
+    try {
+      if ((await deleteVideo(v.id, ownerId)).changed) moved++;
+    } catch (err) {
+      // Deleted for good in the meantime: nothing left to move. Anything else is counted, and the rest still moved.
+      if (!(err instanceof NotFoundError)) {
+        failed++;
+        console.error(`trashing ${v.id} of ${batchId} failed:`, err);
+      }
+    }
+  }
+  if (!moved && !failed) throw new NotFoundError("Batch not found");
+  return { moved, failed };
 }
 
 const BATCH_CONCURRENCY = 5;

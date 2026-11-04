@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, retryVideo, selectionLinkText, selectionQrFiles } from "../services";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, listVideos, retryVideo, selectionLinkText, selectionQrFiles, trashBatch } from "../services";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
@@ -110,5 +110,57 @@ describe("batch links", () => {
     assert.deepEqual([qr.files.map((f) => f.name), qr.links, qr.unsendable], [["qr-Hi – a.svg", "qr-Hi – c.svg"], 2, 2]);
     // Each file is the code of that video's own link.
     assert.deepEqual(qr.files.map((f) => f.svg), ["a", "c"].map((id) => qrSvg(`https://studio.example/share/${id}`, qrWording("share", `Hi – ${id}`).title)));
+  });
+
+  it("moves every video of a batch to the trash, retries too, and only the owner's", async () => {
+    const { batchId, videos } = await createBatch(request("name,time\nAmy,9am\nBen,10am"), OWNER);
+    // Ben's render failed and was started again: both are the batch's.
+    await getStore().put("video", { ...(await getStore().get<Video>("video", videos[1].id))!, status: "failed" });
+    const retry = await retryVideo(videos[1].id, OWNER);
+    await assert.rejects(trashBatch(batchId, "someone_else"), (err: unknown) => err instanceof NotFoundError);
+    assert.deepEqual(await trashBatch(batchId, OWNER), { moved: 3, failed: 0 });
+    const left = await listVideos(OWNER, false);
+    assert.ok(![videos[0].id, videos[1].id, retry.id].some((id) => left.some((v) => v.id === id)));
+    // Each is in the trash, to be restored from there; nothing is left to move.
+    for (const id of [videos[0].id, videos[1].id, retry.id]) assert.ok((await getStore().get<Video>("video", id))?.deletedAt);
+    await assert.rejects(trashBatch(batchId, OWNER), (err: unknown) => err instanceof NotFoundError);
+    await assert.rejects(trashBatch("batch_nope", OWNER), (err: unknown) => err instanceof NotFoundError);
+  });
+
+  it("does not count a video already in the trash, and counts one the store would not take while moving the rest", async () => {
+    const { batchId, videos } = await createBatch(request("name,time\nAmy,9am\nBen,10am\nCy,11am"), OWNER);
+    // Amy's video was moved to the trash from the library first.
+    await getStore().put("video", { ...(await getStore().get<Video>("video", videos[0].id))!, deletedAt: new Date().toISOString() });
+    // The store refuses Cy's write once.
+    const store = getStore();
+    const put = store.put.bind(store);
+    let refused = false;
+    store.put = (async (kind: string, item: { id: string }) => {
+      if (kind === "video" && item.id === videos[2].id && !refused) {
+        refused = true;
+        throw new Error("store is down");
+      }
+      return put(kind as never, item as never);
+    }) as typeof store.put;
+    const putIf = store.putIf?.bind(store);
+    if (putIf)
+      store.putIf = (async (kind: string, item: { id: string }, ...rest: unknown[]) => {
+        if (kind === "video" && item.id === videos[2].id && !refused) {
+          refused = true;
+          throw new Error("store is down");
+        }
+        return (putIf as (...a: unknown[]) => unknown)(kind, item, ...rest);
+      }) as typeof store.putIf;
+    const original = console.error;
+    console.error = () => {};
+    try {
+      assert.deepEqual(await trashBatch(batchId, OWNER), { moved: 1, failed: 1 });
+    } finally {
+      console.error = original;
+    }
+    assert.ok((await getStore().get<Video>("video", videos[1].id))?.deletedAt);
+    assert.equal((await getStore().get<Video>("video", videos[2].id))?.deletedAt, undefined);
+    // Asked again, the one left is moved.
+    assert.deepEqual(await trashBatch(batchId, OWNER), { moved: 1, failed: 0 });
   });
 });

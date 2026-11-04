@@ -60,8 +60,9 @@ import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
 import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
-import { acceptInvite, canEdit, canManageAccount, createInvite, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { acceptInvite, bulkInviteSchema, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
 import { deliverInvite } from "../invite-mail";
+import { bulkInviteSummary, splitEmails } from "../invite-text";
 import { LimitError as InviteLimitError } from "../errors";
 import { roleArticle, roleCanEdit, roleSchema } from "../roles";
 import { framingFor, isPhotoAvatar, type Video } from "../types";
@@ -2676,6 +2677,77 @@ describe("workspaces", () => {
     await store.put("invite", { ...again, renewedAt: undefined, expiresAt: new Date(Date.now() - 1000).toISOString() });
     await assert.rejects(renewInvite(ws.id, inv.token, alice), /already expired/);
     assert.equal(Date.parse((await store.get<{ expiresAt: string }>("invite", inv.token))!.expiresAt) < Date.now(), true, "a refused renew writes nothing");
+  });
+
+  it("invites several addresses at once: one link each, skipping members, pending invites, and repeats, with room checked first", async () => {
+    const ws = await createWorkspace("Batch", alice);
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    await createInvite(ws.id, { email: "Dan@Example.com", role: "viewer" }, alice);
+    const res = await createInvites(ws.id, bulkInviteSchema.parse({ emails: ["eve@example.com", "BOB@example.com", "dan@example.com", "fay@example.com", "Eve@Example.com"], role: "viewer" }), alice);
+    assert.deepEqual(res.invites.map((i) => [i.email, i.role]), [["eve@example.com", "viewer"], ["fay@example.com", "viewer"]]);
+    assert.equal(new Set(res.invites.map((i) => i.token)).size, 2, "each gets its own link");
+    assert.deepEqual(res.skipped, [
+      { email: "BOB@example.com", reason: "member" },
+      { email: "dan@example.com", reason: "pending" },
+      { email: "Eve@Example.com", reason: "repeated" },
+    ]);
+    assert.equal((await workspaceView(ws, alice)).invites.length, 3, "the two new ones join the pending one");
+
+    // Owners only; the schema caps a batch and wants real addresses.
+    await assert.rejects(createInvites(ws.id, bulkInviteSchema.parse({ emails: ["gus@example.com"] }), bob), /Only workspace owners/);
+    assert.throws(() => bulkInviteSchema.parse({ emails: [] }), /at least one/);
+    assert.throws(() => bulkInviteSchema.parse({ emails: Array.from({ length: 21 }, (_, n) => `p${n}@example.com`) }), /At most 20/);
+    const bad = bulkInviteSchema.safeParse({ emails: ["ok@example.com", "not-an-address"] });
+    assert.equal(bad.success ? "" : bad.error.issues[0].message, '"not-an-address" is not an email address');
+
+    // A batch bigger than the room left invites nobody, and says how much room there is.
+    const full = await createWorkspace("Full", alice);
+    const seats = Array.from({ length: 45 }, (_, n) => `s${n}@example.com`);
+    await createInvites(full.id, bulkInviteSchema.parse({ emails: seats.slice(0, 20) }), alice);
+    await createInvites(full.id, bulkInviteSchema.parse({ emails: seats.slice(20, 40) }), alice);
+    const before = (await workspaceView(full, alice)).invites.length;
+    assert.equal(before, 40);
+    await assert.rejects(createInvites(full.id, bulkInviteSchema.parse({ emails: Array.from({ length: 10 }, (_, n) => `x${n}@example.com`) }), alice), /room for 9 more/);
+    assert.equal((await workspaceView(full, alice)).invites.length, before, "nothing was written");
+    // Each invite can send an email: a batch the send allowance cannot take whole is refused, with nothing written.
+    const counted: number[] = [];
+    await assert.rejects(
+      createInvites(full.id, bulkInviteSchema.parse({ emails: ["s0@example.com", "z1@example.com", "z2@example.com"] }), alice, (n) => (counted.push(n), false)),
+      (e: unknown) => e instanceof InviteLimitError && /Too many invites/.test(e.message),
+    );
+    assert.deepEqual(counted, [2], "only the new addresses count against it");
+    assert.equal((await workspaceView(full, alice)).invites.length, before);
+    // Skipped addresses take no room: ten addresses, two of them already pending, are eight new ones, and eight fit in nine.
+    const mixed = await createInvites(full.id, bulkInviteSchema.parse({ emails: ["s0@example.com", "s1@example.com", ...Array.from({ length: 8 }, (_, n) => `y${n}@example.com`)] }), alice);
+    assert.equal(mixed.invites.length, 8);
+    assert.equal(mixed.skipped.length, 2);
+  });
+
+  it("reads pasted addresses and sums up a batch", () => {
+    assert.deepEqual(splitEmails(" a@x.com, b@x.com;c@x.com\n\nd@x.com  e@x.com,, "), ["a@x.com", "b@x.com", "c@x.com", "d@x.com", "e@x.com"]);
+    assert.deepEqual(splitEmails("   "), []);
+    // A list copied from a mail app gives the addresses, not the names; a quoted name may hold a comma.
+    assert.deepEqual(splitEmails('Ana Diaz <ana@x.com>, "Lee, Ben" <ben@x.com>; cal@x.com\nDee <dee@x.com>'), ["ana@x.com", "ben@x.com", "cal@x.com", "dee@x.com"]);
+    const invite = (email: string, emailed: boolean, emailError?: string) => ({ invite: { email }, emailed, emailError });
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", true), invite("b@x.com", true), invite("c@x.com", true)], skipped: [] }),
+      "Invited 3 people. Emailed a@x.com, b@x.com, and c@x.com.",
+    );
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", false), invite("b@x.com", false)], skipped: [{ email: "m@x.com", reason: "member" }, { email: "p@x.com", reason: "pending" }] }),
+      "Invited 2 people. Email sending is not configured; copy the links for a@x.com and b@x.com from Pending invites. Skipped m@x.com (already a member), p@x.com (already invited; resend it from Pending invites).",
+    );
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", true), invite("b@x.com", false, "mailbox unavailable")], skipped: [] }),
+      "Invited 2 people. Emailed a@x.com. The email to b@x.com (mailbox unavailable) failed; copy that link from Pending invites.",
+    );
+    // Each failure keeps its own reason.
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", false, "mailbox unavailable"), invite("b@x.com", false, "rate limited")], skipped: [] }),
+      "Invited 2 people. The email to a@x.com (mailbox unavailable) and b@x.com (rate limited) failed; copy those links from Pending invites.",
+    );
+    assert.equal(bulkInviteSummary({ invites: [], skipped: [{ email: "a@x.com", reason: "repeated" }] }), "No new invites. Skipped a@x.com (listed twice).");
   });
 
   it("delivers an invite: the link on the request's origin, emailed only with an address and a sending provider", async () => {

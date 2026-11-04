@@ -8,6 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_KEPT, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
+import { bulkInviteSummary, splitEmails, type BulkInviteAnswer } from "@/lib/invite-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -99,6 +100,9 @@ export default function WorkspacePage() {
   // The invite last resent or renewed, and what the status line says about it (cleared first so a repeat is heard again).
   const [resent, setResent] = useState<{ token: string; text: string } | null>(null);
   const [inviteStatus, setInviteStatus] = useState("");
+  // What the last batch of invites did, and which pending invite's link was just copied.
+  const [batchNote, setBatchNote] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [name, setName] = useState<string | null>(null);
@@ -118,10 +122,25 @@ export default function WorkspacePage() {
 
   async function invite() {
     if (!ws) return;
+    const emails = splitEmails(email);
+    setBatchNote(null);
+    if (emails.length > 1) {
+      // Several addresses: one invite each; their links are on the Pending invites list.
+      setInviteStatus("");
+      await run(async () => {
+        const res = await api<BulkInviteAnswer>(`/api/workspaces/${ws.id}/invites`, { method: "POST", body: JSON.stringify({ emails, role }) });
+        const note = bulkInviteSummary(res);
+        setLink(null);
+        setBatchNote(note);
+        setInviteStatus(note);
+        setEmail("");
+      });
+      return;
+    }
     await run(async () => {
-      const res = await api<{ url: string; emailed: boolean; emailError?: string }>(`/api/workspaces/${ws.id}/invites`, { method: "POST", body: JSON.stringify({ email: email || undefined, role }) });
+      const res = await api<{ url: string; emailed: boolean; emailError?: string }>(`/api/workspaces/${ws.id}/invites`, { method: "POST", body: JSON.stringify({ email: emails[0], role }) });
       setLink(res.url);
-      setMailNote(res.emailed ? `Invite emailed to ${email}.` : res.emailError ? `Email failed (${res.emailError}); share the link instead.` : email ? "Email sending is not configured; share the link." : null);
+      setMailNote(res.emailed ? `Invite emailed to ${emails[0]}.` : res.emailError ? `Email failed (${res.emailError}); share the link instead.` : emails[0] ? "Email sending is not configured; share the link." : null);
       setEmail("");
     });
   }
@@ -131,6 +150,7 @@ export default function WorkspacePage() {
     // aria-disabled rather than disabled while busy, so the focused button keeps the focus.
     if (!ws || busy) return;
     setInviteStatus("");
+    setBatchNote(null);
     await run(async () => {
       const res = await api<{ url: string; emailed: boolean; emailError?: string; invite: { expiresAt: string } }>(`/api/workspaces/${ws.id}/invites/${i.token}`, { method: "POST" });
       const until = `The link now expires ${formatDate(res.invite.expiresAt)}.`;
@@ -147,6 +167,20 @@ export default function WorkspacePage() {
       setResent({ token: i.token, text: res.emailed ? "Sent again" : "Renewed" });
       setInviteStatus(note);
     });
+  }
+
+  /** Copies a pending invite's link (the same one the invite email carries). */
+  async function copyInvite(token: string, said: string) {
+    const url = `${window.location.origin}/invite/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedToken(token);
+      setInviteStatus("");
+      setTimeout(() => setInviteStatus(said), 0);
+      setTimeout(() => setCopiedToken((t) => (t === token ? null : t)), 2000);
+    } catch {
+      window.prompt("Copy this link", url);
+    }
   }
 
   async function copy() {
@@ -171,6 +205,7 @@ export default function WorkspacePage() {
     );
   }
   const isOwner = ws.role === "owner";
+  const pasted = splitEmails(email);
 
   return (
     <>
@@ -299,10 +334,27 @@ export default function WorkspacePage() {
           <div className="space-y-4">
             <Card className="p-5">
               <h3 className="text-sm font-semibold text-slate-900">Invite someone</h3>
+              {/* Mounted with the card, so what an invite, resend, or copy did is announced even when the
+                  Pending invites list only appears with the answer. */}
+              <p className="sr-only" role="status" data-testid="invite-status">
+                {inviteStatus}
+              </p>
               <p className="mt-1 text-xs text-slate-500">Creates a link that joins this workspace. Anyone with the link can use it, so send it privately. Links expire after 7 days.</p>
               <div className="mt-3 space-y-3">
-                <Field label="Email (optional)" hint="Sent automatically when EMAIL_PROVIDER is configured; otherwise kept for your records.">
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@example.com" className={inputClass} />
+                <Field
+                  label="Email addresses (optional)"
+                  hint={`Sent automatically when EMAIL_PROVIDER is configured; otherwise kept for your records. Paste up to 20, separated by commas or new lines, to invite each with their own link.`}
+                >
+                  <textarea
+                    rows={2}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="teammate@example.com"
+                    autoComplete="off"
+                    inputMode="email"
+                    spellCheck={false}
+                    className={`${inputClass} resize-y`}
+                  />
                 </Field>
                 <Field label="Role">
                   <select value={role} onChange={(e) => setRole(e.target.value as WorkspaceRole)} className={inputClass}>
@@ -312,8 +364,13 @@ export default function WorkspacePage() {
                   </select>
                 </Field>
                 <Button onClick={invite} loading={busy}>
-                  <Link2 className="h-4 w-4" /> Create invite link
+                  <Link2 className="h-4 w-4" /> {pasted.length > 1 ? `Invite ${pasted.length} people` : "Create invite link"}
                 </Button>
+                {batchNote && (
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-900" data-testid="invite-batch">
+                    {batchNote}
+                  </div>
+                )}
                 {link && (
                   <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900" data-testid="invite-link">
                     {mailNote && <div className="mb-2 font-medium">{mailNote}</div>}
@@ -328,9 +385,6 @@ export default function WorkspacePage() {
             {ws.invites.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold text-slate-900">Pending invites</h3>
-                <p className="sr-only" role="status" data-testid="invite-status">
-                  {inviteStatus}
-                </p>
                 <ul className="mt-2 divide-y divide-slate-100 text-xs">
                   {ws.invites.map((i) => (
                     <li key={i.token} className="flex items-center justify-between gap-2 py-2">
@@ -343,6 +397,14 @@ export default function WorkspacePage() {
                         )}
                       </span>
                       <span className="flex shrink-0 items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => copyInvite(i.token, i.email ? `Invite link for ${i.email} copied` : `${i.role[0].toUpperCase()}${i.role.slice(1)} invite link copied`)}
+                          aria-label={`Copy the invite link for ${i.email ?? `the ${i.role} link invite`}, expiring ${formatDate(i.expiresAt)}`}
+                          className="text-slate-500 hover:text-indigo-700"
+                        >
+                          {copiedToken === i.token ? "Copied" : "Copy link"}
+                        </button>
                         <button
                           type="button"
                           aria-disabled={busy}

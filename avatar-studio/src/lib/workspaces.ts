@@ -7,6 +7,7 @@ import { LimitError, NotFoundError, ValidationError } from "./errors";
 import { assertNoRenewingPlan } from "./billing";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
+import type { InviteSkipReason } from "./invite-text";
 import type { Membership, Workspace, WorkspaceInvite, WorkspaceRole } from "./types";
 import { roleCanEdit, roleSchema } from "./roles";
 
@@ -19,6 +20,20 @@ export const RESEND_COOLDOWN_MS = 5 * 60_000;
 
 export const workspaceNameSchema = z.object({ name: z.string().trim().min(1).max(60) });
 export const inviteSchema = z.object({ email: z.string().trim().email().max(200).optional(), role: roleSchema.default("editor") });
+/** The most addresses one request can invite, each getting its own link. */
+export const MAX_BULK_INVITES = 20;
+export const bulkInviteSchema = z.object({
+  emails: z
+    .array(z.string().trim().max(200))
+    .min(1, "Give at least one email address")
+    .max(MAX_BULK_INVITES, `At most ${MAX_BULK_INVITES} addresses at a time`)
+    // Names the address that is wrong, so a long pasted list can be fixed without guessing.
+    .superRefine((emails, ctx) => {
+      const bad = emails.find((e) => !z.string().email().safeParse(e).success);
+      if (bad !== undefined) ctx.addIssue({ code: "custom", message: `"${bad.slice(0, 80)}" is not an email address` });
+    }),
+  role: roleSchema.default("editor"),
+});
 
 export interface User {
   id: string;
@@ -125,13 +140,56 @@ export async function deleteWorkspace(id: string, user: User, purge?: (ownerId: 
   await getStore().remove("workspace", id);
 }
 
+function putInvite(id: string, email: string | undefined, role: WorkspaceRole): Promise<WorkspaceInvite> {
+  const token = randomBytes(18).toString("base64url");
+  const invite: WorkspaceInvite = { id: token, token, ownerId: id, email, role, createdAt: nowIso(), expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString() };
+  return getStore().put("invite", invite);
+}
+
 export async function createInvite(id: string, input: z.infer<typeof inviteSchema>, user: User): Promise<WorkspaceInvite> {
   const ws = await requireRole(id, user, ["owner"]);
   const pending = await listInvites(id);
   if (ws.members.length + pending.length >= MAX_MEMBERS) throw new ValidationError(`At most ${MAX_MEMBERS} members per workspace`);
-  const token = randomBytes(18).toString("base64url");
-  const invite: WorkspaceInvite = { id: token, token, ownerId: id, email: input.email, role: input.role, createdAt: nowIso(), expiresAt: new Date(Date.now() + INVITE_TTL_MS).toISOString() };
-  return getStore().put("invite", invite);
+  return putInvite(id, input.email, input.role);
+}
+
+/**
+ * Invites several addresses at once, one link each, all with the same role. Addresses that are
+ * already members, already have a pending invite, or repeat an earlier one in the list are skipped
+ * and reported rather than refused. The room left under MAX_MEMBERS, and `reserve` (a send allowance
+ * the route passes in, since each invite can send an email), are checked for the whole batch before
+ * anything is written, so a refused batch invites nobody. Two batches at the same moment can still
+ * both pass the room check, as two single invites can; the invites are written one by one.
+ */
+export async function createInvites(
+  id: string,
+  input: z.infer<typeof bulkInviteSchema>,
+  user: User,
+  reserve: (count: number) => boolean = () => true,
+): Promise<{ invites: WorkspaceInvite[]; skipped: Array<{ email: string; reason: InviteSkipReason }> }> {
+  const ws = await requireRole(id, user, ["owner"]);
+  const pending = await listInvites(id);
+  const members = new Set(ws.members.flatMap((m) => (m.email ? [m.email.toLowerCase()] : [])));
+  const invited = new Set(pending.flatMap((i) => (i.email ? [i.email.toLowerCase()] : [])));
+  const seen = new Set<string>();
+  const fresh: string[] = [];
+  const skipped: Array<{ email: string; reason: InviteSkipReason }> = [];
+  for (const email of input.emails) {
+    const key = email.toLowerCase();
+    if (seen.has(key)) skipped.push({ email, reason: "repeated" });
+    else if (members.has(key)) skipped.push({ email, reason: "member" });
+    else if (invited.has(key)) skipped.push({ email, reason: "pending" });
+    else fresh.push(email);
+    seen.add(key);
+  }
+  const room = MAX_MEMBERS - ws.members.length - pending.length;
+  if (fresh.length > room) {
+    throw new ValidationError(room > 0 ? `There is room for ${room} more of the ${MAX_MEMBERS} members a workspace can have; invite fewer at a time` : `At most ${MAX_MEMBERS} members per workspace`);
+  }
+  if (fresh.length && !reserve(fresh.length)) throw new LimitError("Too many invites from this workspace in the last hour; try again later");
+  const invites: WorkspaceInvite[] = [];
+  for (const email of fresh) invites.push(await putInvite(id, email, input.role));
+  return { invites, skipped };
 }
 
 export async function revokeInvite(id: string, token: string, user: User): Promise<void> {

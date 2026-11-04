@@ -6533,6 +6533,58 @@ test("workspaces: create, switch, isolate content, invite, join, leave, delete",
   }
 });
 
+test("workspace owners invite several people at once and copy each pending link", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Batch ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    // One already pending, to be skipped when listed again.
+    expect((await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { email: "cal@example.com", role: "editor" } })).status()).toBe(201);
+    await page.goto("/workspace");
+    const box = page.getByLabel("Email addresses (optional)");
+    // A mail app's "Name <address>" form gives just the address.
+    await box.fill("Ana Diaz <ana@example.com>, ben@example.com\ncal@example.com\nANA@example.com");
+    await page.getByRole("combobox").filter({ hasText: "Viewer: watch and comment only" }).selectOption("viewer");
+    const sent = page.waitForResponse((r) => r.request().method() === "POST" && r.url().endsWith(`/api/workspaces/${ws.id}/invites`));
+    await page.getByRole("button", { name: "Invite 4 people" }).click();
+    const res = await sent;
+    expect(res.status()).toBe(201);
+    expect(JSON.parse(res.request().postData() ?? "{}")).toEqual({ emails: ["ana@example.com", "ben@example.com", "cal@example.com", "ANA@example.com"], role: "viewer" });
+    const body = (await res.json()) as { invites: Array<{ invite: { email: string; role: string; token: string }; url: string; emailed: boolean }>; skipped: Array<{ email: string; reason: string }> };
+    expect(body.invites.map((i) => [i.invite.email, i.invite.role, i.emailed])).toEqual([["ana@example.com", "viewer", false], ["ben@example.com", "viewer", false]]);
+    expect(body.skipped).toEqual([{ email: "cal@example.com", reason: "pending" }, { email: "ANA@example.com", reason: "repeated" }]);
+    await expect(page.getByTestId("invite-batch")).toHaveText(
+      "Invited 2 people. Email sending is not configured; copy the links for ana@example.com and ben@example.com from Pending invites. Skipped cal@example.com (already invited; resend it from Pending invites), ANA@example.com (listed twice).",
+    );
+    await expect(page.getByTestId("invite-status")).toHaveText(/^Invited 2 people\./);
+    await expect(box).toHaveValue("");
+    await expect(page.getByTestId("invite-link")).toHaveCount(0);
+
+    // Each pending invite's link can be copied from its row: the same link its email carries.
+    const ana = page.locator("li", { hasText: "ana@example.com · viewer" });
+    await expect(ana).toBeVisible();
+    await expect(page.locator("li", { hasText: "ben@example.com · viewer" })).toBeVisible();
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    const copy = ana.getByRole("button", { name: /^Copy the invite link for ana@example\.com, expiring / });
+    await copy.click();
+    await expect(copy).toHaveText("Copied");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(body.invites[0].url);
+    await expect(page.getByTestId("invite-status")).toHaveText("Invite link for ana@example.com copied");
+    expect((await page.request.get(`/api/invites/${body.invites[0].invite.token}`)).status()).toBe(200);
+
+    // One address still takes the single-invite path, link and all; a batch over 20 is refused whole.
+    await box.fill("dee@example.com");
+    await expect(page.getByRole("button", { name: "Create invite link" })).toBeVisible();
+    const tooMany = await page.request.post(`/api/workspaces/${ws.id}/invites`, { data: { emails: Array.from({ length: 21 }, (_, n) => `p${n}@example.com`) } });
+    expect(tooMany.status()).toBe(400);
+    expect(((await tooMany.json()) as { issues: Array<{ message: string }> }).issues[0].message).toMatch(/At most 20 addresses at a time/);
+  } finally {
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("pending workspace invites can be resent or renewed: same link, a fresh week", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Invites ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

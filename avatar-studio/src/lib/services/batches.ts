@@ -174,6 +174,29 @@ export const BATCH_LINK_COLUMNS = ["row", "recipient", "title", "status", "share
  */
 export function batchLinkRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof BATCH_LINK_COLUMNS)[number], string | number | undefined>> {
   const origin = base.replace(/\/$/, "");
+  return keptBatchVideos(videos).map((v) => {
+    const live = v.status === "completed" && !shareOffline(v, now);
+    return {
+      row: v.batchRow,
+      recipient: v.rowLabel,
+      title: v.title,
+      status: v.status,
+      share_link: live ? `${origin}/share/${v.id}` : undefined,
+      share_expires: live ? v.shareExpiresAt : undefined,
+      password_required: live && v.shareLocked ? "yes" : undefined,
+      email_required: live && v.shareGate ? "yes" : undefined,
+      video_id: v.id,
+      created: v.createdAt,
+    };
+  });
+}
+
+/**
+ * One video per recipient of a batch, in the order of the CSV it was made from (videos made before rows were kept come
+ * after, oldest first). Where a row has several videos (a failed render and its retries), the one kept is a ready one
+ * if there is one, else the newest.
+ */
+export function keptBatchVideos(videos: Video[]): Video[] {
   const byId = new Map(videos.map((v) => [v.id, v]));
   // A video made before rows were kept is told apart by the first render of its retry chain.
   const rootOf = (v: Video) => {
@@ -198,23 +221,80 @@ export function batchLinkRows(videos: Video[], base: string, now = Date.now()): 
     const held = kept.get(key);
     if (!held || better(v, held)) kept.set(key, v);
   }
-  return [...kept.values()]
-    .sort((a, b) => (a.batchRow ?? Infinity) - (b.batchRow ?? Infinity) || a.createdAt.localeCompare(b.createdAt))
-    .map((v) => {
-      const live = v.status === "completed" && !shareOffline(v, now);
-      return {
-        row: v.batchRow,
-        recipient: v.rowLabel,
-        title: v.title,
-        status: v.status,
-        share_link: live ? `${origin}/share/${v.id}` : undefined,
-        share_expires: live ? v.shareExpiresAt : undefined,
-        password_required: live && v.shareLocked ? "yes" : undefined,
-        email_required: live && v.shareGate ? "yes" : undefined,
-        video_id: v.id,
-        created: v.createdAt,
-      };
-    });
+  return [...kept.values()].sort((a, b) => (a.batchRow ?? Infinity) - (b.batchRow ?? Infinity) || a.createdAt.localeCompare(b.createdAt));
+}
+
+/** A personalized batch at a glance, for the Batch page's list: one video per recipient, counted by where each is. */
+export interface BatchSummary {
+  batchId: string;
+  /** The title the batch was given: its first recipient's video title without " – <recipient>". */
+  title: string;
+  videos: number;
+  ready: number;
+  making: number;
+  failed: number;
+  /** When its first video was started. */
+  startedAt: string;
+}
+
+/** How many batches the Batch page lists, newest first. */
+export const RECENT_BATCHES = 20;
+
+/** The most recent `limit` batches among `videos`, newest first by when each started, with all their videos. */
+function recentBatchGroups(videos: Video[], limit: number): Array<{ batchId: string; videos: Video[]; startedAt: string }> {
+  const groups = new Map<string, { batchId: string; videos: Video[]; startedAt: string }>();
+  for (const v of videos) {
+    if (!v.batchId) continue;
+    const group = groups.get(v.batchId);
+    if (!group) groups.set(v.batchId, { batchId: v.batchId, videos: [v], startedAt: v.createdAt });
+    else {
+      group.videos.push(v);
+      if (v.createdAt < group.startedAt) group.startedAt = v.createdAt;
+    }
+  }
+  return [...groups.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt) || (a.batchId < b.batchId ? -1 : 1)).slice(0, limit);
+}
+
+/**
+ * The title a batch was given: a recipient's video title without its " – <recipient>", taken from the first video
+ * that still carries that ending (one renamed by hand, or cut short at the 120-character limit, does not); the first
+ * video's title as it stands when none does.
+ */
+function batchTitle(kept: Video[]): string {
+  for (const v of kept) {
+    const suffix = v.rowLabel ? ` – ${v.rowLabel}` : "";
+    if (suffix && v.title.endsWith(suffix) && v.title.length > suffix.length) return v.title.slice(0, -suffix.length);
+  }
+  return kept[0].title;
+}
+
+/** The batches among `videos` (the library's, out of the trash), newest first, at most `limit`. */
+export function batchSummaries(videos: Video[], limit = RECENT_BATCHES): BatchSummary[] {
+  return recentBatchGroups(videos, limit).map(({ batchId, videos: all, startedAt }) => {
+    const kept = keptBatchVideos(all);
+    return {
+      batchId,
+      title: batchTitle(kept),
+      videos: kept.length,
+      ready: kept.filter((v) => v.status === "completed").length,
+      making: kept.filter((v) => v.status === "queued" || v.status === "processing").length,
+      failed: kept.filter((v) => v.status === "failed").length,
+      startedAt,
+    };
+  });
+}
+
+/**
+ * The account's recent batches. The renders still being made in those batches (one per recipient) are asked about
+ * first, as the library's list does, so the counts are current; the rest of the library is not.
+ */
+export async function listBatches(ownerId: string = LOCAL_OWNER): Promise<BatchSummary[]> {
+  const videos = await listVideos(ownerId, false);
+  const listed = recentBatchGroups(videos, RECENT_BATCHES);
+  const pending = listed.flatMap((g) => keptBatchVideos(g.videos)).filter((v) => v.status === "queued" || v.status === "processing");
+  if (!pending.length) return batchSummaries(videos);
+  const fresh = new Map((await refreshPending(pending)).map((v) => [v.id, v]));
+  return batchSummaries(videos.map((v) => fresh.get(v.id) ?? v));
 }
 
 /** Columns of the links file for any selection of videos (the library's "Download links"). */

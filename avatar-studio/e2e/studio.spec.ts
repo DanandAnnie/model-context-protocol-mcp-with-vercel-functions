@@ -5716,6 +5716,34 @@ test("API validation and webhook guard", async ({ request }) => {
   expect(preview.status()).toBe(204);
 });
 
+test("the Batch page lists recent batches, each leading to its videos and its links", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Recent ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAna\nBen", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId } = (await made.json()) as { batchId: string };
+  // The API lists it first, with one video per recipient and the title it was given.
+  const listed = (await (await page.request.get("/api/videos/batch")).json()) as { batches: Array<{ batchId: string; title: string; videos: number; ready: number; making: number; failed: number }> };
+  const mine = listed.batches.find((b) => b.batchId === batchId)!;
+  expect(mine).toMatchObject({ title: `Recent ${tag}`, videos: 2 });
+  expect(mine.ready + mine.making + mine.failed).toBe(2);
+  await page.goto("/batch");
+  const row = page.getByTestId("recent-batch").filter({ hasText: `Recent ${tag}` });
+  await expect(row).toHaveCount(1);
+  await expect(row.getByTestId("recent-batch-counts")).toHaveText(/^2 videos · \d ready.* · started /);
+  await expect(row.getByRole("link", { name: new RegExp(`^Download links of Recent ${tag}, started `) })).toHaveAttribute("href", `/api/videos/batch/${batchId}`);
+  const csv = await (await page.request.get(`/api/videos/batch/${batchId}`)).text();
+  expect(csv.split("\n")[0]).toContain("recipient");
+  expect(csv).toContain("Ana");
+  await row.getByRole("link", { name: new RegExp(`^Recent ${tag}, started `) }).click();
+  await expect(page).toHaveURL(new RegExp(`/videos\\?batch=${batchId}$`));
+  await expect(page.getByText(`Recent ${tag} – Ana`)).toBeVisible();
+  await page.goto("/batch");
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("personalized batch creates one video per CSV row", async ({ page }) => {
   await page.goto("/batch");
   await expect(page.getByText(/2 rows · columns: name, property, move_in/)).toBeVisible();

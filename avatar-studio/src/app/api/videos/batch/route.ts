@@ -1,13 +1,22 @@
 import { z } from "zod";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { recordRequestActivity } from "@/lib/activity-request";
-import { requireEditor } from "@/lib/owner";
-import { batchRequestSchema, createBatch, previewBatch } from "@/lib/services";
+import { requireEditor, requireOwner } from "@/lib/owner";
+import { batchRequestSchema, createBatch, listBatches, previewBatch } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const previewSchema = z.object({ scriptTemplate: z.string().max(5000), csv: z.string().max(200_000) });
+
+/** GET = the recent batches (newest first) with how many of each one's videos are ready, being made, or failed. */
+export async function GET() {
+  try {
+    return json({ batches: await listBatches(await requireOwner()) });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
 
 /** PUT = preview substitutions without creating anything; POST = create one video per CSV row. */
 export async function PUT(req: Request) {

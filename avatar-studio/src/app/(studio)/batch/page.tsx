@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Layers3, Upload } from "lucide-react";
@@ -6,7 +7,8 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/co
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
-import { api } from "@/lib/client";
+import { api, formatDate } from "@/lib/client";
+import type { BatchSummary } from "@/lib/services/batches";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
 import { restoredCaptionStyle } from "@/lib/caption-style";
 import { VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
@@ -71,6 +73,8 @@ export default function BatchPage() {
   // voice), format, quality, and captions; the server gives the rows the kit's background. A saved template wins.
   // Without a kit (or when it cannot be read) the first presenter and voice in the lists.
   const { data: brandData, error: brandError } = useApi<{ brand: BrandKit | null }>("/api/brand");
+  // Batches made before, newest first, to find one's videos again or send its links.
+  const { data: batchData } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch");
   const brandApplied = useRef(false);
   // Settings changed by hand before the kit arrived keep the hand's choice.
   const touched = useRef(new Set<"aspect" | "resolution" | "captions">());
@@ -352,6 +356,31 @@ export default function BatchPage() {
           )}
         </Card>
       </div>
+      {!!batchData?.batches.length && (
+        <Card className="mt-6 p-4">
+          <h2 className="text-sm font-semibold text-slate-900">Recent batches</h2>
+          <p className="mt-1 text-xs text-slate-500">Counted one video per recipient (a retried row once): open a batch&apos;s videos in the library, or download its links for a mail merge.</p>
+          <ul className="mt-3 divide-y divide-slate-100" data-testid="recent-batches">
+            {batchData.batches.map((b) => (
+              <li key={b.batchId} className="flex flex-wrap items-center justify-between gap-2 py-2.5" data-testid="recent-batch">
+                <div className="min-w-0">
+                  <Link href={`/videos?batch=${encodeURIComponent(b.batchId)}`} className="block truncate text-sm font-medium text-slate-900 hover:text-brand-700 hover:underline" aria-label={`${b.title}, started ${formatDate(b.startedAt)}`}>
+                    {b.title}
+                  </Link>
+                  <div className="text-xs text-slate-500" data-testid="recent-batch-counts">
+                    {b.videos} {b.videos === 1 ? "video" : "videos"} · {b.ready} ready
+                    {b.making ? ` · ${b.making} being made` : ""}
+                    {b.failed ? ` · ${b.failed} failed` : ""} · started {formatDate(b.startedAt)}
+                  </div>
+                </div>
+                <a href={`/api/videos/batch/${encodeURIComponent(b.batchId)}`} download className="shrink-0 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download links of ${b.title}, started ${formatDate(b.startedAt)}`}>
+                  Download links
+                </a>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
     </>
   );
 }

@@ -9,7 +9,7 @@ import { BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { sendableShareLink, shareOffline, shareState } from "../client";
-import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, deleteVideo, listVideos, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, deleteVideo, listVideos, updateVideo, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 import { qrFileNames, qrSvg, qrWording, uniqueFileNames } from "../qr";
@@ -152,7 +152,7 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
       ownerId,
       ctx,
       true,
-      { batchId, rowLabel: label, batchRow: i + 1 },
+      { batchId, rowLabel: label, batchTitle: input.title, batchRow: i + 1 },
     );
     videos[i] = video;
     if (video.status === "failed") failed.push({ row: i + 1, reason: video.error ?? "The render could not be started" });
@@ -261,11 +261,13 @@ function recentBatchGroups(videos: Video[], limit: number): Array<{ batchId: str
 }
 
 /**
- * The title a batch was given: a recipient's video title without its " – <recipient>", taken from the first video
- * that still carries that ending (one renamed by hand, or cut short at the 120-character limit, does not); the first
- * video's title as it stands when none does.
+ * The title a batch was given: as kept with its videos (`batchTitle`, set when it was made or renamed), else a
+ * recipient's video title without its " – <recipient>", taken from the first video that still carries that ending (one
+ * renamed by hand, or cut short at the 120-character limit, does not); the first video's title as it stands when none does.
  */
 function batchTitle(kept: Video[]): string {
+  const known = kept.find((v) => v.batchTitle)?.batchTitle;
+  if (known) return known;
   for (const v of kept) {
     const suffix = v.rowLabel ? ` – ${v.rowLabel}` : "";
     if (suffix && v.title.endsWith(suffix) && v.title.length > suffix.length) return v.title.slice(0, -suffix.length);
@@ -437,6 +439,56 @@ export async function trashBatch(batchId: string, ownerId: string = LOCAL_OWNER)
   }
   if (!moved && !failed) throw new NotFoundError("Batch not found");
   return { moved, failed };
+}
+
+/** A batch's new title, as the Batch page's title field takes it; each video adds " – <recipient>" within 120 characters. */
+export const batchRenameSchema = z.object({
+  title: z.string().trim().min(1, "Give the batch a title").max(100, "Keep the batch's title to 100 characters, so each recipient's name still fits after it"),
+});
+
+/** What a recipient's video is titled while it is titled after its batch: as a new batch's are, cut at 120 characters. */
+function batchVideoTitle(title: string, rowLabel: string): string {
+  return `${title} – ${rowLabel}`.slice(0, 120);
+}
+
+/**
+ * Rename a batch. Every video of it out of the trash (retries too) that is still titled after the batch, its title being
+ * "<the batch's title> – <recipient>" as made (cut at 120 characters), is renamed to "<title> – <recipient>" cut the same
+ * way, and keeps the new title as the one it is titled after. A video renamed by hand, or made before recipients were
+ * kept, keeps its title and is counted in `kept`; one the store would not take is counted in `failed` while the rest are
+ * renamed, so asking again renames it. As with renaming one video, a renamed video that was approved goes back to not
+ * reviewed; `unapproved` counts them. A batch with nothing out of the trash, or another owner's, is not found.
+ */
+export async function renameBatch(batchId: string, title: string, ownerId: string = LOCAL_OWNER): Promise<{ renamed: number; kept: number; failed: number; unapproved: number }> {
+  const videos = (await listVideos(ownerId, false)).filter((v) => v.batchId === batchId);
+  if (!videos.length) throw new NotFoundError("Batch not found");
+  // The batch's title as it stands, for videos made before their batch's title was kept with them.
+  const current = batchTitle(keptBatchVideos(videos));
+  const result = { renamed: 0, kept: 0, failed: 0, unapproved: 0 };
+  for (const v of videos) {
+    const base = v.batchTitle ?? current;
+    const suffix = v.rowLabel ? ` – ${v.rowLabel}` : "";
+    const titledAfter = !!v.rowLabel && (v.title === batchVideoTitle(base, v.rowLabel) || (!v.batchTitle && v.title.endsWith(suffix) && v.title.length > suffix.length));
+    if (!titledAfter) {
+      result.kept++;
+      continue;
+    }
+    const next = batchVideoTitle(title, v.rowLabel!);
+    try {
+      if (next !== v.title || v.batchTitle !== title) {
+        await updateVideo(v.id, { title: next }, ownerId, { batchTitle: title });
+        if (next !== v.title && v.review?.status === "approved") result.unapproved++;
+      }
+      result.renamed++;
+    } catch (err) {
+      // Deleted for good in the meantime: nothing left to rename. Anything else is counted, and the rest still renamed.
+      if (!(err instanceof NotFoundError)) {
+        result.failed++;
+        console.error(`renaming ${v.id} of ${batchId} failed:`, err);
+      }
+    }
+  }
+  return result;
 }
 
 const BATCH_CONCURRENCY = 5;

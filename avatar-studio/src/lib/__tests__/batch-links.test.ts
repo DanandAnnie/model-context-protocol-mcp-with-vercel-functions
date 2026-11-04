@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, listVideos, retryVideo, selectionLinkText, selectionQrFiles, trashBatch } from "../services";
+import { BATCH_LINK_COLUMNS, batchLinkRows, batchRequestSchema, batchVideos, createBatch, listVideos, batchRenameSchema, renameBatch, retryVideo, selectionLinkText, selectionQrFiles, trashBatch } from "../services";
 import { NotFoundError } from "../errors";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
 import { parseCsv, toCsv } from "../csv";
@@ -162,5 +162,58 @@ describe("batch links", () => {
     assert.equal((await getStore().get<Video>("video", videos[2].id))?.deletedAt, undefined);
     // Asked again, the one left is moved.
     assert.deepEqual(await trashBatch(batchId, OWNER), { moved: 1, failed: 0 });
+  });
+
+  it("renames every recipient's video still titled after the batch, retries too, and keeps ones renamed by hand", async () => {
+    const { batchId, videos } = await createBatch(request("name,time\nAmy,9am\nBen,10am\nCy,11am"), OWNER);
+    await getStore().put("video", { ...(await getStore().get<Video>("video", videos[1].id))!, status: "failed" });
+    const retry = await retryVideo(videos[1].id, OWNER);
+    // Cy's video was renamed by hand.
+    await getStore().put("video", { ...(await getStore().get<Video>("video", videos[2].id))!, title: "Cy's special" });
+    await assert.rejects(renameBatch(batchId, "Spring", "someone_else"), (err: unknown) => err instanceof NotFoundError);
+    assert.deepEqual(await renameBatch(batchId, "Spring open house", OWNER), { renamed: 3, kept: 1, failed: 0, unapproved: 0 });
+    const title = async (id: string) => (await getStore().get<Video>("video", id))!.title;
+    assert.deepEqual(await Promise.all([videos[0].id, videos[1].id, retry.id, videos[2].id].map(title)), ["Spring open house – Amy", "Spring open house – Ben", "Spring open house – Ben", "Cy's special"]);
+    // The batch's title is kept with its videos, so the list names it so.
+    assert.equal((await getStore().get<Video>("video", videos[0].id))!.batchTitle, "Spring open house");
+    assert.equal(batchRenameSchema.safeParse({ title: " " }).success, false);
+    assert.equal(batchRenameSchema.safeParse({ title: "x".repeat(101) }).success, false);
+    await assert.rejects(renameBatch("batch_nope", "X", OWNER), (err: unknown) => err instanceof NotFoundError);
+  });
+
+  it("renames a batch whose titles were cut at 120 characters, again after a rename that cut them, and says what it could not", async () => {
+    // A long title and long recipients: every title is cut, so none ends with its recipient.
+    const long = "Quarterly update for our valued partners in the northern region".padEnd(90, ".");
+    const { batchId, videos } = await createBatch(batchRequestSchema.parse({ title: long, scriptTemplate: "Hi {name}.", csv: "name\nchristopher.johnson@example.com\nalexandra.mcallister@example.com", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), OWNER);
+    const title = async (id: string) => (await getStore().get<Video>("video", id))!.title;
+    assert.equal((await title(videos[0].id)).length, 120);
+    const newTitle = "Spring update for partners".padEnd(95, "!");
+    assert.deepEqual(await renameBatch(batchId, newTitle, OWNER), { renamed: 2, kept: 0, failed: 0, unapproved: 0 });
+    assert.equal(await title(videos[0].id), `${newTitle} – christopher.johnson@example.com`.slice(0, 120));
+    // Cut again by that rename, they are still titled after the batch.
+    assert.deepEqual(await renameBatch(batchId, "Short", OWNER), { renamed: 2, kept: 0, failed: 0, unapproved: 0 });
+    assert.deepEqual(await Promise.all(videos.map((v) => title(v.id))), ["Short – christopher.johnson@example.com", "Short – alexandra.mcallister@example.com"]);
+    // An approved video goes back to not reviewed, and is counted; a write the store refuses is counted, the rest still renamed.
+    await getStore().put("video", { ...(await getStore().get<Video>("video", videos[0].id))!, review: { status: "approved", requestedById: "u", requestedAt: new Date().toISOString() } as Video["review"] });
+    const store = getStore();
+    const put = store.put.bind(store);
+    let refused = false;
+    store.put = (async (kind: string, item: { id: string }) => {
+      if (kind === "video" && item.id === videos[1].id && !refused) {
+        refused = true;
+        throw new Error("store is down");
+      }
+      return put(kind as never, item as never);
+    }) as typeof store.put;
+    const original = console.error;
+    console.error = () => {};
+    try {
+      assert.deepEqual(await renameBatch(batchId, "Final", OWNER), { renamed: 1, kept: 0, failed: 1, unapproved: 1 });
+    } finally {
+      console.error = original;
+    }
+    assert.equal((await getStore().get<Video>("video", videos[0].id))!.review, undefined);
+    assert.deepEqual(await renameBatch(batchId, "Final", OWNER), { renamed: 2, kept: 0, failed: 0, unapproved: 0 });
+    assert.equal(await title(videos[1].id), "Final – alexandra.mcallister@example.com");
   });
 });

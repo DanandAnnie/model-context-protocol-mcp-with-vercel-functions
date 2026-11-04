@@ -1118,6 +1118,11 @@ export interface Video extends VideoRequest {
   /** Set when the video was produced by a personalized batch; `rowLabel` identifies the row. */
   batchId?: string;
   rowLabel?: string;
+  /**
+   * The title the batch was given (or last renamed to): a recipient's video still titled after its batch is
+   * "<batchTitle> – <rowLabel>", cut at 120 characters. Absent on videos made before it was kept.
+   */
+  batchTitle?: string;
   /** The batch's CSV row this video was made from (1 is the first row under the header); absent before rows were kept. */
   batchRow?: number;
   avatarName?: string;

@@ -304,7 +304,7 @@ export async function resolveRenderContext(
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, star, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "starred" | "description" | "batchId" | "rowLabel" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
+export type VideoExtras = Partial<Pick<Video, "folder" | "starred" | "description" | "batchId" | "rowLabel" | "batchTitle" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
   /** The video's id, when a client key decides it (a template render retried after a lost answer). */
   id?: string;
   /** Called once the renderer has started this render here, never for a replay of one started before (never stored). */
@@ -1101,7 +1101,7 @@ function renamedScenes(scenes: Scene[] | undefined, renames: Map<number, string 
   });
 }
 
-export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER): Promise<Video> {
+export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER, internal: { batchTitle?: string } = {}): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   // A trashed video past its retention is gone (see getVideo); writing it would only feed the purge.
   if (purgeDue(existing, Date.now())) throw new NotFoundError(`Video ${id} not found`);
@@ -1109,6 +1109,8 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   const renames = patch.sceneNames ? sceneRenames(existing, patch.sceneNames) : undefined;
   const next: Video = { ...existing, updatedAt: nowIso() };
   if (patch.title !== undefined) next.title = patch.title;
+  // Not a field a client can set: a batch rename keeps what its videos are titled after (see renameBatch).
+  if (internal.batchTitle !== undefined) next.batchTitle = internal.batchTitle;
   if (patch.description !== undefined) {
     if (patch.description) next.description = patch.description;
     else delete next.description;
@@ -1504,7 +1506,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (failed.directed?.editOf) throw new ConflictError(`An edited cut is not retried; edit the scenes of “${failed.directed.editOf.title}” again`);
   const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
-  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, starred: failed.starred, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, starred: failed.starred, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchTitle: failed.batchTitle, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
 /**

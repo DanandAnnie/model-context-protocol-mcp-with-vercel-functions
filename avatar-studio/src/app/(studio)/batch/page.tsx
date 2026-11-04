@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Copy, Layers3, QrCode, RotateCcw, Trash2, Upload } from "lucide-react";
+import { Copy, Layers3, Pencil, QrCode, RotateCcw, Trash2, Upload } from "lucide-react";
 import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -77,9 +77,9 @@ export default function BatchPage() {
   // being made, so the counts move as they finish.
   const { data: batchData, refetch: refetchBatches } = useApi<{ batches: BatchSummary[] }>("/api/videos/batch", { pollMs: 8000, pollWhile: (d) => d.batches.some((b) => b.making > 0) });
   // One action at a time across the list (Retry failed, Copy links, QR codes), since they share the note under a batch.
-  const [batchBusy, setBatchBusy] = useState<{ batchId: string; action: "retry" | "copy" | "qr" | "trash" } | null>(null);
+  const [batchBusy, setBatchBusy] = useState<{ batchId: string; action: "retry" | "copy" | "qr" | "trash" | "rename" } | null>(null);
   const retrying = batchBusy?.action === "retry" ? batchBusy.batchId : null;
-  const busyWith = (batchId: string, action: "retry" | "copy" | "qr" | "trash") => batchBusy?.batchId === batchId && batchBusy.action === action;
+  const busyWith = (batchId: string, action: "retry" | "copy" | "qr" | "trash" | "rename") => batchBusy?.batchId === batchId && batchBusy.action === action;
   /** What the last Retry failed, Copy links, or QR codes did, said under that batch. */
   const [batchNote, setBatchNote] = useState<{ batchId: string; text: string; error?: boolean } | null>(null);
   const focusNote = useRef<string | null>(null);
@@ -87,6 +87,20 @@ export default function BatchPage() {
   const [listNote, setListNote] = useState<{ text: string; error?: boolean } | null>(null);
   const batchesHeading = useRef<HTMLHeadingElement>(null);
   const focusHeading = useRef(false);
+  /** The batch whose title is being edited on its row, with the title typed so far. */
+  const [renaming, setRenaming] = useState<{ batchId: string; value: string } | null>(null);
+  const focusRename = useRef<string | null>(null);
+  /** Close the rename field and give focus back to that batch's Rename button (once it is enabled again, below). */
+  function closeRename(batchId: string) {
+    setRenaming(null);
+    focusRename.current = batchId;
+  }
+  useEffect(() => {
+    const id = focusRename.current;
+    if (!id || renaming || batchBusy) return;
+    focusRename.current = null;
+    document.getElementById(`rename-${id}`)?.focus();
+  }, [renaming, batchBusy, batchData]);
   const brandApplied = useRef(false);
   // Settings changed by hand before the kit arrived keep the hand's choice.
   const touched = useRef(new Set<"aspect" | "resolution" | "captions">());
@@ -259,6 +273,36 @@ export default function BatchPage() {
     focusHeading.current = false;
     batchesHeading.current?.focus();
   }, [batchBusy, listNote]);
+  /** Rename a batch: every recipient's video still titled after it takes the new title before " – <recipient>". */
+  async function renameBatch(b: BatchSummary, title: string) {
+    if (batchBusy) return;
+    if (!title.trim() || title.trim() === b.title) return closeRename(b.batchId);
+    setBatchBusy({ batchId: b.batchId, action: "rename" });
+    setBatchNote(null);
+    setListNote(null);
+    try {
+      const r = await api<{ renamed: number; kept: number; failed: number; unapproved: number }>(`/api/videos/batch/${encodeURIComponent(b.batchId)}`, { method: "PATCH", body: JSON.stringify({ title }) });
+      const n = (k: number, one: string, many: string) => (k === 1 ? one : many.replace("#", String(k)));
+      const parts = [
+        r.renamed ? `Renamed ${n(r.renamed, "1 video", "# videos")}: each is now titled “${title.trim()}” followed by its recipient's name.` : "No video was renamed.",
+        r.kept ? `${n(r.kept, "1 video keeps its own title", "# videos keep their own titles")} (renamed by hand, or made before recipients were kept).` : "",
+        r.unapproved ? `${n(r.unapproved, "1 approved video goes", "# approved videos go")} back to not reviewed.` : "",
+        r.failed ? `${n(r.failed, "1 could not be renamed", "# could not be renamed")}; try again.` : "",
+      ].filter(Boolean);
+      setBatchNote({ batchId: b.batchId, text: parts.join(" "), error: r.failed > 0 || !r.renamed });
+      closeRename(b.batchId);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Trashed or deleted elsewhere while the field was open: its row goes with the re-read list, so it is said for the list.
+        setRenaming(null);
+        setListNote({ text: `“${b.title}” was moved to the trash or deleted, so it could not be renamed.` });
+        focusHeading.current = true;
+      } else setBatchNote({ batchId: b.batchId, text: e instanceof Error ? e.message : "Could not rename the batch", error: true });
+    } finally {
+      await refetchBatches();
+      setBatchBusy(null);
+    }
+  }
   /** A presenter picked by hand brings its own voice, when it has one. */
   function pickAvatar(id: string) {
     setAvatarId(id);
@@ -544,6 +588,11 @@ export default function BatchPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                  {canEdit !== false && renaming?.batchId !== b.batchId && (
+                    <Button id={`rename-${b.batchId}`} variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => setRenaming({ batchId: b.batchId, value: b.title })} disabled={batchBusy !== null} aria-label={`Rename ${b.title}, started ${formatDate(b.startedAt)}`} title="Rename the batch's videos; each keeps its recipient's name at the end">
+                      <Pencil className="h-3.5 w-3.5" /> Rename
+                    </Button>
+                  )}
                   {b.failed > 0 && canEdit !== false && (
                     <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => void retryBatch(b)} disabled={batchBusy !== null && !busyWith(b.batchId, "retry")} loading={busyWith(b.batchId, "retry")} aria-label={`Retry failed (${b.failed}) in ${b.title}, started ${formatDate(b.startedAt)}`} title={`Start this batch's failed renders again with the same settings, up to ${MAX_RETRY_AT_ONCE} at a time; each counts toward this month's renders`}>
                       <RotateCcw className="h-3.5 w-3.5" /> Retry failed ({b.failed})
@@ -568,6 +617,33 @@ export default function BatchPage() {
                     </Button>
                   )}
                 </div>
+                {renaming?.batchId === b.batchId && (
+                  <form
+                    className="flex w-full flex-wrap items-end gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void renameBatch(b, renaming.value);
+                    }}
+                    onKeyDown={(e) => {
+                      // Not while an input method is composing (its Escape closes its own list), nor while the title is being saved.
+                      if (e.key === "Escape" && !e.nativeEvent.isComposing && !busyWith(b.batchId, "rename")) {
+                        e.preventDefault();
+                        closeRename(b.batchId);
+                      }
+                    }}
+                  >
+                    <label className="min-w-0 flex-1 text-xs text-slate-600">
+                      New title for “{b.title}”
+                      <input autoFocus className={`${inputClass} mt-1`} value={renaming.value} maxLength={100} onChange={(e) => setRenaming({ batchId: b.batchId, value: e.target.value })} />
+                    </label>
+                    <Button type="submit" className="px-3 py-1.5 text-xs" disabled={!renaming.value.trim()} loading={busyWith(b.batchId, "rename")}>
+                      Save
+                    </Button>
+                    <Button type="button" variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => closeRename(b.batchId)} disabled={busyWith(b.batchId, "rename")}>
+                      Cancel
+                    </Button>
+                  </form>
+                )}
                 <p role="status" id={`batch-note-${b.batchId}`} tabIndex={-1} className={batchNote?.batchId === b.batchId ? `w-full text-xs ${batchNote.error ? "text-red-700" : "text-slate-600"}` : "sr-only"} data-testid="recent-batch-note">
                   {batchNote?.batchId === b.batchId ? batchNote.text : ""}
                 </p>

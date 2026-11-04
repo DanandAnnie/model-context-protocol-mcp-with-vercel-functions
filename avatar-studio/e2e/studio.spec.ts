@@ -5897,6 +5897,38 @@ test("Move to trash on a recent batch moves all its videos to the trash and says
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
 
+test("Rename on a recent batch renames every recipient's video and keeps the recipient at the end", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Name batch ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAna\nBen", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId, videos } = (await made.json()) as { batchId: string; videos: Array<{ id: string }> };
+  expect((await page.request.patch(`/api/videos/batch/${batchId}`, { data: { title: "  " } })).status()).toBe(400);
+  expect((await page.request.patch("/api/videos/batch/batch_nope", { data: { title: "X" } })).status()).toBe(404);
+  await page.goto("/batch");
+  const row = page.getByTestId("recent-batch").filter({ hasText: `Name batch ${tag}` });
+  const rename = row.getByRole("button", { name: new RegExp(`^Rename Name batch ${tag}, started `) });
+  // Escape closes the field without renaming, and focus goes back to Rename.
+  await rename.click();
+  const field = row.getByLabel(`New title for “Name batch ${tag}”`);
+  await expect(field).toBeFocused();
+  await field.fill("Not this");
+  await page.keyboard.press("Escape");
+  await expect(field).toHaveCount(0);
+  await expect(rename).toBeFocused();
+  await rename.click();
+  await row.getByLabel(`New title for “Name batch ${tag}”`).fill(`Renamed batch ${tag}`);
+  await page.keyboard.press("Enter");
+  const renamed = page.getByTestId("recent-batch").filter({ hasText: `Renamed batch ${tag}` });
+  await expect(renamed.getByTestId("recent-batch-note")).toHaveText(`Renamed 2 videos: each is now titled “Renamed batch ${tag}” followed by its recipient's name.`);
+  await expect(renamed.getByRole("button", { name: new RegExp(`^Rename Renamed batch ${tag}, started `) })).toBeFocused();
+  const titles = await Promise.all(videos.map(async (v) => ((await (await page.request.get(`/api/videos/${v.id}`)).json()) as { video: { title: string } }).video.title));
+  expect(titles).toEqual([`Renamed batch ${tag} – Ana`, `Renamed batch ${tag} – Ben`]);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+});
+
 test("personalized batch creates one video per CSV row", async ({ page }) => {
   await page.goto("/batch");
   await expect(page.getByText(/2 rows · columns: name, property, move_in/)).toBeVisible();

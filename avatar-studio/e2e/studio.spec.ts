@@ -7026,6 +7026,77 @@ test("the Workspace page downloads its members and invites as CSV", async ({ pag
   }
 });
 
+test("the Workspace page sorts its members, and remembers the order", async ({ page }) => {
+  const created = await page.request.post("/api/workspaces", { data: { name: `Member sort ${Date.now().toString(36)}` } });
+  expect(created.status()).toBe(201);
+  const ws = (await created.json()).workspace as { id: string };
+  try {
+    expect((await page.request.post("/api/workspaces/switch", { data: { id: ws.id } })).status()).toBe(200);
+    // A team as the server would list it (open mode has one person): you, plus three teammates.
+    const team = [
+      { userId: "u-zoe", email: "zoe@example.com", role: "viewer", joinedAt: "2026-10-01T00:00:00.000Z", you: false },
+      { userId: "u-amy", email: "amy@example.com", role: "editor", joinedAt: "2026-10-03T00:00:00.000Z", you: false },
+      { userId: "u-bea", email: "bea@example.com", role: "owner", joinedAt: "2026-10-02T00:00:00.000Z", you: false },
+    ];
+    await page.route("**/api/workspaces", async (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      const res = await route.fetch();
+      const body = (await res.json()) as { workspaces: Array<{ id: string; members: unknown[] }> };
+      for (const w of body.workspaces) if (w.id === ws.id) w.members = [...w.members, ...team];
+      await route.fulfill({ response: res, json: body });
+    });
+    await page.route((url) => url.pathname === "/api/activity" && url.searchParams.get("summary") === "1", (route) =>
+      route.fulfill({ json: { lastActive: { "u-zoe": "2026-11-03T00:00:00.000Z", "u-amy": "2026-11-04T00:00:00.000Z" } } }),
+    );
+    await page.goto("/workspace");
+    const sort = page.getByLabel("Sort members");
+    // Only the members' role selects ("Role for <member>"), not an invite's ("Role for the invite …").
+    const order = () => page.getByRole("combobox", { name: /^Role for (?!the invite)/ }).evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")!.replace("Role for ", "")));
+    await expect(sort).toHaveValue("role");
+    // Owners first (bea, then you: "bea@example.com" before "local" by name), then editors, then viewers.
+    await expect.poll(order).toEqual(["bea@example.com", "local", "amy@example.com", "zoe@example.com"]);
+    await sort.selectOption("name");
+    await expect.poll(order).toEqual(["amy@example.com", "bea@example.com", "local", "zoe@example.com"]);
+    await sort.selectOption("active");
+    await expect.poll(order).toEqual(["amy@example.com", "zoe@example.com", "bea@example.com", "local"]);
+    await sort.selectOption("joined");
+    // You joined today, so you come first.
+    await expect.poll(order).toEqual(["local", "amy@example.com", "bea@example.com", "zoe@example.com"]);
+    // The browser remembers the order across a reload.
+    await page.reload();
+    await expect(sort).toHaveValue("joined");
+    await expect.poll(order).toEqual(["local", "amy@example.com", "bea@example.com", "zoe@example.com"]);
+
+    // A role changed under Owners first keeps its row (and the focus) where it was until the list is sorted again.
+    await sort.selectOption("role");
+    await expect.poll(order).toEqual(["bea@example.com", "local", "amy@example.com", "zoe@example.com"]);
+    const patched: string[] = [];
+    await page.route("**/api/workspaces/*/members/*", async (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      patched.push(route.request().postData() ?? "");
+      const i = team.findIndex((t) => route.request().url().endsWith(`/members/${t.userId}`));
+      team[i] = { ...team[i], role: JSON.parse(route.request().postData() ?? "{}").role };
+      await route.fulfill({ json: { workspace: {} } });
+    });
+    const amyRole = page.getByRole("combobox", { name: "Role for amy@example.com" });
+    await amyRole.focus();
+    await amyRole.selectOption("viewer");
+    await expect.poll(() => patched.length).toBe(1);
+    await expect(amyRole).toHaveValue("viewer");
+    await expect.poll(order).toEqual(["bea@example.com", "local", "amy@example.com", "zoe@example.com"]);
+    await expect(amyRole).toBeFocused();
+    // Choosing the sort again puts the list in order.
+    await sort.selectOption("name");
+    await sort.selectOption("role");
+    await expect.poll(order).toEqual(["bea@example.com", "local", "amy@example.com", "zoe@example.com"]);
+  } finally {
+    await page.unroute("**/api/workspaces/*/members/*");
+    await page.unroute("**/api/workspaces");
+    await page.request.post("/api/workspaces/switch", { data: { id: "local" } });
+    expect((await page.request.delete(`/api/workspaces/${ws.id}`)).status()).toBe(204);
+  }
+});
+
 test("the workspace activity feed shows more, a page at a time, up to all kept", async ({ page }) => {
   const created = await page.request.post("/api/workspaces", { data: { name: `Feed ${Date.now().toString(36)}` } });
   expect(created.status()).toBe(201);

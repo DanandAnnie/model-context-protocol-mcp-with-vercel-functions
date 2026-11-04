@@ -8,7 +8,7 @@ import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import { ACTIVITY_AREAS, ACTIVITY_AREA_LABELS, ACTIVITY_KEPT, ACTIVITY_PAGE, activityFilterPhrase, canShowMoreActivity, nextActivityLimit, activitySeenKey, activitySeenMark, describeActivity, newActivityCount, newActivityIds, parseActivityArea, type ActivityArea } from "@/lib/activity-text";
 import { readSeenMark } from "@/lib/comment-list";
-import { EXPIRED_INVITE_DAYS, PEOPLE_SEARCH_FROM, bulkInviteSummary, peopleMatchLine, personMatches, seatLine, seatsLeft, splitEmails, type BulkInviteAnswer, type Seats } from "@/lib/invite-text";
+import { EXPIRED_INVITE_DAYS, MEMBER_SORT_KEY, PEOPLE_SEARCH_FROM, bulkInviteSummary, memberSortFrom, shownMemberSort, steadyMembers, type MemberOrder, type MemberSort, peopleMatchLine, personMatches, seatLine, seatsLeft, splitEmails, type BulkInviteAnswer, type Seats } from "@/lib/invite-text";
 import { roleArticle } from "@/lib/roles";
 import type { ActivityEvent, WorkspaceRole } from "@/lib/types";
 
@@ -122,6 +122,25 @@ export default function WorkspacePage() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
   // What is typed into Find, over members and invites (the box shows once the workspace has PEOPLE_SEARCH_FROM of them).
   const [findText, setFindText] = useState("");
+  // How the member list is ordered; remembered by this browser (read after mounting, so the server render keeps the default).
+  const [memberSort, setMemberSort] = useState<MemberSort>("role");
+  // The order the member list was last drawn in, kept while only a member's details change (see steadyMembers).
+  const memberOrder = useRef<MemberOrder | null>(null);
+  useEffect(() => {
+    try {
+      setMemberSort(memberSortFrom(window.localStorage.getItem(MEMBER_SORT_KEY)));
+    } catch {
+      // Storage blocked (a private window, say): the default order it is.
+    }
+  }, []);
+  function chooseMemberSort(next: MemberSort) {
+    setMemberSort(next);
+    try {
+      window.localStorage.setItem(MEMBER_SORT_KEY, next);
+    } catch {
+      // Not remembered, but the order still holds for this visit.
+    }
+  }
   const findBox = useRef<HTMLInputElement>(null);
   // A pending invite's role while its change is being saved, by token.
   const [pendingRole, setPendingRole] = useState<Record<string, WorkspaceRole>>({});
@@ -294,7 +313,11 @@ export default function WorkspacePage() {
   // Kept while something is typed, so the box never vanishes under a search (or comes back holding an old one).
   const searchable = ws.members.length + ws.invites.length + expiredAll.length >= PEOPLE_SEARCH_FROM || findText !== "";
   const finding = searchable && findText.trim() !== "";
-  const shownMembers = finding ? ws.members.filter((m) => personMatches(findText, m.email ?? m.userId)) : ws.members;
+  // "Last active" needs the times; until they arrive (or if they could not be read) the list is drawn owners first.
+  const memberSortShown = shownMemberSort(memberSort, !!lastActive.data);
+  const steady = steadyMembers(memberOrder.current, ws.members, memberSortShown, lastActive.data?.lastActive);
+  memberOrder.current = steady.order;
+  const shownMembers = finding ? steady.members.filter((m) => personMatches(findText, m.email ?? m.userId)) : steady.members;
   const shownInvites = finding ? ws.invites.filter((i) => personMatches(findText, i.email ?? "Link invite")) : ws.invites;
   const shownExpired = finding ? expiredAll.filter((i) => personMatches(findText, i.email ?? "Link invite")) : expiredAll;
   const noneFound = <T,>(shown: T[], what: string) =>
@@ -373,7 +396,25 @@ export default function WorkspacePage() {
         }
       />
       <ErrorBanner message={error ?? err} />
-      <div className="mb-2 flex justify-end">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        {ws.members.length > 1 ? (
+          <select
+            aria-label="Sort members"
+            value={memberSortShown}
+            onChange={(e) => chooseMemberSort(memberSortFrom(e.target.value))}
+            data-testid="member-sort"
+            className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700"
+          >
+            <option value="role">Owners first</option>
+            <option value="name">Name A–Z</option>
+            <option value="active" disabled={!lastActive.data} title={lastActive.data ? undefined : lastActive.error ? "Could not read when members were last active" : "Reading when members were last active…"}>
+              Last active
+            </option>
+            <option value="joined">Newest joined</option>
+          </select>
+        ) : (
+          <span />
+        )}
         {/* Members (and, for owners, invites) as a spreadsheet, for records. */}
         <a
           href={`/api/workspaces/${ws.id}/people`}
@@ -449,9 +490,14 @@ export default function WorkspacePage() {
                   <select
                     aria-label={`Role for ${m.email ?? m.userId}`}
                     value={m.role}
-                    disabled={busy}
-                    onChange={(e) => run(async () => { await api(`/api/workspaces/${ws.id}/members/${m.userId}`, { method: "PATCH", body: JSON.stringify({ role: e.target.value }) }); })}
-                    className={`${inputClass} w-auto py-1 text-xs`}
+                    // aria-disabled rather than disabled while busy, so the select keeps the focus; the value stays as it was.
+                    aria-disabled={busy || undefined}
+                    onChange={(e) => {
+                      if (busy) return;
+                      const role = e.target.value;
+                      void run(async () => { await api(`/api/workspaces/${ws.id}/members/${m.userId}`, { method: "PATCH", body: JSON.stringify({ role }) }); });
+                    }}
+                    className={`${inputClass} w-auto py-1 text-xs aria-disabled:cursor-wait aria-disabled:opacity-60`}
                   >
                     <option value="owner">Owner</option>
                     <option value="editor">Editor</option>

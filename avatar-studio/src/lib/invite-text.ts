@@ -133,3 +133,66 @@ export function peopleRows(sheet: PeopleSheet, lastActive: Record<string, string
     ...[...(sheet.expiredInvites ?? [])].sort((a, b) => b.expiresAt.localeCompare(a.expiresAt)).map((i) => ({ email: i.email ?? "Link invite", user_id: "", role: i.role, status: "expired invite", joined: "", expires: i.expiresAt, last_active: "" })),
   ];
 }
+
+/** How the Workspace page orders its members: by role (owners first, the default), name A–Z, last active, or newest joined. */
+export const MEMBER_SORTS = ["role", "name", "active", "joined"] as const;
+export type MemberSort = (typeof MEMBER_SORTS)[number];
+export const MEMBER_SORT_KEY = "avatar-studio:member-sort";
+
+/** A stored sort read back: one of the four, or the default for anything else (nothing stored, an old or edited value). */
+export function memberSortFrom(stored: string | null | undefined): MemberSort {
+  return (MEMBER_SORTS as readonly string[]).includes(stored ?? "") ? (stored as MemberSort) : "role";
+}
+
+const ROLE_RANK: Record<string, number> = { owner: 0, editor: 1, viewer: 2 };
+
+/**
+ * The members in the order asked for, a new array. Each order falls back to the name (the address, or the id when
+ * there is none, ignoring case), then to who joined first, so the list never shuffles between loads. "active" puts
+ * the most recently active first, from `lastActive` (member id → ISO time); members with nothing kept come last.
+ */
+export function sortMembers<T extends { userId: string; email?: string; role: string; joinedAt: string }>(members: T[], sort: MemberSort, lastActive: Record<string, string> = {}): T[] {
+  const name = (m: T) => m.email ?? m.userId;
+  // Plain comparisons of the ISO times; names compare as people read them ("u2" before "u10").
+  const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  const byName = (a: T, b: T) => name(a).localeCompare(name(b), undefined, { sensitivity: "base", numeric: true }) || cmp(a.joinedAt, b.joinedAt);
+  const order: Record<MemberSort, (a: T, b: T) => number> = {
+    role: (a, b) => (ROLE_RANK[a.role] ?? 3) - (ROLE_RANK[b.role] ?? 3) || byName(a, b),
+    name: byName,
+    active: (a, b) => cmp(lastActive[b.userId] ?? "", lastActive[a.userId] ?? "") || byName(a, b),
+    joined: (a, b) => cmp(b.joinedAt, a.joinedAt) || byName(a, b),
+  };
+  return [...members].sort(order[sort]);
+}
+
+/**
+ * The sort the page can show now: a remembered "active" waits for the last-active times (owners first until they
+ * arrive, or for good if they could not be read), so the list never claims an order it cannot give. The remembered
+ * choice is kept.
+ */
+export function shownMemberSort(sort: MemberSort, lastActiveReady: boolean): MemberSort {
+  return sort === "active" && !lastActiveReady ? "role" : sort;
+}
+
+/** The order the member list was last drawn in: the sort it was drawn under and the members' ids in that order. */
+export interface MemberOrder {
+  sort: MemberSort;
+  ids: string[];
+}
+
+/**
+ * The members in a steady order: sorted afresh when the sort changes or someone joins or leaves, else in the order
+ * they were last drawn in, so the row an owner just changed (a role, say) stays where it is rather than jumping to
+ * its new place (and taking the focus with it). Returns the members and the order to keep for next time.
+ */
+export function steadyMembers<T extends { userId: string; email?: string; role: string; joinedAt: string }>(
+  previous: MemberOrder | null,
+  members: T[],
+  sort: MemberSort,
+  lastActive: Record<string, string> = {},
+): { members: T[]; order: MemberOrder } {
+  const byId = new Map(members.map((m) => [m.userId, m]));
+  const same = previous && previous.sort === sort && previous.ids.length === members.length && previous.ids.every((id) => byId.has(id));
+  const ordered = same ? previous!.ids.map((id) => byId.get(id)!) : sortMembers(members, sort, lastActive);
+  return { members: ordered, order: same ? previous! : { sort, ids: ordered.map((m) => m.userId) } };
+}

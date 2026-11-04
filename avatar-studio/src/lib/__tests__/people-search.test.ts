@@ -59,3 +59,60 @@ describe("people download", () => {
     assert.deepEqual(parseCsv(csv).columns, ["email", "user_id", "role", "status", "joined", "expires", "last_active"]);
   });
 });
+
+describe("member sort", () => {
+  it("orders by role, name, last active, or newest joined, falling back to name then join time", async () => {
+    const { MEMBER_SORTS, memberSortFrom, sortMembers } = await import("../invite-text");
+    const m = (userId: string, role: string, joinedAt: string, email?: string) => ({ userId, role, joinedAt, email });
+    const members = [
+      m("u1", "viewer", "2026-10-01T00:00:00.000Z", "zoe@example.com"),
+      m("u2", "owner", "2026-09-01T00:00:00.000Z", "Bea@example.com"),
+      m("u3", "editor", "2026-10-03T00:00:00.000Z", "amy@example.com"),
+      m("u4", "owner", "2026-10-02T00:00:00.000Z", "al@example.com"),
+      m("u5", "editor", "2026-10-04T00:00:00.000Z"),
+    ];
+    const names = (sort: Parameters<typeof sortMembers>[1], last?: Record<string, string>) => sortMembers(members, sort, last).map((x) => x.email ?? x.userId);
+    assert.deepEqual(names("role"), ["al@example.com", "Bea@example.com", "amy@example.com", "u5", "zoe@example.com"]);
+    assert.deepEqual(names("name"), ["al@example.com", "amy@example.com", "Bea@example.com", "u5", "zoe@example.com"]);
+    assert.deepEqual(names("joined"), ["u5", "amy@example.com", "al@example.com", "zoe@example.com", "Bea@example.com"]);
+    assert.deepEqual(
+      names("active", { u1: "2026-11-03T00:00:00.000Z", u3: "2026-11-04T00:00:00.000Z" }),
+      ["amy@example.com", "zoe@example.com", "al@example.com", "Bea@example.com", "u5"],
+      "most recent first; those with nothing kept by name",
+    );
+    assert.deepEqual(names("active"), names("name"), "with nothing kept, last active reads as by name");
+    assert.equal(members[0].userId, "u1", "the list given is not reordered");
+    assert.deepEqual(MEMBER_SORTS, ["role", "name", "active", "joined"]);
+    assert.equal(memberSortFrom("joined"), "joined");
+    assert.equal(memberSortFrom(null), "role");
+    assert.equal(memberSortFrom("oldest"), "role");
+  });
+});
+
+describe("member order while editing", () => {
+  it("waits for the last-active times before showing that order, and keeps rows in place while only details change", async () => {
+    const { shownMemberSort, steadyMembers } = await import("../invite-text");
+    assert.equal(shownMemberSort("active", false), "role", "no times yet: owners first");
+    assert.equal(shownMemberSort("active", true), "active");
+    assert.equal(shownMemberSort("name", false), "name", "other orders need nothing");
+    const m = (userId: string, role: string, email: string) => ({ userId, role, email, joinedAt: "2026-10-01T00:00:00.000Z" });
+    const first = steadyMembers(null, [m("a", "editor", "amy@x.com"), m("b", "owner", "bea@x.com")], "role");
+    assert.deepEqual(first.members.map((x) => x.userId), ["b", "a"]);
+    // Amy is made an owner: the same people under the same sort keep their places, with the fresh details.
+    const edited = steadyMembers(first.order, [m("a", "owner", "amy@x.com"), m("b", "owner", "bea@x.com")], "role");
+    assert.deepEqual(edited.members.map((x) => [x.userId, x.role]), [["b", "owner"], ["a", "owner"]]);
+    assert.equal(edited.order, first.order);
+    // A new sort, or someone joining or leaving, sorts afresh.
+    assert.deepEqual(steadyMembers(edited.order, [m("a", "owner", "amy@x.com"), m("b", "owner", "bea@x.com")], "name").members.map((x) => x.userId), ["a", "b"]);
+    const joined = steadyMembers(edited.order, [m("a", "owner", "amy@x.com"), m("b", "owner", "bea@x.com"), m("c", "owner", "al@x.com")], "role");
+    assert.deepEqual(joined.members.map((x) => x.userId), ["c", "a", "b"]);
+    const left = steadyMembers(joined.order, [m("a", "owner", "amy@x.com"), m("d", "viewer", "dan@x.com")], "role");
+    assert.deepEqual(left.members.map((x) => x.userId), ["a", "d"]);
+  });
+
+  it("orders names as people read them, ids with numbers included", async () => {
+    const { sortMembers } = await import("../invite-text");
+    const m = (userId: string) => ({ userId, role: "editor", joinedAt: "2026-10-01T00:00:00.000Z" });
+    assert.deepEqual(sortMembers([m("u10"), m("u2"), m("u1")], "name").map((x) => x.userId), ["u1", "u2", "u10"]);
+  });
+});

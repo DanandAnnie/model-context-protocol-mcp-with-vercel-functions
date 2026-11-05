@@ -16,18 +16,23 @@ export const ASPECT_DIMENSIONS: Record<AspectRatio, { width: number; height: num
   "4:5": { width: 1080, height: 1350 },
 };
 
-/** Output quality; the short side of the frame in pixels. */
-export type Resolution = "720p" | "1080p";
+/**
+ * Output quality; the short side of the frame in pixels (2160 for 4K). 4K renders on HeyGen's Avatar III engine, for
+ * presenters whose look is a video avatar that supports it (`renders4k`).
+ */
+export type Resolution = "720p" | "1080p" | "4k";
 /** Where the brand logo sits over the share and embed player; absent means no watermark. */
 export const WATERMARK_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
 export type WatermarkCorner = (typeof WATERMARK_CORNERS)[number];
-export const RESOLUTIONS: Resolution[] = ["720p", "1080p"];
+export const RESOLUTIONS: Resolution[] = ["720p", "1080p", "4k"];
+/** How each quality is written for people. */
+export const RESOLUTION_LABELS: Record<Resolution, string> = { "720p": "720p", "1080p": "1080p", "4k": "4K" };
 
 /** Pixel dimensions for an aspect ratio at a given quality (1080p when omitted). */
 export function dimensionsFor(aspect: AspectRatio, resolution: Resolution = "1080p"): { width: number; height: number } {
   const full = ASPECT_DIMENSIONS[aspect];
   if (resolution === "1080p") return full;
-  const scale = 720 / 1080;
+  const scale = resolution === "4k" ? 2 : 720 / 1080;
   return { width: Math.round(full.width * scale), height: Math.round(full.height * scale) };
 }
 
@@ -54,6 +59,8 @@ export interface Avatar {
   tags?: string[];
   /** The look can render on HeyGen's Avatar V engine (its `supported_api_engines`); see `AvatarEngine`. */
   avatarV?: true;
+  /** The look can render on HeyGen's Avatar III engine (its `supported_api_engines`), which renders 4K for a video avatar; see `renders4k`. */
+  avatarIII?: true;
   /** Ids assigned by rendering providers after uploading a custom portrait, keyed by provider name. */
   providerAssetIds?: Record<string, string>;
   /** Workspace that owns this avatar (user id with accounts, "local" otherwise). */
@@ -663,6 +670,18 @@ export const isPhotoAvatar = (a: { source?: string; tags?: string[] }) => a.sour
  */
 export const rendersOnAvatarV = (a: { source?: string; tags?: string[]; avatarV?: true }, req: { expressiveness?: string; motionPrompt?: string }) =>
   !!a.avatarV && !(isPhotoAvatar(a) && (req.expressiveness || req.motionPrompt));
+
+/**
+ * Whether a presenter can appear in a 4K video: HeyGen renders 4K on Avatar III for video avatars (digital twins and
+ * studio avatars) whose look supports the engine, and for a digital twin trained here, which is a HeyGen digital_twin
+ * look (kept as a custom presenter, so not a photo avatar for this); a photo avatar, or an uploaded portrait, tops out at 1080p.
+ */
+export const renders4k = (a: { source?: string; tags?: string[]; avatarIII?: true }) =>
+  !!a.tags?.includes("digital twin") || (!!a.avatarIII && !isPhotoAvatar(a));
+/** Why a 4K video cannot use Avatar V: HeyGen renders 4K on Avatar III only. */
+export const FOUR_K_ENGINE = "4K renders on HeyGen's Avatar III engine; set Avatar engine to Avatar IV, or choose 1080p for Avatar V";
+/** Why a 4K video takes no motion settings: Avatar III supports neither expressiveness nor a motion prompt. */
+export const FOUR_K_MOTION = "4K renders on HeyGen's Avatar III engine, which takes no expressiveness or gestures; clear them, or choose 1080p";
 
 /** The framing a presenter actually gets: a photo avatar's close-up shows its full frame. */
 export const framingFor = (framing: PresenterFraming | undefined, avatar?: { source?: string; tags?: string[] }): PresenterFraming =>

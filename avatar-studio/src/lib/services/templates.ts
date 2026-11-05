@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
-import { ASPECT_RATIOS, MAX_SCENES, MAX_TEMPLATES, backdropIdOf, footageIdOf } from "../types";
+import { ASPECT_RATIOS, RESOLUTIONS, MAX_SCENES, MAX_TEMPLATES, backdropIdOf, footageIdOf } from "../types";
 import { silentProblem, silentSeconds } from "../pauses";
 import type { Video, VideoTemplate } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
@@ -50,7 +50,7 @@ export const templateInputSchema = z.object({
   avatarId: z.string().min(1).optional(),
   voiceId: z.string().min(1).optional(),
   aspect: z.enum(ASPECT_RATIOS).optional(),
-  resolution: z.enum(["720p", "1080p"]).optional(),
+  resolution: z.enum(RESOLUTIONS).optional(),
   captions: z.boolean().optional(),
   captionStyle: captionStyleSchema.optional(),
   speed: z.number().min(0.5).max(1.5).optional(),

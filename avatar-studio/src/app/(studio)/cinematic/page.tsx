@@ -87,7 +87,8 @@ function CinematicInner() {
     setPrompt(shot.prompt);
     setChosen(shot.avatarIds);
     setAspect(source.video.aspect);
-    if (source.video.resolution) setResolution(source.video.resolution);
+    // A cinematic shot renders at up to 1080p, so a copy of a 4K video's shot starts at 1080p.
+    if (source.video.resolution) setResolution(source.video.resolution === "4k" ? "1080p" : source.video.resolution);
     setDuration(shot.durationSec ?? "auto");
     setEnhance(!!shot.enhancePrompt);
     setNotice(`The shot of “${source.video.title}” is filled in${source.video.folder ? ` and goes in the folder “${source.video.folder}”` : ""}; change it and make it again.`);

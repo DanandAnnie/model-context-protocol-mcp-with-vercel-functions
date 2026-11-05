@@ -38,7 +38,7 @@ import { amendLast, emptyHistory, record, redo, undo, type History, type History
 import { graphemes, withSuffix } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { draftKeyFor, restorableScenes } from "@/lib/editor-draft";
-import { ASPECT_NAMES, ASPECT_RATIOS, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { ASPECT_NAMES, ASPECT_RATIOS, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, RESOLUTION_LABELS, renders4k, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -1007,6 +1007,14 @@ function CreateInner() {
     return !!a && !isPhotoAvatar(a) && !!a.avatarV;
   });
   const gesturesOnV = avatarEngine === "avatar_v" && videoLookOnV;
+  // 4K renders on HeyGen's Avatar III, for video avatars whose look supports it: the first presenter shown that does not, if any.
+  const shortOf4k = avatarData
+    ? scenes
+        .filter((sc) => !sc.hidePresenter)
+        .map((sc) => (sc.avatarId && avatarData.avatars.find((x) => x.id === sc.avatarId)) || avatar)
+        .find((a) => !!a && !renders4k(a))
+    : undefined;
+  const in4k = resolution === "4k";
   const sentAccent = accent && accentVoices.some((v) => voiceTakesAccent(v, accent)) ? accent : undefined;
   const accentTakers = accent ? accentVoices.filter((v) => voiceTakesAccent(v, accent)) : accentVoices;
   /** Expressiveness applies to photo avatars, gestures also to video avatars on Avatar V; the defaults are sent as none. */
@@ -1627,7 +1635,8 @@ function CreateInner() {
     try {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...motion, ...(sentAccent ? { accent: sentAccent } : {}), ...(avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine, ...(moreBlinking ? { moreBlinking: true } : {}) } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
+        // A 4K video renders on Avatar III, which takes neither the engine choice nor motion settings, so neither is sent.
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(in4k ? {} : motion), ...(sentAccent ? { accent: sentAccent } : {}), ...(!in4k && avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine, ...(moreBlinking ? { moreBlinking: true } : {}) } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
       });
       sent.current = true;
       if (editKey) writeDraft(editKey, null);
@@ -2807,22 +2816,33 @@ function CreateInner() {
                     ))}
                   </div>
                 </div>
-                <div role="group" aria-label="Output quality">
+                <div role="group" aria-label="Output quality" aria-describedby="resolution-hint">
                   <div className="mb-2 text-sm font-medium text-slate-700">Output quality</div>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {RESOLUTIONS.map((r) => (
                       <button
                         key={r}
                         type="button"
                         aria-pressed={resolution === r}
                         onClick={() => setResolution(r)}
-                        className={`rounded-lg border px-3 py-3 text-sm font-medium ${resolution === r ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
+                        // 4K is offered once every presenter shown can render it; a video already set to 4K keeps it, with the reason below.
+                        disabled={r === "4k" && !!shortOf4k && !in4k}
+                        className={`rounded-lg border px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${resolution === r ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                       >
-                        {r}
-                        <div className="text-[11px] font-normal text-slate-600">{r === "720p" ? "HD · faster, smaller file" : "Full HD · best quality"}</div>
+                        {RESOLUTION_LABELS[r]}
+                        <div className="text-[11px] font-normal text-slate-600">{r === "720p" ? "HD · faster, smaller file" : r === "1080p" ? "Full HD" : "Ultra HD · Avatar III"}</div>
                       </button>
                     ))}
                   </div>
+                  <p id="resolution-hint" role="status" className={`mt-2 text-xs ${in4k && shortOf4k ? "text-amber-700" : "text-slate-500"}`}>
+                    {in4k && shortOf4k
+                      ? `${shortOf4k.name} tops out at 1080p: 4K is for digital twins and studio avatars whose look supports HeyGen's Avatar III engine. Choose 1080p or another presenter.`
+                      : in4k
+                        ? "HeyGen renders 4K on its Avatar III engine, for digital twins and studio avatars. The Avatar engine choice, expressiveness, and gestures are not used."
+                        : shortOf4k
+                          ? `4K is for digital twins and studio avatars whose look supports HeyGen's Avatar III engine; ${shortOf4k.name} tops out at 1080p.`
+                          : "4K renders on HeyGen's Avatar III engine, for digital twins and studio avatars."}
+                  </p>
                 </div>
                 <Field label={`Speaking speed · ${speed.toFixed(2)}x`}>
                   <input type="range" min={0.5} max={1.5} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full accent-brand-600" />
@@ -2870,12 +2890,14 @@ function CreateInner() {
                   label="Avatar engine"
                   hintId="avatar-engine-hint"
                   hint={
-                    !avatarData || avatarVInUse
+                    in4k
+                      ? "Not used: a 4K video renders on HeyGen's Avatar III engine. Choose 1080p to render on Avatar V."
+                      : !avatarData || avatarVInUse
                       ? "Avatar V is HeyGen's higher-quality engine, for looks that support it; other presenters, and photo avatars given expressiveness or gestures, stay on Avatar IV. Other renderers ignore it."
                       : "No presenter in this video renders on Avatar V (none supports it, or a photo avatar has motion settings), so every scene uses Avatar IV."
                   }
                 >
-                  <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={!!avatarData && !avatarVInUse && avatarEngine === "avatar_iv"} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>
+                  <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={in4k || (!!avatarData && !avatarVInUse && avatarEngine === "avatar_iv")} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>
                     <option value="avatar_iv">Avatar IV (standard)</option>
                     <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here renders on it)"}</option>
                   </select>
@@ -2884,7 +2906,9 @@ function CreateInner() {
                   <span>
                     <span className="block text-sm font-medium text-slate-800">More blinking</span>
                     <span id="more-blinking-hint" className="block text-xs text-slate-500">
-                      {avatarEngine !== "avatar_v"
+                      {in4k
+                        ? "Not used: a 4K video renders on HeyGen's Avatar III engine. Choose 1080p and Avatar V to use it."
+                        : avatarEngine !== "avatar_v"
                         ? moreBlinking
                           ? "Not sent on Avatar IV; kept for when you choose Avatar V above."
                           : "An Avatar V setting, for presenters that blink too little; choose Avatar V above to use it."
@@ -2893,7 +2917,7 @@ function CreateInner() {
                           : "HeyGen's Avatar V blinks more naturally, for presenters that blink too little; scenes on Avatar IV keep their own blinking. Other renderers ignore it."}
                     </span>
                   </span>
-                  <input type="checkbox" checked={moreBlinking} onChange={(e) => setMoreBlinking(e.target.checked)} disabled={avatarEngine !== "avatar_v" && !moreBlinking} aria-label="More blinking" aria-describedby="more-blinking-hint" className="mt-1 h-5 w-5 shrink-0 accent-brand-600" />
+                  <input type="checkbox" checked={moreBlinking} onChange={(e) => setMoreBlinking(e.target.checked)} disabled={(in4k || avatarEngine !== "avatar_v") && !moreBlinking} aria-label="More blinking" aria-describedby="more-blinking-hint" className="mt-1 h-5 w-5 shrink-0 accent-brand-600" />
                 </label>
                 <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3">
                   <span>
@@ -2911,7 +2935,9 @@ function CreateInner() {
                 <div role="group" aria-labelledby="photo-motion-title" className="space-y-2 rounded-lg border border-slate-200 px-3 py-3" data-testid="photo-motion">
                   <div id="photo-motion-title" className="text-sm font-medium text-slate-800">Avatar motion</div>
                   <p id="photo-motion-hint" className="text-xs text-slate-500">
-                    {photoInUse || !avatarData
+                    {in4k
+                      ? "Not used: a 4K video renders on HeyGen's Avatar III engine, which takes no expressiveness or gestures. Choose 1080p to use them."
+                      : photoInUse || !avatarData
                       ? `How a photo avatar moves as it speaks, on HeyGen (Avatar IV).${gesturesOnV ? " Gestures also reach the video avatars rendering on Avatar V." : ""} Other presenters keep their own motion, and D-ID and the demo renderer ignore it.`
                       : gesturesOnV
                         ? "Gestures reach the video avatars rendering on Avatar V, on HeyGen; expressiveness is for photo avatars (an uploaded portrait or a HeyGen photo avatar), and no scene shows one now."

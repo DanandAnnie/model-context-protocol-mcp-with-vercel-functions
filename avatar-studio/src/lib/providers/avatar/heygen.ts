@@ -73,6 +73,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   readonly name = "heygen";
   readonly assetKey = ASSET;
   readonly gifPreviews = true;
+  readonly renders4k = true;
   readonly cinematicShots = true as const;
   /** Directed videos take the brand kit's pronunciations, as the workspace glossary's terms. */
   readonly directedPronunciations = true as const;
@@ -99,6 +100,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         gender: (l.gender?.toLowerCase() as Avatar["gender"]) ?? undefined,
         ...(l.avatar_type === "photo_avatar" ? { tags: ["photo avatar"] } : l.tags?.length ? { tags: l.tags.slice(0, 4) } : {}),
         ...(l.supported_api_engines?.includes("avatar_v") ? { avatarV: true as const } : {}),
+        ...(l.supported_api_engines?.includes("avatar_iii") ? { avatarIII: true as const } : {}),
       }));
   }
 
@@ -231,10 +233,12 @@ export class HeyGenAvatarProvider implements AvatarProvider {
             ? { type: "image", source, ...(silent && !clip ? { duration: silent } : sound) }
             : { type: "video", source, playback: { mode: "loop", mute: true }, ...sound };
         }
-        // Avatar V where the look supports it (a photo avatar given motion settings stays on Avatar IV; see rendersOnAvatarV).
-        const onV = req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req);
+        // 4K renders on Avatar III, for every presenter (each was checked to support it; see fourKProblem). Otherwise Avatar V
+        // where the look supports it (a photo avatar given motion settings stays on Avatar IV; see rendersOnAvatarV).
+        const onIII = req.resolution === "4k";
+        const onV = !onIII && req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req);
         // More blinking is an Avatar V setting, so it goes only where the scene renders on it.
-        const engine = onV ? { engine: { type: "avatar_v", ...(req.moreBlinking ? { more_blinking: true } : {}) } } : {};
+        const engine = onIII ? { engine: { type: "avatar_iii" } } : onV ? { engine: { type: "avatar_v", ...(req.moreBlinking ? { more_blinking: true } : {}) } } : {};
         // A photo avatar moves as asked (on Avatar IV). A video avatar takes gestures on Avatar V only, as HeyGen refuses a
         // motion prompt for one on Avatar IV; expressiveness is for photo avatars alone.
         const photo = isPhotoAvatar(sceneAvatarOf(scene));
@@ -253,9 +257,13 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       const data = await this.client.generateVideo(sent);
       return { providerJobId: data.video_id };
     } catch (err) {
-      // Avatar V can be refused where Avatar IV is not (a look's reference whose consent is missing), and a retry
-      // asks again, so the error says how to get past it.
-      if (err instanceof Error && body.scenes.some((sc) => "input" in sc && sc.input && "engine" in sc.input)) {
+      // Avatar III and Avatar V can be refused where Avatar IV is not (a look HeyGen cannot render in 4K, a reference whose
+      // consent is missing), and a retry asks again, so the error says how to get past it.
+      const engines = body.scenes.some((sc) => "input" in sc && sc.input && "engine" in sc.input);
+      if (err instanceof Error && engines && req.resolution === "4k") {
+        throw new Error(`${err.message} (this video asked for 4K on Avatar III; if HeyGen refused it, make a copy at 1080p)`);
+      }
+      if (err instanceof Error && engines) {
         const instead = req.moreBlinking ? "with More blinking off, or with Avatar engine set to Avatar IV" : "with Avatar engine set to Avatar IV";
         throw new Error(`${err.message} (this video asked for Avatar V${req.moreBlinking ? " with more blinking" : ""}; if HeyGen refused it, make a copy ${instead})`);
       }

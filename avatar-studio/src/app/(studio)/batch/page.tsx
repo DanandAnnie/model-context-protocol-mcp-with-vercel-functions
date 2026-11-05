@@ -11,7 +11,7 @@ import { ApiError, BATCH_NOTHING_TO_SEND, api, formatDate } from "@/lib/client";
 import type { BatchSummary } from "@/lib/services/batches";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
 import { restoredCaptionStyle } from "@/lib/caption-style";
-import { MAX_RETRY_AT_ONCE, TRASH_RETENTION_DAYS, VOICE_EMOTIONS, isDefaultCaptionStyle, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { MAX_RETRY_AT_ONCE, TRASH_RETENTION_DAYS, VOICE_EMOTIONS, isDefaultCaptionStyle, renders4k, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -34,6 +34,12 @@ function kitCaptionStyle(kit: BrandKit | null | undefined): CaptionStyle | undef
   if (!kit?.captionStyle) return undefined;
   const style = restoredCaptionStyle(kit.captionStyle);
   return isDefaultCaptionStyle(style) ? undefined : style;
+}
+
+/** A 4K batch renders on HeyGen's Avatar III, which takes neither Avatar V nor motion settings: a template's are left out. */
+function fourKCarried<T extends { expressiveness?: unknown; motionPrompt?: unknown; avatarEngine?: unknown; moreBlinking?: unknown }>(c: T) {
+  const { expressiveness: _x, motionPrompt: _m, avatarEngine: _e, moreBlinking: _b, ...rest } = c;
+  return rest;
 }
 
 export default function BatchPage() {
@@ -376,7 +382,7 @@ export default function BatchPage() {
     try {
       const result = await api<{ batchId: string; videos: unknown[]; skipped: Array<{ row: number; reason: string }>; failed: Array<{ row: number; reason: string }> }>("/api/videos/batch", {
         method: "POST",
-        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions, ...(captions && captionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(background ? { background } : {}), ...carried }),
+        body: JSON.stringify({ title, scriptTemplate: template, csv, avatarId, voiceId, aspect, resolution, captions, ...(captions && captionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(background ? { background } : {}), ...(resolution === "4k" ? fourKCarried(carried) : carried) }),
       });
       const note = `${result.skipped.length ? `&skipped=${result.skipped.length}` : ""}${result.failed.length ? `&failed=${result.failed.length}` : ""}`;
       router.push(`/videos?batch=${result.batchId}${note}`);
@@ -504,10 +510,20 @@ export default function BatchPage() {
                 <option value="4:5">4:5 Portrait feed</option>
               </select>
             </Field>
-            <Field label="Output quality">
+            <Field
+              label="Output quality"
+              hint={
+                resolution === "4k"
+                  ? chosenAvatar && !renders4k(chosenAvatar)
+                    ? `${chosenAvatar.name} tops out at 1080p: 4K is for digital twins and studio avatars whose look supports HeyGen's Avatar III engine.`
+                    : "HeyGen renders 4K on its Avatar III engine, for digital twins and studio avatars; the Avatar V engine and gestures are not used."
+                  : undefined
+              }
+            >
               <select className={inputClass} value={resolution} onChange={(e) => (touched.current.add("resolution"), setResolution(e.target.value as Resolution))}>
                 <option value="1080p">1080p Full HD</option>
                 <option value="720p">720p HD</option>
+                <option value="4k">4K Ultra HD</option>
               </select>
             </Field>
             <label className="flex items-center justify-between self-end rounded-lg border border-slate-200 px-3 py-2.5">

@@ -5,11 +5,11 @@ import { getStore } from "../store";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { ASPECT_RATIOS, BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
+import { ASPECT_RATIOS, BULK_MAX, MAX_RETRY_AT_ONCE, RESOLUTIONS } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { sendableShareLink, shareOffline, shareState } from "../client";
-import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, deleteVideo, listVideos, updateVideo, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
+import { MORE_BLINKING_NEEDS_V, captionCuesFor, accentSchema, avatarEngineSchema, deleteVideo, listVideos, updateVideo, purgeDue, refreshPending, retryVideo, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, createVideo, emotionSchema, fourKProblem, expressivenessSchema, motionPromptSchema, pitchSchema, rendersThisMonth, resolveRenderContext } from "./videos";
 import { getBrandKit } from "./brand";
 import { stripPauses } from "../pauses";
 import { qrFileNames, qrSvg, qrWording, uniqueFileNames } from "../qr";
@@ -60,7 +60,7 @@ export const batchRequestSchema = z.object({
   avatarId: z.string().min(1),
   voiceId: z.string().min(1),
   aspect: z.enum(ASPECT_RATIOS).default("16:9"),
-  resolution: z.enum(["720p", "1080p"]).default("1080p"),
+  resolution: z.enum(RESOLUTIONS).default("1080p"),
   /** Behind every row; when absent, the brand kit's background (its default, else its primary colour), else light grey. */
   background: backgroundSchema.optional(),
   captions: z.boolean().default(false),
@@ -115,6 +115,9 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
   const background = input.background ?? kit?.defaultBackground ?? (kit ? { type: "color" as const, value: kit.primaryColor } : { type: "color" as const, value: "#f1f5f9" });
   // The background goes in too: an uploaded image is looked up (and refused if it is gone) before any row starts.
   const ctx = await resolveRenderContext({ ...input, background }, ownerId);
+  // A 4K batch is checked once, before any row starts: every row shares its presenter and settings.
+  const fourK = fourKProblem(input, ctx.cast);
+  if (fourK) throw new ValidationError(fourK);
   const limit = await renderLimitFor(ownerId);
   const used = limit ? await rendersThisMonth(ownerId) : 0;
   const allowedRows = limit ? Math.max(0, Math.min(table.rows.length, limit - used)) : table.rows.length;

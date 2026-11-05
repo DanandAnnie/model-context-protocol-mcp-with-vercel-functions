@@ -72,6 +72,8 @@ export interface AvatarProvider {
   readonly assetKey?: string;
   /** True when a finished render's status carries an animated GIF of it (`gifUrl`), so it is worth asking for one. */
   readonly gifPreviews?: boolean;
+  /** True when the renderer makes 4K videos (HeyGen's Avatar III, for presenters that `renders4k`); others stop at 1080p. */
+  readonly renders4k?: boolean;
   listAvatars(): Promise<Avatar[]>;
   /**
    * Make a custom (uploaded) avatar usable by this provider, e.g. by uploading

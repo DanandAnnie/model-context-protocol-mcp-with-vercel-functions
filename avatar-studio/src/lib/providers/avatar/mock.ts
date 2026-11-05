@@ -99,6 +99,7 @@ const DEMO_EFFECTS = [
 export class MockAvatarProvider implements AvatarProvider {
   readonly name = "mock";
   readonly gifPreviews = true;
+  readonly renders4k = true;
   readonly cinematicShots = true as const;
   private static RENDER_MS = 12_000;
   /** How long a demo clipping job takes. */

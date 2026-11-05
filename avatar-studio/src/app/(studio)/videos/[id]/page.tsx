@@ -28,7 +28,7 @@ import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, post
 import { embedSize } from "@/lib/oembed";
 import { socialShareLinks } from "@/lib/social";
 import { fileToCover } from "@/lib/image-upload";
-import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
+import { RESOLUTION_LABELS, TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
 
 /** Whether a drawn image is a single flat colour, judged on a 20 × 20 grid across the whole frame. Throws if the canvas is tainted. */
 function flatImage(ctx: CanvasRenderingContext2D, width: number, height: number): boolean {
@@ -705,7 +705,7 @@ export default function VideoDetailPage() {
                 </button>
               )
             }
-            subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect}${video.resolution ? ` · ${video.resolution}` : ""} · ${video.provider}`}
+            subtitle={`Created ${formatDate(video.createdAt)} · ${video.aspect}${video.resolution ? ` · ${RESOLUTION_LABELS[video.resolution]}` : ""} · ${video.provider}`}
             action={
               <div className="flex flex-wrap items-center gap-2">
                 {/* A toggle keeps one name; whether it is on is its pressed state (and the filled star). */}

@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import { ASPECT_RATIOS, BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
 export { videoNeeds, videoPresenters, videoVoices };
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
@@ -78,7 +78,7 @@ export const videoRequestSchema = z
     avatarId: z.string().min(1),
     voiceId: z.string().min(1),
     aspect: z.enum(ASPECT_RATIOS).default("16:9"),
-    resolution: z.enum(["720p", "1080p"]).default("1080p"),
+    resolution: z.enum(RESOLUTIONS).default("1080p"),
     background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
     captions: z.boolean().default(false),
     captionStyle: captionStyleSchema.optional(),
@@ -95,6 +95,15 @@ export const videoRequestSchema = z
   .transform((v, ctx) => {
     if (v.moreBlinking && v.avatarEngine !== "avatar_v") {
       ctx.addIssue({ code: "custom", path: ["moreBlinking"], message: MORE_BLINKING_NEEDS_V });
+      return z.NEVER;
+    }
+    // 4K renders on Avatar III, which is neither Avatar V nor takes motion settings; the presenters are checked when they are known.
+    if (v.resolution === "4k" && v.avatarEngine === "avatar_v") {
+      ctx.addIssue({ code: "custom", path: ["avatarEngine"], message: FOUR_K_ENGINE });
+      return z.NEVER;
+    }
+    if (v.resolution === "4k" && (v.expressiveness || v.motionPrompt)) {
+      ctx.addIssue({ code: "custom", path: [v.motionPrompt ? "motionPrompt" : "expressiveness"], message: FOUR_K_MOTION });
       return z.NEVER;
     }
     if (v.transparent && v.scenes && (v.scenes.length > 1 || v.scenes[0]?.hidePresenter)) {
@@ -300,6 +309,27 @@ export async function resolveRenderContext(
 }
 
 /**
+ * Why a request cannot be made in 4K, or undefined when it can (or asks for less). HeyGen renders 4K on Avatar III for
+ * video avatars whose look supports it; every presenter a scene shows must, and other renderers stop at 1080p.
+ */
+export function fourKProblem(
+  req: Pick<VideoRequest, "resolution" | "avatarId" | "avatarEngine" | "expressiveness" | "motionPrompt"> & { scenes?: Array<Pick<Scene, "avatarId" | "hidePresenter">> },
+  cast: RenderCast,
+  provider: AvatarProvider = getAvatarProvider(),
+): string | undefined {
+  if (req.resolution !== "4k") return undefined;
+  if (!provider.renders4k) return `The ${provider.name} renderer makes videos up to 1080p; choose 1080p, or render with HeyGen for 4K`;
+  if (req.avatarEngine === "avatar_v") return FOUR_K_ENGINE;
+  if (req.expressiveness || req.motionPrompt) return FOUR_K_MOTION;
+  const shown = req.scenes?.length ? req.scenes.filter((sc) => !sc.hidePresenter).map((sc) => sc.avatarId ?? req.avatarId) : [req.avatarId];
+  const short = shown.map((id) => cast.avatars[id]).find((a) => a && !renders4k(a));
+  if (short) {
+    return `4K is for digital twins and studio avatars whose look supports HeyGen's Avatar III engine; “${short.name}” tops out at 1080p, so choose 1080p or another presenter`;
+  }
+  return undefined;
+}
+
+/**
  * Start a render. The allowance check is read-then-write and therefore
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
@@ -326,6 +356,8 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   // portrait prepared (uploaded) for the first row is reused by the rest.
   const cast = resolved.cast;
   const provider = getAvatarProvider();
+  const fourK = fourKProblem(req, cast, provider);
+  if (fourK) throw new ValidationError(fourK);
 
   // Scenes keep the names of their own presenter and voice for the library and detail page.
   const scenes = req.scenes?.map((sc) => {

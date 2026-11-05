@@ -5743,8 +5743,12 @@ test("API validation and webhook guard", async ({ request }) => {
   const badVoice = await request.post("/api/videos", { data: { title: "t", script: "hi", avatarId: "stock_1", voiceId: "zzz" } });
   expect(badVoice.status()).toBe(400);
   const base = { title: "q", script: "hi", avatarId: "stock_1", voiceId: "stock_voice_1" };
-  expect((await request.post("/api/videos", { data: { ...base, resolution: "4k" } })).status()).toBe(400);
-  const hd = await request.post("/api/videos", { data: { ...base, resolution: "720p" } });
+  // A quality the renderer has no size for is refused; 4K is one it has (Ava Chen's look renders on Avatar III).
+  expect((await request.post("/api/videos", { data: { ...base, resolution: "8k" } })).status()).toBe(400);
+  const uhd = await request.post("/api/videos", { data: { ...base, resolution: "4k" } });
+  expect(uhd.status()).toBe(201);
+  expect((await uhd.json()).video.resolution).toBe("4k");
+  const hd =await request.post("/api/videos", { data: { ...base, resolution: "720p" } });
   expect(hd.status()).toBe(201);
   expect((await hd.json()).video.resolution).toBe("720p");
   const full = await request.post("/api/videos", { data: base });
@@ -11902,6 +11906,70 @@ test("a video is made as a 4:5 feed post: chosen in the editor, played in its ow
   expect(embed.status()).toBe(200);
   const o = (await embed.json()) as { width: number; height: number };
   expect(o.width / o.height).toBeCloseTo(4 / 5, 2);
+});
+
+test("a video is made in 4K on Avatar III for a presenter whose look supports it, and 4K is held back for one that does not", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto("/create");
+  await page.locator("input[placeholder='Video title']").fill("Ultra HD tour");
+  await page.locator("textarea").fill("Welcome to the open house.");
+  await expect(page.getByText(/ · 16:9 · 1 scene · /)).not.toContainText("No voice");
+  // Daniel Okafor's look tops out at 1080p: 4K is held back, and the panel says why.
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Daniel Okafor Daniel Okafor" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const quality = page.getByRole("group", { name: "Output quality" });
+  await expect(quality.getByRole("button")).toHaveCount(3);
+  const fourK = quality.getByRole("button", { name: /4K/ });
+  await expect(fourK).toBeDisabled();
+  await expect(page.locator("#resolution-hint")).toContainText("Daniel Okafor tops out at 1080p");
+  // Ava Chen's look renders on Avatar III, so 4K can be chosen; the engine choice is then not used, and not sent.
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Ava Chen Ava Chen" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const engine = page.getByLabel("Avatar engine", { exact: true });
+  await engine.selectOption("avatar_v");
+  await fourK.click();
+  await expect(fourK).toHaveAttribute("aria-pressed", "true");
+  await expect(engine).toBeDisabled();
+  await expect(page.locator("#avatar-engine-hint")).toContainText("Not used: a 4K video renders on HeyGen's Avatar III engine");
+  await expect(page.locator("#resolution-hint")).toContainText("HeyGen renders 4K on its Avatar III engine");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  expect([body.resolution, "avatarEngine" in body, "moreBlinking" in body]).toEqual(["4k", false, false]);
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.resolution).toBe("4k");
+  await expect(page.getByText(/ · 16:9 · 4K · /)).toBeVisible();
+  // A copy keeps 4K; with Daniel instead, the panel says he tops out at 1080p, and the server refuses the render.
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(fourK).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Daniel Okafor Daniel Okafor" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.locator("#resolution-hint")).toHaveText(/^Daniel Okafor tops out at 1080p: 4K is for digital twins and studio avatars/);
+  await expect(page.locator("#resolution-hint")).toHaveAttribute("role", "status");
+  const refused = await page.request.post("/api/videos", { data: { title: "Too sharp", script: "Hello there.", avatarId: "stock_4", voiceId: "stock_voice_2", resolution: "4k" } });
+  expect(refused.status()).toBe(400);
+  expect(await refused.text()).toMatch(/Daniel Okafor.*tops out at 1080p/);
+  // A 4K batch from a template on Avatar V with gestures leaves those out, as the hint says, so the batch starts.
+  const onV = await createVideoViaApi(page, `On Avatar V ${Date.now().toString(36)}`, { avatarEngine: "avatar_v", moreBlinking: true, motionPrompt: "nods warmly" });
+  const tpl = (await (await page.request.post("/api/templates", { data: { fromVideoId: onV.id } })).json()).template;
+  try {
+    await page.goto("/batch");
+    await page.getByLabel("Start from a saved template").selectOption(tpl.id);
+    await page.getByLabel("Output quality").selectOption("4k");
+    await expect(page.getByText("the Avatar V engine and gestures are not used")).toBeVisible();
+    const batchSent = page.waitForRequest((r) => r.url().endsWith("/api/videos/batch") && r.method() === "POST");
+    await page.getByRole("button", { name: /^Generate \d+ videos?$/ }).click();
+    const batchBody = (await batchSent).postDataJSON() as Record<string, unknown>;
+    expect([batchBody.resolution, "avatarEngine" in batchBody, "moreBlinking" in batchBody, "motionPrompt" in batchBody]).toEqual(["4k", false, false, false]);
+    await page.waitForURL(/\/videos\?batch=batch_/);
+  } finally {
+    await page.request.delete(`/api/templates/${tpl.id}`);
+  }
 });
 
 test("the Shared presenters list is searched and sorted, and the sort is remembered", async ({ page }) => {

@@ -1367,6 +1367,8 @@ export interface NotifySettings {
   lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string; id?: string; test?: boolean };
   /** The events this webhook is sent; absent for every one of them (as before the choice existed). */
   events?: WebhookEvent[];
+  /** When the webhook was paused: while set, no event is sent or logged (a test and a redelivery still go). */
+  pausedAt?: string;
   /** Changed by every save and every recorded delivery, so a record is written only over the settings it read. */
   rev?: string;
   /** The most recent deliveries to this URL, newest first (at most WEBHOOK_LOG_SIZE); cleared when the URL changes. */

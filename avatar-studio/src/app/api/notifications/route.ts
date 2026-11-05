@@ -1,6 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
-import { deleteNotifySettings, getNotifySettings, notifySchema, publicNotifySettings, saveNotifySettings } from "@/lib/notifications";
+import { z } from "zod";
+import { deleteNotifySettings, getNotifySettings, notifySchema, publicNotifySettings, saveNotifySettings, setNotificationsPaused } from "@/lib/notifications";
 import { requireEditor, requireOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,19 @@ export async function PUT(req: Request) {
     } catch (e) {
       throw new ValidationError(e instanceof Error ? e.message : "Webhook URL is not valid");
     }
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+const patchSchema = z.object({ paused: z.boolean() });
+
+/** Pauses (`{ "paused": true }`) or resumes the webhook; editors only, `404` with no webhook. */
+export async function PATCH(req: Request) {
+  try {
+    const owner = await requireEditor();
+    const { paused } = patchSchema.parse(await readJson(req));
+    return json({ webhook: shown(await setNotificationsPaused(owner, paused)) });
   } catch (err) {
     return errorResponse(err);
   }

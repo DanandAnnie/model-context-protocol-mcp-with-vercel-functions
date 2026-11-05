@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, RotateCcw, Send, Trash2, Webhook } from "lucide-react";
+import { KeyRound, Pause, Play, RotateCcw, Send, Trash2, Webhook } from "lucide-react";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -38,7 +38,7 @@ export function OutboundWebhook() {
   const readOnly = useCanEdit() === false; // the workspace's setting: a viewer sees it, the server refuses their changes
   const [url, setUrl] = useState("");
   // A redelivery is busy as the id of the delivery being sent again.
-  const [busy, setBusy] = useState<"save" | "test" | "remove" | "rotate" | "retire" | { redeliver: string } | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "remove" | "rotate" | "retire" | "pause" | { redeliver: string } | null>(null);
   // Whether a rotation keeps the old secret signing X-Studio-Signature-Previous for a day.
   const [keepPrevious, setKeepPrevious] = useState(true);
   const [testEvent, setTestEvent] = useState<TestChoice>("test");
@@ -149,6 +149,21 @@ export function OutboundWebhook() {
     }
   }
 
+  async function setPaused(paused: boolean) {
+    setBusy("pause");
+    setErr(null);
+    setNote(null);
+    try {
+      await api("/api/notifications", { method: "PATCH", body: JSON.stringify({ paused }) });
+      await refetch();
+      setNote(paused ? "Webhook paused. No events are sent until you resume it." : "Webhook resumed. Events are sent again.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : paused ? "Could not pause the webhook" : "Could not resume the webhook");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function remove() {
     if (!window.confirm("Remove the webhook? Finished renders will no longer be reported.")) return;
     setBusy("remove");
@@ -209,6 +224,9 @@ export function OutboundWebhook() {
             </select>
             <Button type="button" variant="secondary" onClick={test} loading={busy === "test"} disabled={!!busy}>
               <Send className="h-3.5 w-3.5" /> Send test
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setPaused(!saved.pausedAt)} loading={busy === "pause"} disabled={!!busy && busy !== "pause"}>
+              {busy !== "pause" && (saved.pausedAt ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />)} {saved.pausedAt ? "Resume" : "Pause"}
             </Button>
             <Button type="button" variant="secondary" onClick={remove} disabled={!!busy} aria-label="Remove webhook">
               <Trash2 className="h-3.5 w-3.5" /> Remove
@@ -277,6 +295,16 @@ export function OutboundWebhook() {
               </dd>
             </div>
           )}
+          <div className="flex flex-wrap gap-2" data-testid="webhook-state">
+            <dt className="w-28 text-slate-500">Status</dt>
+            <dd>
+              {saved.pausedAt ? (
+                <span className="font-medium text-amber-800">Paused since {formatDate(saved.pausedAt)}: no events are sent or logged.{readOnly ? "" : " Send test still works."}</span>
+              ) : (
+                "Sending"
+              )}
+            </dd>
+          </div>
           <div className="flex flex-wrap gap-2">
             <dt className="w-28 text-slate-500">Last delivery</dt>
             <dd>

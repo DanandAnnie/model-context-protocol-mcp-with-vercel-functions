@@ -6785,6 +6785,37 @@ test("the webhook signing secret is rotated in Settings, the old one kept for a 
   }
 });
 
+test("the webhook is paused and resumed from Settings, keeping its URL and secret", async ({ page }) => {
+  expect((await page.request.patch("/api/notifications", { data: { paused: true } })).status()).toBe(404);
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/paused" } })).status()).toBe(200);
+  try {
+    expect((await page.request.patch("/api/notifications", { data: { paused: "yes" } })).status()).toBe(400);
+    const before = (await (await page.request.get("/api/notifications")).json()).webhook as { secret: string };
+    await page.goto("/settings");
+    const state = page.getByTestId("webhook-state");
+    await expect(state).toContainText("Sending");
+    await page.getByRole("button", { name: "Pause", exact: true }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText("Webhook paused. No events are sent until you resume it.");
+    await expect(state).toContainText(/Paused since .*: no events are sent or logged\. Send test still works\./);
+    const paused = (await (await page.request.get("/api/notifications")).json()).webhook as { url: string; secret: string; pausedAt?: string };
+    expect(paused.pausedAt).toBeTruthy();
+    expect(paused.url).toBe("https://203.0.113.5/hooks/paused");
+    expect(paused.secret).toBe(before.secret);
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+    // Saving the webhook again leaves it paused.
+    await page.getByRole("button", { name: "Save webhook" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText("Webhook saved.");
+    await expect(state).toContainText("Paused since");
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText("Webhook resumed. Events are sent again.");
+    await expect(state).toContainText("Sending");
+    expect((await (await page.request.get("/api/notifications")).json()).webhook).not.toHaveProperty("pausedAt");
+  } finally {
+    await page.request.delete("/api/notifications");
+  }
+});
+
 test("Settings sends a marked sample of a webhook event, logged as a sample", async ({ page }) => {
   // One delivery to an unroutable address, which waits out the 10-second timeout.
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/samples", events: ["video.failed"] } })).status()).toBe(200);

@@ -2714,6 +2714,46 @@ describe("outbound webhooks", () => {
     }
   });
 
+  it("pauses the webhook: nothing is sent or logged until it is resumed, a test still goes, and a save keeps the pause", async () => {
+    const { setNotificationsPaused, sendTestNotification, redeliverNotification } = await import("../notifications");
+    const sent: string[] = [];
+    setNotificationFetch(async (_input, init) => {
+      sent.push(JSON.parse(String(init?.body)).event);
+      return new Response("", { status: 200 });
+    });
+    try {
+      await assert.rejects(setNotificationsPaused("pz0", true), /Save a webhook URL first/);
+      await saveNotifySettings({ url: HOOK }, "pz1");
+      const first = (await dispatchNotification((await getNotifySettings("pz1"))!, "video.completed", { id: "v1" }))!;
+      const paused = await setNotificationsPaused("pz1", true);
+      assert.ok(paused.pausedAt);
+      assert.equal((await setNotificationsPaused("pz1", true)).pausedAt, paused.pausedAt, "pausing again keeps when it began");
+      assert.equal(await dispatchNotification(paused, "video.failed", { id: "v2" }), null, "not sent");
+      assert.equal(await dispatchNotification(paused, "lead.captured", { email: "a@example.com" }), null);
+      // A copy read before the pause (a lead's deferred dispatch) is not sent either.
+      const stale = { ...paused, pausedAt: undefined };
+      assert.equal(await dispatchNotification(stale, "video.completed", { id: "v-stale" }), null, "the pause is checked as it is now");
+      assert.equal((await getNotifySettings("pz1"))!.deliveries!.length, 1, "nor logged");
+      // A test and a redelivery are asked for by hand, so they still go.
+      assert.equal((await sendTestNotification("pz1"))!.ok, true);
+      assert.equal((await sendTestNotification("pz1", "video.completed"))!.ok, true);
+      await redeliverNotification(first.id!, "pz1");
+      assert.deepEqual(sent, ["video.completed", "test", "video.completed", "video.completed"]);
+      // A save (a new URL) keeps the pause, and the secret.
+      const resaved = await saveNotifySettings({ url: `${HOOK}/moved` }, "pz1");
+      assert.equal(resaved.pausedAt, paused.pausedAt);
+      assert.equal(resaved.secret, paused.secret);
+      // A rotation keeps the pause.
+      const { rotateNotifySecret } = await import("../notifications");
+      assert.equal((await rotateNotifySecret("pz1")).pausedAt, paused.pausedAt);
+      const resumed = await setNotificationsPaused("pz1", false);
+      assert.equal(resumed.pausedAt, undefined);
+      assert.equal((await dispatchNotification(resumed, "video.failed", { id: "v3" }))!.ok, true, "sent again once resumed");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
   it("sends a marked sample of any event, whatever is chosen, and redelivers it still marked", async () => {
     const { sendTestNotification, sampleEventData, redeliverNotification, publicDelivery } = await import("../notifications");
     const calls: Array<{ headers: Record<string, string>; body: string }> = [];

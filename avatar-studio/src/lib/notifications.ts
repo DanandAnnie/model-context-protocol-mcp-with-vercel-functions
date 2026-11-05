@@ -61,6 +61,8 @@ export async function saveNotifySettings(input: z.infer<typeof notifySchema>, ow
       updatedAt: now,
       rev: newId("rev"),
       ...(events ? { events } : {}),
+      // A pause outlives a save, so changing the URL does not start sending again.
+      ...(existing?.pausedAt ? { pausedAt: existing.pausedAt } : {}),
       lastDelivery: existing?.url === url ? existing?.lastDelivery : undefined,
       // The log is of deliveries to this URL; a new one starts it afresh.
       deliveries: existing?.url === url ? existing?.deliveries : undefined,
@@ -126,6 +128,17 @@ export async function rotateNotifySecret(ownerId: string = LOCAL_OWNER, keepPrev
   });
 }
 
+/**
+ * Pauses the webhook (no event is sent or logged until it is resumed; the URL, secret, chosen events, and log are kept,
+ * and a test or a redelivery still goes) or resumes it. Pausing a paused webhook keeps when it was first paused.
+ */
+export async function setNotificationsPaused(ownerId: string = LOCAL_OWNER, paused: boolean): Promise<NotifySettings> {
+  return updateNotifySettings(ownerId, (latest) => {
+    const { pausedAt, ...rest } = latest;
+    return paused ? { ...rest, pausedAt: pausedAt ?? nowIso() } : rest;
+  });
+}
+
 /** Stops signing with the previous secret before its overlap ends (once every receiver uses the new one). */
 export async function retirePreviousSecret(ownerId: string = LOCAL_OWNER): Promise<NotifySettings> {
   return updateNotifySettings(ownerId, (latest) => {
@@ -167,6 +180,9 @@ export function setNotificationFetch(impl: FetchLike | null) {
  */
 export async function dispatchNotification(settings: NotifySettings, event: NotifyEvent, data: unknown): Promise<NonNullable<NotifySettings["lastDelivery"]> | null> {
   if (!sendsEvent(settings, event)) return null;
+  // A paused webhook is sent nothing (a test or a redelivery is sent through deliver, whatever the pause). Checked on the
+  // settings as they are now, not the copy the caller read, which a lead's deferred dispatch may have read before a pause.
+  if (settings.pausedAt || (await getNotifySettings(settings.ownerId).catch(() => null))?.pausedAt) return null;
   // `id` names the event, inside the signed body, so it stays the same when the delivery is sent again: a receiver can
   // use it to ignore a repeat. (`X-Studio-Delivery` names each attempt.)
   return deliver(settings, event, JSON.stringify({ id: newId("whe"), event, timestamp: nowIso(), data }));

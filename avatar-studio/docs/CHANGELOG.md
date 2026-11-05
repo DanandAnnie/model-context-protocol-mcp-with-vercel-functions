@@ -1627,3 +1627,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Viewers' Status line no longer tells them Send test still works, since they can't send one.
     - The Pause/Resume button no longer shows its icon beside the spinner while working.
     - The unit test also covers a stale copy of the settings and a rotation keeping the pause.
+- Sample of a presenter's lead (`99d103e`). Send test could send a sample `lead.captured`, but only shaped like a lead from a share page, so an endpoint that handles leads from interactive presenters (which carry the presenter, the conversation, and the visitor's last message) could not be checked without a real visitor. The Send test choices now have "Sample: visitor leaves an email (share page)" and "Sample: visitor leaves an email (presenter)".
+  - **API:** `POST /api/notifications/test` takes `{ "event": "lead.captured", "source": "presenter" }`; `source` defaults to `share`, and `source` with any other event is a `400`. The presenter sample has the same keys as a real presenter lead (`source`, `agentId`, `agentName`, `conversationId`, `email`, `name`, `lastMessage`, `capturedAt`), with sample values, and is marked as a test like the other samples.
+  - The unit test captures a real lead through a public presenter and checks the sample's shape against it.
+  - An independent review found nothing blocking. From its optional findings:
+    - The end-to-end test checks the request Settings sends for the presenter choice, and that `source` with `event` left out is refused.
+    - The API notes say plainly when `source` is a `400`, and the route's description names `source`.
+  - Two end-to-end tests that failed once each in the full run are steadier:
+    - The Home test for comments that mention you now waits for the reload's link prefetches before it clicks. A click while one for the same page was cancelled left the router fetching the library without moving to it.
+    - The Batch page's accessibility check now waits for the page to settle. Generate is enabled only once the debounced preview answers, and a check during the button's fade from disabled caught it at low contrast. This was seen in 2 of 40 checks before the change and in none of 60 after.

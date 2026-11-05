@@ -27,6 +27,8 @@ export const config = {
   /** The app's public address as configured; links an outside service must open (proofread lines) need it. */
   publicAppUrl: env("APP_URL")?.replace(/\/$/, ""),
   webhookSecret: env("WEBHOOK_SECRET"),
+  /** Bearer secret the scheduled background check (GET /api/cron/checks) is called with; the check is off without it. */
+  cronSecret: env("CRON_SECRET"),
   /** HeyGen's LiveAvatar (live video for the interactive avatar); its own key, from app.liveavatar.com. */
   liveAvatarApiKey: providerSecret("LIVEAVATAR_API_KEY"),
   /** The LiveAvatar avatar every live session shows; LiveAvatar's avatars are its own, not HeyGen's video looks. */

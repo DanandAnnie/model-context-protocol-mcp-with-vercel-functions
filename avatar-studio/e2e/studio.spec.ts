@@ -6830,6 +6830,32 @@ test("the webhook is paused and resumed from Settings, keeping its URL and secre
   }
 });
 
+test("the scheduled background check takes only the cron secret, and moves a waiting dub on", async ({ page }) => {
+  test.setTimeout(90_000);
+  expect((await page.request.get("/api/cron/checks", { headers: { authorization: "" } })).status()).toBe(401);
+  expect((await page.request.get("/api/cron/checks", { headers: { authorization: "Bearer wrong" } })).status()).toBe(401);
+  // A session is not the secret either.
+  await page.goto("/home");
+  expect((await page.request.get("/api/cron/checks")).status()).toBe(401);
+  // Only this event is sent, so the log shows what the check itself moved (no page or listing reads the dub before).
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/cron", events: ["translation.proofread_ready"] } })).status()).toBe(200);
+  const made = await page.request.post("/api/translate", { data: { title: "Background", sourceVideoUrl: "https://example.com/bg.mp4", targetLanguage: "Spanish", proofread: true } });
+  expect(made.status()).toBe(201);
+  const id = ((await made.json()) as { translation: { id: string } }).translation.id;
+  const run = await page.request.get("/api/cron/checks", { headers: { authorization: "Bearer e2e-cron-secret" } });
+  expect(run.status()).toBe(200);
+  const body = (await run.json()) as { ok: boolean; translations: { checked: number; moved: number }; twins: { checked: number; moved: number } };
+  expect(body.ok).toBe(true);
+  expect(body.translations.checked).toBeGreaterThanOrEqual(1);
+  // The new proofread's lines (ready at once in the demo) were stored by the check, which sent the event.
+  expect(body.translations.moved).toBeGreaterThanOrEqual(1);
+  await expect
+    .poll(async () => ((await (await page.request.get("/api/notifications")).json()).webhook.deliveries ?? []).some((d: { event: string }) => d.event === "translation.proofread_ready"), { timeout: 30_000 })
+    .toBe(true);
+  await page.request.delete("/api/notifications");
+  await page.request.delete(`/api/translate/${id}`);
+});
+
 test("Settings sends a marked sample of a webhook event, logged as a sample", async ({ page }) => {
   // Three deliveries to an unroutable address, each waiting out the 10-second timeout.
   test.setTimeout(90_000);

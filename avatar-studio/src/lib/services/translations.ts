@@ -313,6 +313,39 @@ export async function listTranslations(ownerId: string = LOCAL_OWNER): Promise<T
   return items.map((t) => shown(byId.get(t.id) ?? t));
 }
 
+/** Dubs the scheduled background check asks about at most per run, across every account. */
+export const BACKGROUND_TRANSLATION_CHECKS = 20;
+
+/**
+ * The scheduled background check: running dubs and proofreads being translated, across every account, so a dub nobody
+ * is watching still moves on and its webhook is sent. Each is asked at most every 15 seconds, and the least recently
+ * asked by this check first (`checkedAt`, kept on the dub since a scheduled run rarely lands on the instance that ran
+ * the last), so a few dubs stuck at the provider cannot take every place. Finished dubs' links are left for a listing to
+ * renew. Returns how many were asked about and how many this check moved to a new stage; never throws for one dub.
+ */
+export async function checkTranslationsInBackground(max = BACKGROUND_TRANSLATION_CHECKS, now = Date.now()): Promise<{ checked: number; moved: number }> {
+  const items = (await getStore().list<Translation>("translation")).filter((t) => t.status !== "completed" && due(t) && now - (lastChecked.get(t.id) ?? 0) >= MIN_CHECK_GAP_MS);
+  const picked = items.sort((a, b) => (a.checkedAt ?? "").localeCompare(b.checkedAt ?? "") || a.updatedAt.localeCompare(b.updatedAt)).slice(0, max);
+  for (const t of picked) lastChecked.set(t.id, now);
+  const at = new Date(now).toISOString();
+  const moved = await Promise.all(
+    picked.map(async (t) => {
+      try {
+        const fresh = await refreshTranslation(t);
+        // Moved by this check: its own write landed (a callback meanwhile is not counted).
+        const ours = fresh.updatedAt !== t.updatedAt && fresh.checkedAt === t.checkedAt && (fresh.status !== t.status || fresh.proofreadStage !== t.proofreadStage);
+        // Noted as asked, over the dub as it now is, so the next run starts with the others; a newer write wins.
+        await getStore().putIf("translation", { ...fresh, checkedAt: at }, "updatedAt", fresh.updatedAt);
+        return ours;
+      } catch (err) {
+        console.error(`background check failed for ${t.id}:`, err);
+        return false;
+      }
+    }),
+  );
+  return { checked: picked.length, moved: moved.filter(Boolean).length };
+}
+
 export async function getTranslation(id: string, ownerId: string = LOCAL_OWNER): Promise<Translation> {
   const item = owned(await getStore().get<Translation>("translation", id), ownerId, `Translation ${id}`);
   return shown(due(item) ? await refreshTranslation(item) : item);

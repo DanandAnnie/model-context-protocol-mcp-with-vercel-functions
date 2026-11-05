@@ -90,6 +90,20 @@ export async function listTwins(ownerId: string = LOCAL_OWNER): Promise<TwinJob[
   return (await checks.follow(jobs)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+/** Twins the scheduled background check asks about at most per run, across every account. */
+export const BACKGROUND_TWIN_CHECKS = 20;
+
+/**
+ * The scheduled background check: twins still being trained or consented to, across every account, asked about the
+ * way a listing would (the least recently asked first, at most every few seconds each), so a twin nobody is watching
+ * still becomes a presenter and its webhook is sent. Returns how many were asked about and how many finished.
+ */
+export async function checkTwinsInBackground(max = BACKGROUND_TWIN_CHECKS, now = Date.now()): Promise<{ checked: number; moved: number }> {
+  const waiting = (await getStore().list<TwinJob>("twin")).filter((j) => j.status === "processing");
+  const { jobs: after, checked } = await checks.followCounted(waiting, now, max);
+  return { checked, moved: after.filter((j, i) => j.status !== waiting[i].status).length };
+}
+
 /**
  * Starts training a twin from a public link to the footage. With a client `key`, the twin's id is derived from the
  * account and the key, so a retried start returns the twin already stored. The row is kept before the renderer is asked

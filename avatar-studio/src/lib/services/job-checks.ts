@@ -41,21 +41,27 @@ export function jobChecker<T extends Followed>(refresh: (job: T) => Promise<T>) 
     return run;
   }
 
+  /** As `follow`, also saying how many jobs were due and asked about. */
+  async function followCounted(jobs: T[], now = Date.now(), max = MAX_CHECKS_PER_CALL): Promise<{ jobs: T[]; checked: number }> {
+    const due = new Set(
+      jobs
+        .filter((j) => needsCheck(j, now))
+        .sort((a, b) => (a.checkedAt ?? a.updatedAt).localeCompare(b.checkedAt ?? b.updatedAt))
+        .slice(0, max)
+        .map((j) => j.id),
+    );
+    return { jobs: await Promise.all(jobs.map((j) => (due.has(j.id) ? checkOnce(j, now) : j))), checked: due.size };
+  }
+
   return {
     /**
      * The jobs, those due asked about first: at most `max` per call, the least recently checked first, so a list of many
      * old links cannot hold one request open on dozens of renderer calls (the rest are asked on the next look).
      */
     follow(jobs: T[], now = Date.now(), max = MAX_CHECKS_PER_CALL): Promise<T[]> {
-      const due = new Set(
-        jobs
-          .filter((j) => needsCheck(j, now))
-          .sort((a, b) => (a.checkedAt ?? a.updatedAt).localeCompare(b.checkedAt ?? b.updatedAt))
-          .slice(0, max)
-          .map((j) => j.id),
-      );
-      return Promise.all(jobs.map((j) => (due.has(j.id) ? checkOnce(j, now) : j)));
+      return followCounted(jobs, now, max).then((r) => r.jobs);
     },
+    followCounted,
     /** Forgets when jobs were last asked about (tests). */
     forget(): void {
       attempted.clear();

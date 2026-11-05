@@ -1248,6 +1248,8 @@ export interface Translation extends TranslationRequest {
   dubStartedAt?: string;
   /** When a failed dub was claimed to be tried again, so a second click (or tab) does not start a second dub. */
   retriedAt?: string;
+  /** When the scheduled background check last asked about it (it asks the least recently asked first). */
+  checkedAt?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;

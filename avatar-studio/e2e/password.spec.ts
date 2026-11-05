@@ -11,6 +11,10 @@ test("pages redirect, API rejects, public paths stay open", async ({ request }) 
   expect((await request.get("/api/videos/analytics")).status()).toBe(401);
   expect((await request.get("/")).status()).toBe(200);
   expect((await request.get("/login")).status()).toBe(200);
+  // The scheduled background check answers for itself (off here, with no CRON_SECRET), not with the sign-in wall.
+  const cron = await request.get("/api/cron/checks", { maxRedirects: 0 });
+  expect(cron.status()).toBe(404);
+  expect(await cron.json()).toEqual({ error: "Background checks are off: set CRON_SECRET to turn them on" });
   const media = await request.get("/demo/render.webm");
   expect(media.status()).toBe(200);
   expect(media.headers()["content-type"]).toContain("video/webm");

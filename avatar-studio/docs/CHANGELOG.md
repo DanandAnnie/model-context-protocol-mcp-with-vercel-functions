@@ -1708,3 +1708,23 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The music mix throws, rather than narrowing a 4:5 frame quietly, should the earlier check ever move.
     - The end-to-end test checks the player's own frame on the video and share pages, and that Music leaves the video out.
     - The docs list the new embed, email, and oEmbed sizes and the music refusal.
+- 4K videos on HeyGen's Avatar III engine (`9c2e560`). HeyGen's v3 video API renders `resolution: "4k"` on its Avatar III engine for video avatars (digital twins and studio avatars) whose look supports it. The studio stopped at 1080p.
+  - **Where to choose it:** 4K is a third quality in the editor's Output quality picker and on the Batch page. Templates, copies, retries, Make other sizes, and language copies keep it. It renders at 3840×2160, 2160×3840, 2160×2160, or 2160×2700, depending on the shape.
+  - **Which presenters:** every presenter a scene shows must be a video avatar whose HeyGen look lists Avatar III. The avatar list now marks those looks with `avatarIII`.
+    - A digital twin trained in the studio qualifies too, as it is a HeyGen digital twin look.
+    - Photo avatars and uploaded portraits stop at 1080p, as HeyGen's do.
+    - The editor holds 4K back while the presenter cannot render it, and says which presenter stops at 1080p.
+    - The API refuses such a request with a `400` that names the presenter. A batch is checked once, before any row starts.
+  - **What HeyGen gets:** `resolution: "4k"`, with `engine: { "type": "avatar_iii" }` on each presenter scene.
+    - Avatar III takes neither Avatar V nor motion settings, so a 4K request with `avatarEngine: "avatar_v"`, `expressiveness`, or a `motionPrompt` is refused. The editor does not send them and says the engine choice is not used.
+    - When HeyGen refuses a 4K render, the error says to make a copy at 1080p.
+  - **Where 4K is not offered:** D-ID renders up to 1080p and refuses 4K. Brand kit defaults and cinematic shots stay at 720p or 1080p; a cinematic copy of a 4K video starts at 1080p.
+    - A background music mix of a 4K video is rendered at 1080p, the size HeyGen HyperFrames is sent.
+  - An independent review found two blocking problems, both fixed:
+    - A digital twin trained in the studio is stored as a custom presenter, so it had been refused 4K with a message saying 4K was for digital twins. It is offered 4K now.
+    - A 4K batch started from a template on Avatar V or with gestures had sent those settings and been refused, while the page said they were not used. The batch page now leaves them out, as the editor does.
+  - From its optional findings:
+    - The editor's Avatar motion and More blinking hints say they are not used in 4K, and More blinking is disabled there.
+    - The 4K warning is a live region from the start, so a change to it is announced.
+    - The unit tests check the hidden-presenter rule directly and match the engine message exactly.
+    - The docs say a 4K video's music mix is 1080p.

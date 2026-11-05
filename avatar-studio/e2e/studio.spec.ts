@@ -6785,6 +6785,35 @@ test("the webhook signing secret is rotated in Settings, the old one kept for a 
   }
 });
 
+test("Settings sends a marked sample of a webhook event, logged as a sample", async ({ page }) => {
+  // One delivery to an unroutable address, which waits out the 10-second timeout.
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/samples", events: ["video.failed"] } })).status()).toBe(200);
+  try {
+    expect((await page.request.post("/api/notifications/test", { data: { event: "video.deleted" } })).status()).toBe(400);
+    await page.goto("/settings");
+    const choice = page.getByLabel("Test to send");
+    await expect(choice.locator("option:checked")).toHaveText("Test ping");
+    // A sample of an event the webhook is not sent is still sent: it is a test.
+    await expect(page.getByTestId("webhook-sample-hint")).toHaveCount(0);
+    await choice.selectOption("video.completed");
+    await expect(page.getByTestId("webhook-sample-hint")).toContainText("A receiver that does not check either will act on it as a real event.");
+    await page.getByRole("button", { name: "Send test" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText(/^Sample video\.completed failed: /, { timeout: 20_000 });
+    // Found by what it is, not by place: a render from another test can be logged meanwhile.
+    const log = (await (await page.request.get("/api/notifications")).json()).webhook as { lastDelivery: { test?: boolean }; deliveries: Array<{ id: string; event: string; test?: boolean; resendable: boolean }> };
+    const sample = log.deliveries.find((d) => d.test && d.event === "video.completed")!;
+    expect(sample).toMatchObject({ resendable: true });
+    await expect(page.locator(`[data-delivery="${sample.id}"]`)).toContainText("video.completed · ");
+    await expect(page.locator(`[data-delivery="${sample.id}"]`)).toContainText(" · sample");
+    await expect(page.getByRole("button", { name: /^Redeliver sample video\.completed from / })).toHaveCount(1);
+    await expect(page.getByText(/video\.completed \(sample\) · /)).toBeVisible();
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+  } finally {
+    await page.request.delete("/api/notifications");
+  }
+});
+
 test("API keys are made in Settings with an optional lifetime, shown once, listed with their expiry, and revoked", async ({ page }) => {
   const tag = Date.now().toString(36);
   // A lifetime other than 30, 90, or 365 days is refused.

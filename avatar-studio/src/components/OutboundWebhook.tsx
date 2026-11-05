@@ -14,6 +14,15 @@ const EVENT_LABELS: Record<WebhookEvent, string> = {
   "lead.captured": "A visitor leaves an email",
 };
 
+/** What Send test can send: a ping, or a marked sample of each event (the server's TEST_EVENTS). */
+const TEST_CHOICES = [
+  { value: "test", label: "Test ping" },
+  { value: "video.completed", label: "Sample: render completes" },
+  { value: "video.failed", label: "Sample: render fails" },
+  { value: "lead.captured", label: "Sample: visitor leaves an email" },
+] as const;
+type TestChoice = (typeof TEST_CHOICES)[number]["value"];
+
 /** A logged delivery as the API lists it: the body sent stays on the server, `resendable` says whether it was kept. */
 type LoggedDelivery = Omit<WebhookDelivery, "body"> & { resendable: boolean };
 type Shown = Omit<NotifySettings, "deliveries"> & { deliveries?: LoggedDelivery[] };
@@ -32,6 +41,7 @@ export function OutboundWebhook() {
   const [busy, setBusy] = useState<"save" | "test" | "remove" | "rotate" | "retire" | { redeliver: string } | null>(null);
   // Whether a rotation keeps the old secret signing X-Studio-Signature-Previous for a day.
   const [keepPrevious, setKeepPrevious] = useState(true);
+  const [testEvent, setTestEvent] = useState<TestChoice>("test");
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const saved = data?.webhook ?? null;
@@ -69,8 +79,9 @@ export function OutboundWebhook() {
     setErr(null);
     setNote(null);
     try {
-      const { delivery } = await api<{ delivery: NonNullable<NotifySettings["lastDelivery"]> }>("/api/notifications/test", { method: "POST" });
-      setNote(delivery.ok ? `Test delivered (HTTP ${delivery.status}).` : `Test failed: ${delivery.error ?? "no response"}.`);
+      const { delivery } = await api<{ delivery: NonNullable<NotifySettings["lastDelivery"]> }>("/api/notifications/test", { method: "POST", body: JSON.stringify({ event: testEvent }) });
+      const what = testEvent === "test" ? "Test" : `Sample ${testEvent}`;
+      setNote(delivery.ok ? `${what} delivered (HTTP ${delivery.status}).` : `${what} failed: ${delivery.error ?? "no response"}.`);
       await refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not send the test");
@@ -85,7 +96,8 @@ export function OutboundWebhook() {
     setNote(null);
     try {
       const { delivery } = await api<{ delivery: NonNullable<NotifySettings["lastDelivery"]> }>(`/api/notifications/deliveries/${encodeURIComponent(d.id)}/redeliver`, { method: "POST" });
-      setNote(delivery.ok ? `${d.event} sent again: delivered (HTTP ${delivery.status}).` : `${d.event} sent again: failed: ${delivery.error ?? "no response"}.`);
+      const what = d.test ? `Sample ${d.event}` : d.event;
+      setNote(delivery.ok ? `${what} sent again: delivered (HTTP ${delivery.status}).` : `${what} sent again: failed: ${delivery.error ?? "no response"}.`);
       await refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not send the delivery again");
@@ -181,6 +193,20 @@ export function OutboundWebhook() {
         </Button>
         {saved && (
           <>
+            <select
+              aria-label="Test to send"
+              value={testEvent}
+              onChange={(e) => setTestEvent(e.target.value as TestChoice)}
+              disabled={!!busy}
+              aria-describedby={testEvent === "test" ? undefined : "webhook-sample-hint"}
+              className={`${inputClass} w-auto`}
+            >
+              {TEST_CHOICES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
             <Button type="button" variant="secondary" onClick={test} loading={busy === "test"} disabled={!!busy}>
               <Send className="h-3.5 w-3.5" /> Send test
             </Button>
@@ -188,6 +214,11 @@ export function OutboundWebhook() {
               <Trash2 className="h-3.5 w-3.5" /> Remove
             </Button>
           </>
+        )}
+        {saved && testEvent !== "test" && (
+          <p id="webhook-sample-hint" className="w-full text-xs text-slate-500" data-testid="webhook-sample-hint">
+            A sample carries made-up data under the event&apos;s real name, marked <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">&quot;test&quot;: true</code> in its body and <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Test: true</code>. A receiver that does not check either will act on it as a real event.
+          </p>
         )}
         <fieldset className="mt-1 w-full">
           <legend className="text-xs font-medium text-slate-700">Send when</legend>
@@ -250,7 +281,7 @@ export function OutboundWebhook() {
             <dt className="w-28 text-slate-500">Last delivery</dt>
             <dd>
               {saved.lastDelivery
-                ? `${saved.lastDelivery.ok ? "delivered" : "failed"} · ${saved.lastDelivery.event} · ${formatDate(saved.lastDelivery.at)}${saved.lastDelivery.error ? ` · ${saved.lastDelivery.error}` : ""}`
+                ? `${saved.lastDelivery.ok ? "delivered" : "failed"} · ${saved.lastDelivery.event}${saved.lastDelivery.test ? " (sample)" : ""} · ${formatDate(saved.lastDelivery.at)}${saved.lastDelivery.error ? ` · ${saved.lastDelivery.error}` : ""}`
                 : "none yet"}
             </dd>
           </div>
@@ -270,6 +301,7 @@ export function OutboundWebhook() {
                   <span className="text-slate-600">
                     {" · "}
                     <code className="font-mono">{d.event}</code> · {formatDate(d.at)}
+                    {d.test ? " · sample" : ""}
                     {d.redeliveryOf ? " · sent again" : ""}
                   </span>
                 </span>
@@ -281,7 +313,7 @@ export function OutboundWebhook() {
                     onClick={() => void redeliver(d)}
                     loading={typeof busy === "object" && busy?.redeliver === d.id}
                     disabled={!!busy && !(typeof busy === "object" && busy?.redeliver === d.id)}
-                    aria-label={`Redeliver ${d.event} from ${formatDate(d.at)}`}
+                    aria-label={`Redeliver ${d.test ? "sample " : ""}${d.event} from ${formatDate(d.at)}`}
                     title="Send this delivery's body again, signed afresh, under a new delivery id"
                   >
                     <RotateCcw className="h-3.5 w-3.5" /> Redeliver

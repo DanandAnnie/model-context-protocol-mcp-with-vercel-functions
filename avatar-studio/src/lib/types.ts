@@ -1363,7 +1363,8 @@ export interface NotifySettings {
   previousSecretExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
-  lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string; id?: string };
+  /** `test` marks a sample sent from Settings, as on its log entry. */
+  lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string; id?: string; test?: boolean };
   /** The events this webhook is sent; absent for every one of them (as before the choice existed). */
   events?: WebhookEvent[];
   /** Changed by every save and every recorded delivery, so a record is written only over the settings it read. */
@@ -1385,6 +1386,8 @@ export interface WebhookDelivery {
   body?: string;
   /** For a delivery sent again from the log, the id of the one it repeats (also sent as `X-Studio-Redelivery-Of`). */
   redeliveryOf?: string;
+  /** A sample of the event sent from Settings to try the receiver (`test: true` in its body, `X-Studio-Test: true`), not a real one. */
+  test?: boolean;
 }
 
 /** Per-owner preferences that are not provider settings. */

@@ -2657,6 +2657,81 @@ describe("outbound webhooks", () => {
     }
   });
 
+  it("sends a marked sample of any event, whatever is chosen, and redelivers it still marked", async () => {
+    const { sendTestNotification, sampleEventData, redeliverNotification, publicDelivery } = await import("../notifications");
+    const calls: Array<{ headers: Record<string, string>; body: string }> = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("", { status: 200 });
+    });
+    try {
+      assert.equal(await sendTestNotification("smp0", "video.completed"), null, "no webhook, nothing sent");
+      // Only renders failing are chosen; a sample of another event is still sent, as a test always is.
+      const { notifySchema } = await import("../notifications");
+      await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed"] }), "smp1");
+      const ping = (await sendTestNotification("smp1"))!;
+      assert.equal(ping.event, "test");
+      assert.equal(calls[0].headers["X-Studio-Test"], undefined, "a ping is a test by its name alone");
+      assert.equal(JSON.parse(calls[0].body).test, undefined);
+
+      for (const event of ["video.completed", "video.failed", "lead.captured"] as const) {
+        const sent = (await sendTestNotification("smp1", event))!;
+        assert.equal(sent.ok, true);
+        const call = calls.at(-1)!;
+        assert.equal(call.headers["X-Studio-Event"], event);
+        assert.equal(call.headers["X-Studio-Test"], "true");
+        const body = JSON.parse(call.body);
+        assert.equal(body.event, event);
+        assert.equal(body.test, true);
+        assert.match(body.id, /^whe_/);
+        assert.ok(JSON.stringify(body.data).includes("sample_"));
+      }
+      const completed = JSON.parse(calls[1].body).data;
+      assert.equal(completed.status, "completed");
+      assert.equal(completed.videoUrl, "https://example.com/sample.mp4");
+      assert.equal(JSON.parse(calls[2].body).data.status, "failed");
+      assert.equal(JSON.parse(calls[3].body).data.email, "viewer@example.com");
+
+      // Logged as samples; sent again, still a sample.
+      const log = (await getNotifySettings("smp1"))!.deliveries!;
+      assert.deepEqual(log.map((d) => [d.event, !!d.test]), [["lead.captured", true], ["video.failed", true], ["video.completed", true], ["test", false]]);
+      assert.equal(publicDelivery(log[0]).test, true);
+      assert.equal((await getNotifySettings("smp1"))!.lastDelivery?.test, true, "the last delivery says so too");
+      await redeliverNotification(log[0].id, "smp1");
+      assert.equal(calls.at(-1)!.headers["X-Studio-Test"], "true");
+      assert.equal((await getNotifySettings("smp1"))!.deliveries![0].test, true);
+
+      // Shaped like the data a real event sends: the same fields, each of the same type.
+      const shape = (d: Record<string, unknown>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v]).sort());
+      const real = (await createVideo({ title: "Real", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "smp1"));
+      await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.completed", "video.failed", "lead.captured"] }), "smp1");
+      const before = calls.length;
+      await notifyVideoTransition({ ...real, status: "processing" }, { ...real, status: "completed", videoUrl: "https://cdn/x.mp4", thumbnailUrl: "https://cdn/x.jpg", durationSec: 12 });
+      await notifyVideoTransition({ ...real, status: "processing" }, { ...real, status: "failed", error: "It broke" });
+      const { captureVideoLead } = await import("../services/leads");
+      await captureVideoLead({ ...real, shareGate: true }, { email: "lead@example.com", name: "Lee" });
+      await new Promise((r) => setTimeout(r, 20));
+      const realData = Object.fromEntries(calls.slice(before).map((c) => [JSON.parse(c.body).event, JSON.parse(c.body).data]));
+      for (const event of ["video.completed", "video.failed", "lead.captured"] as const) {
+        assert.ok(realData[event], `a real ${event} was sent`);
+        assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData(event)))), shape(realData[event]), `the ${event} sample is shaped like the real one`);
+      }
+      calls.splice(before);
+
+      // Settings saved before revision ids existed still get the delivery logged (written over their updatedAt).
+      const legacy = (await getNotifySettings("smp1"))!;
+      const { rev: _rev, ...noRev } = legacy;
+      void _rev;
+      await getStore().put("notify", noRev);
+      await dispatchNotification(noRev as typeof legacy, "video.failed", { id: "v" });
+      const afterLegacy = (await getNotifySettings("smp1"))!;
+      assert.equal(afterLegacy.deliveries![0].event, "video.failed");
+      assert.ok(afterLegacy.rev, "and carry a rev from then on");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
   it("logs the last deliveries, redelivers one signed afresh, and starts the log over for a new URL", async () => {
     const { WEBHOOK_LOG_SIZE, publicDelivery, redeliverNotification, deleteNotifySettings } = await import("../notifications");
     const calls: Array<{ headers: Record<string, string>; body: string }> = [];

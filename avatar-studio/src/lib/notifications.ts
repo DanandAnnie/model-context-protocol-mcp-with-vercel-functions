@@ -8,7 +8,7 @@ import { LOCAL_OWNER } from "./owner-id";
 import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
-import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Video, type WebhookDelivery } from "./types";
+import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
 import { getEmailProvider } from "./providers/email";
 import { config } from "./config";
 
@@ -174,11 +174,12 @@ export async function dispatchNotification(settings: NotifySettings, event: Noti
 
 /**
  * Sends a body to the settings' URL, signed afresh, and records the attempt as the last delivery and at the head of the
- * log. The record is written only over the settings as they are now (a conditional write on `rev`, tried again when
+ * log. The record is written only over the settings as they are now (a conditional write on `rev`, or on `updatedAt` for
+ * settings saved before `rev` existed, tried again when
  * something else wrote first), so concurrent deliveries keep each other's entries, and not at all when the webhook was
  * removed, saved anew, or pointed elsewhere meanwhile. Never throws.
  */
-async function deliver(settings: NotifySettings, event: NotifyEvent, body: string, redeliveryOf?: string): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
+async function deliver(settings: NotifySettings, event: NotifyEvent, body: string, redeliveryOf?: string, sample = false): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const id = newId("whd");
   const previous = activePreviousSecret(settings);
@@ -196,6 +197,8 @@ async function deliver(settings: NotifySettings, event: NotifyEvent, body: strin
         ...(previous ? { "X-Studio-Signature-Previous": `sha256=${signPayload(previous, timestamp, body)}` } : {}),
         "X-Studio-Delivery": id,
         ...(redeliveryOf ? { "X-Studio-Redelivery-Of": redeliveryOf } : {}),
+        // A sample says so outside the body too, so a receiver can drop it before parsing.
+        ...(sample ? { "X-Studio-Test": "true" } : {}),
       },
       body,
       redirect: "error",
@@ -205,6 +208,7 @@ async function deliver(settings: NotifySettings, event: NotifyEvent, body: strin
   } catch (err) {
     result = { id, at: nowIso(), event, ok: false, error: err instanceof Error ? err.message : "Delivery failed" };
   }
+  if (sample) result.test = true;
   const entry: WebhookDelivery = { ...result, id, ...(body.length <= MAX_KEPT_BODY ? { body } : {}), ...(redeliveryOf ? { redeliveryOf } : {}) };
   try {
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -212,12 +216,7 @@ async function deliver(settings: NotifySettings, event: NotifyEvent, body: strin
       // Removed, or removed and made again, or pointed elsewhere: the attempt belongs to a webhook no longer there.
       if (!latest || latest.url !== settings.url || latest.createdAt !== settings.createdAt) break;
       const next: NotifySettings = { ...latest, rev: newId("rev"), lastDelivery: result, deliveries: [entry, ...(latest.deliveries ?? [])].slice(0, WEBHOOK_LOG_SIZE) };
-      // Settings saved before `rev` existed are written once as before, and carry one from then on.
-      if (!latest.rev) {
-        await getStore().put("notify", next);
-        break;
-      }
-      if (await getStore().putIf("notify", next, "rev", latest.rev)) break;
+      if (await writeOver(latest, next)) break;
     }
   } catch {
     // Recording is best effort; the delivery itself has happened.
@@ -239,7 +238,7 @@ export async function redeliverNotification(deliveryId: string, ownerId: string 
   const original = settings?.deliveries?.find((d) => d.id === deliveryId);
   if (!settings || !original) throw new NotFoundError("That delivery is no longer in the log");
   if (original.body === undefined) throw new ValidationError("That delivery was too large to keep, so it cannot be sent again");
-  return deliver(settings, original.event, original.body, original.redeliveryOf ?? original.id);
+  return deliver(settings, original.event, original.body, original.redeliveryOf ?? original.id, !!original.test);
 }
 
 /** Called after a video's status is persisted; fires once when it reaches a final state. */
@@ -321,8 +320,33 @@ export async function notifyVideoTransition(prev: Video, next: Video): Promise<v
   });
 }
 
-export async function sendTestNotification(ownerId: string = LOCAL_OWNER) {
+/** What Settings can send to try the receiver: a plain ping, or a sample of one of the real events. */
+export const TEST_EVENTS = ["test", ...WEBHOOK_EVENTS] as const;
+export type TestEvent = (typeof TEST_EVENTS)[number];
+
+/**
+ * Made-up data shaped like each event's real `data`, so a receiver's handling can be tried before one happens: every id
+ * starts `sample_`, addresses are on example.com, and links point at example.com. As in a real event, a field with no
+ * value is left out (a video in no folder has no `folder`), and a lead is the share-page kind (`source: "share"`); a
+ * presenter's lead carries `agentId`, `agentName`, `conversationId`, and `lastMessage` in place of the video's fields.
+ */
+export function sampleEventData(event: WebhookEvent, now = nowIso()): Record<string, unknown> {
+  if (event === "lead.captured") {
+    return { source: "share", videoId: "sample_video", videoTitle: "Sample video", email: "viewer@example.com", name: "Sample Viewer", capturedAt: now };
+  }
+  const base = { id: "sample_video", title: "Sample video", createdAt: now, updatedAt: now };
+  return event === "video.completed"
+    ? { ...base, status: "completed", videoUrl: "https://example.com/sample.mp4", thumbnailUrl: "https://example.com/sample.jpg", durationSec: 42 }
+    : { ...base, status: "failed", error: "Sample failure: the renderer could not finish this video" };
+}
+
+/**
+ * Sends a test to the saved endpoint whatever events are chosen: a `test` ping, or a sample of a real event (its own name
+ * in `X-Studio-Event` and the body, sample data, `test: true` in the body, and `X-Studio-Test: true`). Null with no webhook.
+ */
+export async function sendTestNotification(ownerId: string = LOCAL_OWNER, event: TestEvent = "test") {
   const settings = await getNotifySettings(ownerId);
   if (!settings) return null;
-  return deliver(settings, "test", JSON.stringify({ id: newId("whe"), event: "test", timestamp: nowIso(), data: { message: "Avatar Studio webhook test" } }));
+  if (event === "test") return deliver(settings, "test", JSON.stringify({ id: newId("whe"), event: "test", timestamp: nowIso(), data: { message: "Avatar Studio webhook test" } }));
+  return deliver(settings, event, JSON.stringify({ id: newId("whe"), event, timestamp: nowIso(), test: true, data: sampleEventData(event) }), undefined, true);
 }

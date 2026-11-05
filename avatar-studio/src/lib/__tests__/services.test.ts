@@ -56,6 +56,9 @@ import { MockAvatarProvider } from "../providers/avatar/mock";
 import { MockScriptProvider } from "../providers/script/mock";
 import { setScriptProvider } from "../providers";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
+import { getStore } from "../store";
+import { UnauthorizedError } from "../errors";
+import type { ApiKey } from "../types";
 import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
@@ -2427,6 +2430,34 @@ describe("api keys", () => {
   it("caps the number of keys per owner", async () => {
     for (let i = 0; i < MAX_API_KEYS; i++) await createApiKey(`k${i}`, "u3");
     await assert.rejects(createApiKey("one more", "u3"), /At most/);
+  });
+
+  it("gives a key an optional lifetime, after which it is refused with its own message and its last use is not recorded", async () => {
+    const { apiKeyExpired } = await import("../api-keys");
+    const forever = await createApiKey("forever", "u4");
+    assert.equal(forever.key.expiresAt, undefined, "no lifetime, no expiry");
+    const before = Date.now();
+    const month = await createApiKey("month", "u4", "u4", 30);
+    const at = Date.parse(month.key.expiresAt!);
+    assert.ok(at >= before + 30 * 86_400_000 && at <= Date.now() + 30 * 86_400_000, "30 days from now");
+    assert.equal(await ownerForApiKey(month.secret), "u4", "works until then");
+    assert.equal(apiKeyExpired(month.key, at - 1), false);
+    assert.equal(apiKeyExpired(month.key, at), true, "the moment it expires, it is expired");
+    assert.equal(apiKeyExpired(forever.key, Date.now() + 1e12), false);
+
+    // Its lifetime run out: refused, saying so, and its last use left as it was.
+    const stored = (await getStore().get<ApiKey>("apikey", month.key.id))!;
+    await getStore().put("apikey", { ...stored, expiresAt: new Date(Date.now() - 1000).toISOString(), lastUsedAt: undefined });
+    await assert.rejects(ownerForApiKey(month.secret), (err: unknown) => err instanceof UnauthorizedError && /expired on \d{4}-\d\d-\d\d \d\d:\d\d UTC; create a new one/.test(err.message));
+    assert.equal((await getStore().get<ApiKey>("apikey", month.key.id))!.lastUsedAt, undefined);
+    assert.equal(await ownerForApiKey(forever.secret), "u4", "other keys are unaffected");
+    // Still listed (to be revoked), with when it expired and that it has, by the server's clock.
+    const listed = await listApiKeys("u4");
+    const gone = listed.find((k) => k.id === month.key.id)!;
+    assert.ok(gone.expiresAt);
+    assert.equal(gone.expired, true);
+    assert.equal(listed.find((k) => k.id === forever.key.id)!.expired, false);
+    assert.equal((await listApiKeys("u4", Date.now() - 86_400_000)).find((k) => k.id === month.key.id)!.expired, false, "judged at the time given");
   });
 });
 

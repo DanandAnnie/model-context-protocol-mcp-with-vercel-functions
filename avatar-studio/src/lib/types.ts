@@ -1331,6 +1331,8 @@ export interface ApiKey {
   createdBy?: string;
   createdAt: string;
   lastUsedAt?: string;
+  /** When the key stops working (an optional lifetime chosen when it was made); absent for a key that never expires. */
+  expiresAt?: string;
 }
 
 export type NotifyEvent = "video.completed" | "video.failed" | "lead.captured" | "test";

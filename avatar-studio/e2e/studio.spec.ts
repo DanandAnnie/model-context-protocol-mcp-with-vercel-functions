@@ -6696,6 +6696,37 @@ test("webhook settings reject private hosts and show the signing secret", async 
   expect((await (await page.request.get("/api/notifications")).json()).webhook).toBeNull();
 });
 
+test("API keys are made in Settings with an optional lifetime, shown once, listed with their expiry, and revoked", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  // A lifetime other than 30, 90, or 365 days is refused.
+  const bad = await page.request.post("/api/keys", { data: { name: `Bad ${tag}`, expiresInDays: 7 } });
+  expect(bad.status()).toBe(400);
+  expect(await bad.text()).toMatch(/expiresInDays must be 30, 90, 365/);
+  await page.goto("/settings");
+  await page.getByLabel("Key name").fill(`Expiring ${tag}`);
+  await expect(page.getByLabel("Key expiry").locator("option:checked")).toHaveText("Never expires");
+  await page.getByLabel("Key expiry").selectOption("90");
+  await page.getByRole("button", { name: "Create key" }).click();
+  const fresh = page.getByTestId("fresh-key");
+  await expect(fresh).toContainText("Copy your new key now");
+  const secret = (await fresh.locator("code").first().textContent())!.trim();
+  const listed = ((await (await page.request.get("/api/keys")).json()) as { keys: Array<{ id: string; name: string; expiresAt?: string; expired: boolean }> }).keys.find((k) => k.name === `Expiring ${tag}`)!;
+  expect(listed.expired).toBe(false);
+  const days = (Date.parse(listed.expiresAt!) - Date.now()) / 86_400_000;
+  expect(days).toBeGreaterThan(89.9);
+  expect(days).toBeLessThanOrEqual(90);
+  const row = page.getByRole("listitem").filter({ hasText: `Expiring ${tag}` });
+  await expect(row).toContainText(/ · expires /);
+  // It works until then, as a key with no lifetime does.
+  expect((await page.request.get("/api/videos?limit=1", { headers: { Authorization: `Bearer ${secret}` } })).status()).toBe(200);
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
+  page.once("dialog", (d) => d.accept());
+  await row.getByRole("button", { name: `Revoke Expiring ${tag}` }).click();
+  await expect(row).toHaveCount(0);
+  expect((await page.request.get("/api/videos?limit=1", { headers: { Authorization: `Bearer ${secret}` } })).status()).toBe(401);
+});
+
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };

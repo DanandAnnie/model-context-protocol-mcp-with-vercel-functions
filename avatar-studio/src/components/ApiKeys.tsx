@@ -6,12 +6,23 @@ import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
 import type { ApiKey } from "@/lib/types";
 
-type PublicKey = Omit<ApiKey, "hash">;
+/** A key as the server lists it, `expired` judged by the server's clock rather than this browser's. */
+type PublicKey = Omit<ApiKey, "hash"> & { expired?: boolean };
+
+/** The lifetimes offered when a key is made ("" for one that never expires), as the server takes them. */
+const LIFETIMES = [
+  { value: "", label: "Never expires" },
+  { value: "30", label: "Expires in 30 days" },
+  { value: "90", label: "Expires in 90 days" },
+  { value: "365", label: "Expires in 1 year" },
+] as const;
+
 
 /** Settings section: create, list, and revoke personal API keys. The secret is shown once. */
 export function ApiKeys() {
   const { data, error, refetch } = useApi<{ keys: PublicKey[] }>("/api/keys");
   const [name, setName] = useState("");
+  const [lifetime, setLifetime] = useState<(typeof LIFETIMES)[number]["value"]>("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [fresh, setFresh] = useState<{ name: string; secret: string } | null>(null);
@@ -22,7 +33,7 @@ export function ApiKeys() {
     setBusy(true);
     setErr(null);
     try {
-      const res = await api<{ key: PublicKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name }) });
+      const res = await api<{ key: PublicKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name, ...(lifetime ? { expiresInDays: Number(lifetime) } : {}) }) });
       setFresh({ name: res.key.name, secret: res.secret });
       setName("");
       await refetch();
@@ -79,6 +90,13 @@ export function ApiKeys() {
         }}
       >
         <input aria-label="Key name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Key name, e.g. Zapier" maxLength={60} className={`${inputClass} max-w-xs`} />
+        <select aria-label="Key expiry" value={lifetime} onChange={(e) => setLifetime(e.target.value as typeof lifetime)} title="A key that expires stops working on its own; scripts then need a new one" className={`${inputClass} w-auto`}>
+          {LIFETIMES.map((l) => (
+            <option key={l.value} value={l.value}>
+              {l.label}
+            </option>
+          ))}
+        </select>
         <Button type="submit" loading={busy} disabled={!name.trim()}>
           Create key
         </Button>
@@ -107,6 +125,15 @@ export function ApiKeys() {
               <div className="text-xs text-slate-500">
                 <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{k.prefix}…</code> · created {formatDate(k.createdAt)}
                 {k.lastUsedAt ? ` · last used ${formatDate(k.lastUsedAt)}` : " · never used"}
+                {k.expiresAt && !k.expired ? ` · expires ${formatDate(k.expiresAt)}` : ""}
+                {k.expiresAt && k.expired && (
+                  <>
+                    {" · "}
+                    <span className="font-medium text-red-700" data-testid="key-expired">
+                      expired {formatDate(k.expiresAt)}; requests with it are refused
+                    </span>
+                  </>
+                )}
               </div>
             </div>
             <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => revoke(k)} aria-label={`Revoke ${k.name}`}>

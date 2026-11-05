@@ -1587,3 +1587,13 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The docs now name the reads no key can make, and say what a read-only key isn't shown.
     - Settings takes its access choices from the server's list.
     - The end-to-end test also covers asking for a review, a scripts export, and a leads read.
+- Rotate the webhook signing secret (`6b0d2e4`). The secret was made once and kept for good, so one that leaked, or was pasted somewhere it shouldn't have been, could only be replaced by removing the webhook and losing its log. Settings now has a Rotate secret button under the signing secret, with "Keep the old secret working for 24 hours" ticked by default. While the old secret is still in use, the card says until when and offers Stop using it now.
+  - **Behaviour:** after a rotation with the overlap, each delivery is signed with the new secret in `X-Studio-Signature`, and also with the old one in `X-Studio-Signature-Previous` for 24 hours. A receiver still holding the old secret keeps verifying while it's moved over. Without the overlap, the old secret stops at once. The old secret is never shown again, by the API or the account export. Saving the webhook, or changing its URL, keeps the overlap as it keeps the secret, and the delivery log is kept.
+  - **API:** `POST /api/notifications/secret` (`{ "keepPrevious"? }`; a bare POST rotates with the overlap) and `DELETE /api/notifications/secret` to stop the previous secret early. Both are for editors only and return `404` without a webhook. While the overlap lasts, the webhook carries `previousSecretExpiresAt`. The docs' Node verifier now accepts either header.
+  - An independent review found nothing blocking. From its optional findings:
+    - Saving the webhook is now a conditional write too, tried again when a rotation or a delivery wrote first. A save racing a rotation can no longer bring back the secret just replaced or stopped. A save also no longer brings back a removed webhook, and no longer drops a delivery logged meanwhile.
+    - An overlap that has run out is no longer carried forward by a save.
+    - Settings for webhooks saved before revision ids existed are now updated with a conditional write as well.
+    - Rotating during an overlap now says the earlier secret stops at once, and the checkbox is disabled while a change is being sent.
+    - The docs' verifier compares byte lengths, so an odd header can't make it throw, and it rejects a timestamp that isn't digits.
+    - Tests cover a save racing a rotation, the export, and a read-only key, which sees neither secret and can't rotate.

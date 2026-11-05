@@ -1694,3 +1694,17 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The kinds group is labelled by its visible text, and "Tick at least one kind to save" is announced. The confirmation reads "Results for dubs and digital twins will be emailed to …".
     - More tests: escaping of the language and twin name, starring keeps the kinds, and Turn off keeps them in the browser.
     - The docs say a retried dub can email again, and that only dubs and twins come from the background check.
+- 4:5 portrait feed videos (`475f7b9`). HeyGen's v3 video API renders `aspect_ratio: "4:5"`, the frame Instagram and LinkedIn feeds show tallest. The studio offered only 16:9, 9:16, and 1:1.
+  - **Where to choose it:** 4:5 is a fourth shape everywhere a video's shape is chosen: the editor's Aspect ratio picker, the Batch page, a saved template, the brand kit's default, and Make other sizes. It renders at 1080×1350 (720×900 at 720p).
+  - **Playback:** the editor stage, video page, share page, and embed player play it in its own frame. oEmbed, the Embed snippet, and the email snippet size it 4:5. The library's Portrait shape filter now includes it.
+  - **Imports:** a HeyGen Studio template made at 4:5 is kept as 4:5. A PDF deck of slightly tall pages becomes a 4:5 video instead of a letterboxed 9:16: a carousel post, or a Letter or A4 page.
+  - **Not offered for music:** HeyGen's HyperFrames renders a music mix in 16:9, 9:16, or 1:1 only. A 4:5 video is left off the Music page, and the API refuses it with what to do: make a 9:16 or 1:1 size first.
+  - An independent review found nothing blocking. From its optional findings:
+    - HeyGen Studio templates at 4:5 had been recorded as 16:9; they keep their shape now.
+    - A 4:5 PDF deck had imported as 9:16 with white bands; it becomes 4:5 now.
+    - The Embed snippet and oEmbed now size a 4:5 video the same way, from one function.
+    - The Music page leaves 4:5 videos out rather than refusing them only at Mix.
+    - Make other sizes takes a request naming every shape, or one with repeats, as it did before.
+    - The music mix throws, rather than narrowing a 4:5 frame quietly, should the earlier check ever move.
+    - The end-to-end test checks the player's own frame on the video and share pages, and that Music leaves the video out.
+    - The docs list the new embed, email, and oEmbed sizes and the music refusal.

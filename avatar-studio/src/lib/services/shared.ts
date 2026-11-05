@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { after } from "next/server";
 import { ConflictError, NotFoundError } from "../errors";
-import { notifyVideoTransition } from "../notifications";
+import { notifyJobTransition, notifyVideoTransition } from "../notifications";
 import { LOCAL_OWNER } from "../owner-id";
 import { getStore, type ItemKind } from "../store";
 import type { Video } from "../types";
@@ -79,13 +79,21 @@ export function nextUpdatedAt(previous: string): string {
  * than undone, and the renewal is not lost to it either; a later answer another check stored meanwhile is kept as it is.
  * A row deleted meanwhile stays deleted: `job` is returned as it was.
  */
-export async function writeRefresh<T extends { id: string; updatedAt: string; checkedAt?: string }>(kind: RenamableKind, job: T, apply: (current: T) => T): Promise<T> {
+export async function writeRefresh<T extends { id: string; ownerId: string; status: string; updatedAt: string; checkedAt?: string }>(kind: RenamableKind, job: T, apply: (current: T) => T): Promise<T> {
   let current: T | null = job;
   for (let attempt = 0; attempt < 3 && current; attempt++) {
     const next = { ...apply(current), updatedAt: nextUpdatedAt(current.updatedAt) };
     // Another check (another server, say) stored a later answer meanwhile: it stands, rather than this one undoing it.
     if (current !== job && current.checkedAt !== job.checkedAt && (current.checkedAt ?? "") >= (next.checkedAt ?? "")) return current;
-    if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) return next;
+    // A finished job is never moved back to being made by an answer that was out of date when it arrived, so it cannot
+    // finish (and send its webhook) a second time.
+    if (current !== job && current.status !== "processing" && next.status === "processing") return current;
+    if (await getStore().putIf(kind, next, "updatedAt", current.updatedAt)) {
+      // The write that moved a job off "processing" is the one that sends its webhook (job.completed or job.failed).
+      const prev = current;
+      if (prev.status !== next.status) await afterResponse(() => notifyJobTransition(kind, prev, next));
+      return next;
+    }
     current = await getStore().get<T>(kind, job.id);
   }
   return current ?? job;

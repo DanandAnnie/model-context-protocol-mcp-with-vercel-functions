@@ -401,6 +401,58 @@ export async function notifyTwinTransition(prev: TwinJob, next: TwinJob): Promis
   await dispatchNotification(settings, status === "completed" ? "twin.completed" : "twin.failed", { id, name, status, consent, avatarId, error, createdAt, updatedAt });
 }
 
+/**
+ * The studio's other renderer jobs a webhook reports on, by the kind each is stored as: the `type` it is sent as, and the
+ * studio page it is listed on (sent as `pageUrl`).
+ */
+export const JOB_EVENT_TYPES = {
+  footage: { type: "broll", page: "/footage" },
+  shoot: { type: "photo_shoot", page: "/photos" },
+  cleanup: { type: "cleanup", page: "/cleanup" },
+  lipsync: { type: "lipsync", page: "/lipsync" },
+  music: { type: "music", page: "/music" },
+  voicechange: { type: "voice_change", page: "/voice-changer" },
+  instantvoice: { type: "instant_voice", page: "/voice-changer" },
+} as const;
+export type JobEventKind = keyof typeof JOB_EVENT_TYPES;
+
+/** What job.completed and job.failed read from any of those jobs (an instant voice has a `name` where the rest have a `title`). */
+export interface ReportedJob {
+  id: string;
+  ownerId?: string;
+  status: string;
+  title?: string;
+  name?: string;
+  error?: string;
+  createdAt?: string;
+  updatedAt: string;
+}
+
+/**
+ * Sends job.completed or job.failed when a B-roll clip, photo shoot, clean-up, lip sync, music mix, voice recording, or
+ * instant voice that was being made is ready or fails, from the write that moved it there (each written once,
+ * conditionally, so sent once). Only a job leaving "processing" is sent: a finished one whose link later expires is not.
+ * The renderer's ids and its signed links (which expire) are not sent; `pageUrl` is where the job is listed, and the
+ * job's listing gives its current link.
+ */
+export async function notifyJobTransition(kind: JobEventKind, prev: ReportedJob, next: ReportedJob): Promise<void> {
+  if (prev.status !== "processing" || (next.status !== "completed" && next.status !== "failed")) return;
+  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+  if (!settings) return;
+  const { type, page } = JOB_EVENT_TYPES[kind];
+  const { id, status, error, createdAt, updatedAt } = next;
+  await dispatchNotification(settings, status === "completed" ? "job.completed" : "job.failed", {
+    type,
+    id,
+    title: next.title ?? next.name,
+    status,
+    error: status === "failed" ? error : undefined,
+    pageUrl: `${config.appUrl.replace(/\/$/, "")}${page}`,
+    createdAt,
+    updatedAt,
+  });
+}
+
 /** What Settings can send to try the receiver: a plain ping, or a sample of one of the real events. */
 export const TEST_EVENTS = ["test", ...WEBHOOK_EVENTS] as const;
 export type TestEvent = (typeof TEST_EVENTS)[number];
@@ -435,6 +487,10 @@ export function sampleEventData(event: WebhookEvent, now = nowIso(), source: Lea
     return event === "twin.completed"
       ? { ...twin, status: "completed", consent: "accepted", avatarId: "sample_avatar" }
       : { ...twin, status: "failed", consent: "not_requested", error: "Sample failure: the renderer could not train a twin from that footage" };
+  }
+  if (event === "job.completed" || event === "job.failed") {
+    const job = { type: "broll", id: "sample_clip", title: "Sample clip", pageUrl: "https://example.com/footage", createdAt: now, updatedAt: now };
+    return event === "job.completed" ? { ...job, status: "completed" } : { ...job, status: "failed", error: "Sample failure: the renderer could not make this clip" };
   }
   const base = { id: "sample_video", title: "Sample video", createdAt: now, updatedAt: now };
   return event === "video.completed"

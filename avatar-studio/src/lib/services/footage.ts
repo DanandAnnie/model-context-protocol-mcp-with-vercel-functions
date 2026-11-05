@@ -12,7 +12,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
 import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
-import { jobChecker } from "./job-checks";
+import { checkWaitingJobs, jobChecker } from "./job-checks";
 import { plainScene, rewriteIfNamed, sniff } from "./backdrops";
 import { promptExcerpt } from "./lookpacks";
 import { danglingLabels } from "../picture-labels";
@@ -126,6 +126,11 @@ export function publicFootage(job: FootageJob): PublicFootage {
 }
 
 const checks = jobChecker<FootageJob>((job) => refreshFootage(job));
+
+/** The scheduled background check of these jobs, across every account (see checkWaitingJobs). */
+export function checkFootageInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("footage", checks, max, now);
+}
 
 /** Forgets when clips were last asked about (tests). */
 export function forgetFootageChecks(): void {

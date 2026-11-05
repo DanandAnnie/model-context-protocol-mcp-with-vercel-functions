@@ -11,7 +11,7 @@ import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { decodeDataUrl } from "../providers/image";
 import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
-import { RELINK_MS, jobChecker } from "./job-checks";
+import { RELINK_MS, checkWaitingJobs, jobChecker } from "./job-checks";
 import { sniff } from "./backdrops";
 
 /** Photo shoots an account keeps; another needs one deleted first. */
@@ -84,6 +84,11 @@ export function publicShoot(job: ShootJob): PublicShoot {
 }
 
 const checks = jobChecker<ShootJob>((job) => refreshShoot(job));
+
+/** The scheduled background check of these jobs, across every account (see checkWaitingJobs). */
+export function checkShootsInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("shoot", checks, max, now);
+}
 
 /** Forgets when shoots were last asked about (tests). */
 export function forgetShootChecks(): void {

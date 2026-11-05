@@ -12,7 +12,7 @@ import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { getVideo } from "./videos";
 import { freshVideoUrl } from "./highlights";
-import { jobChecker } from "./job-checks";
+import { checkWaitingJobs, jobChecker } from "./job-checks";
 import { withSuffix } from "../text";
 
 /** Videos with music an account keeps; another needs one deleted first. */
@@ -93,6 +93,11 @@ function clock(sec: number): string {
 }
 
 const checks = jobChecker<MusicJob>((job) => refreshMusic(job));
+
+/** The scheduled background check of these jobs, across every account (see checkWaitingJobs). */
+export function checkMusicJobsInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("music", checks, max, now);
+}
 
 /** Forgets when mixes were last asked about (tests). */
 export function forgetMusicChecks(): void {

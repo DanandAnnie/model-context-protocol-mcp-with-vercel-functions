@@ -17,7 +17,7 @@ import { UnsafeUrlError } from "../safe-url";
 import { getBackdrop, getBackdropImage } from "./backdrops";
 import { prepareClipOnce } from "./videos";
 import { rememberMadeVoices } from "./voices";
-import { jobChecker } from "./job-checks";
+import { checkWaitingJobs, jobChecker } from "./job-checks";
 import { graphemes, withSuffix } from "../text";
 import { wordCues, type Cue } from "../captions";
 import { pronunciationLanguage } from "../pronounce";
@@ -289,6 +289,16 @@ async function assetOf(clip: AudioClip, ownerId: string): Promise<string> {
 
 const voiceChecks = jobChecker<InstantVoice>((v) => refreshInstantVoice(v));
 const changeChecks = jobChecker<VoiceChange>((c) => refreshVoiceChange(c));
+
+/** The scheduled background check of instant voices being made, across every account (see checkWaitingJobs). */
+export function checkInstantVoicesInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("instantvoice", voiceChecks, max, now);
+}
+
+/** The scheduled background check of recordings being spoken again or text being spoken, across every account. */
+export function checkVoiceChangesInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("voicechange", changeChecks, max, now);
+}
 
 /** Forgets when voices and conversions were last asked about (tests). */
 export function forgetVoiceChangerChecks(): void {

@@ -2,6 +2,8 @@
 // about at most every few seconds while it runs, one check at a time however many pages follow it, and a finished
 // job's signed links are renewed once old, waiting a few minutes between tries so a dead job does not cost a call per look.
 
+import { getStore, type ItemKind } from "../store";
+
 /** Finished jobs' links are signed for a limited time, so they are renewed once this old. */
 export const RELINK_MS = 30 * 60 * 1000;
 /** A running job is asked about at most this often. */
@@ -10,6 +12,8 @@ export const RECHECK_MS = 4_000;
 export const RETRY_FINISHED_MS = 5 * 60 * 1000;
 /** Renderer checks one listing makes at most. */
 export const MAX_CHECKS_PER_CALL = 5;
+/** Jobs of one kind the scheduled background check asks about at most, across every account. */
+export const BACKGROUND_JOB_CHECKS = 10;
 
 interface Followed {
   id: string;
@@ -67,4 +71,15 @@ export function jobChecker<T extends Followed>(refresh: (job: T) => Promise<T>) 
       attempted.clear();
     },
   };
+}
+
+/**
+ * The scheduled background check for one kind of job: those still being made, across every account, asked about the
+ * way a listing would (the least recently asked first, at most every few seconds each), so a job nobody is watching
+ * still finishes and its webhook is sent. Returns how many were asked about and how many finished or failed.
+ */
+export async function checkWaitingJobs<T extends Followed>(kind: ItemKind, checker: ReturnType<typeof jobChecker<T>>, max = BACKGROUND_JOB_CHECKS, now = Date.now()): Promise<{ checked: number; moved: number }> {
+  const waiting = (await getStore().list<T>(kind)).filter((j) => j.status === "processing");
+  const { jobs: after, checked } = await checker.followCounted(waiting, now, max);
+  return { checked, moved: after.filter((j, i) => j.status !== waiting[i].status).length };
 }

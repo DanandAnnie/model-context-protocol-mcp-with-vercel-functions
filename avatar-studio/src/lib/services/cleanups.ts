@@ -12,7 +12,7 @@ import { assertPublicHttpUrl } from "../safe-url";
 import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { getVideo } from "./videos";
 import { freshVideoUrl } from "./highlights";
-import { jobChecker } from "./job-checks";
+import { checkWaitingJobs, jobChecker } from "./job-checks";
 import { withSuffix } from "../text";
 
 /** Cleaned recordings an account keeps; another needs one deleted first. */
@@ -50,6 +50,11 @@ export async function renameCleanup(id: string, title: string, ownerId: string =
 }
 
 const checks = jobChecker<CleanupJob>((job) => refreshCleanup(job));
+
+/** The scheduled background check of these jobs, across every account (see checkWaitingJobs). */
+export function checkCleanupsInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("cleanup", checks, max, now);
+}
 
 /** Forgets when cleanups were last asked about (tests). */
 export function forgetCleanupChecks(): void {

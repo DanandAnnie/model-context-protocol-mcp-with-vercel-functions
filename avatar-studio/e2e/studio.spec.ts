@@ -6700,11 +6700,11 @@ test("webhook settings reject private hosts and show the signing secret", async 
   // Choose which events are sent: every one to start with; none at all cannot be saved.
   await page.reload();
   const events = page.getByRole("group", { name: "Send when" });
-  for (const name of [/A render completes/, /A render fails/, /A dub is ready/, /A dub fails/, /A dub.s lines are ready to proofread/, /A digital twin is ready/, /A digital twin fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
+  for (const name of [/A render completes/, /A render fails/, /A dub is ready/, /A dub fails/, /A dub.s lines are ready to proofread/, /A digital twin is ready/, /A digital twin fails/, /or voice is ready/, /or voice fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
   await events.getByRole("checkbox", { name: /A visitor leaves an email/ }).uncheck();
   await expect(page.getByText("Save the webhook to send these events.")).toBeVisible();
   await page.getByRole("button", { name: "Save webhook" }).click();
-  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed", "translation.proofread_ready", "twin.completed", "twin.failed"]);
+  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed", "translation.proofread_ready", "twin.completed", "twin.failed", "job.completed", "job.failed"]);
   await page.reload();
   await expect(events.getByRole("checkbox", { name: /A visitor leaves an email/ })).not.toBeChecked();
   await events.getByRole("checkbox", { name: /A render completes/ }).uncheck();
@@ -6715,12 +6715,15 @@ test("webhook settings reject private hosts and show the signing secret", async 
   await events.getByRole("checkbox", { name: /A dub.s lines are ready to proofread/ }).uncheck();
   await events.getByRole("checkbox", { name: /A digital twin is ready/ }).uncheck();
   await events.getByRole("checkbox", { name: /A digital twin fails/ }).uncheck();
+  await events.getByRole("checkbox", { name: /or voice is ready/ }).uncheck();
+  await expect(page.getByTestId("webhook-events-none")).toHaveCount(0);
+  await events.getByRole("checkbox", { name: /or voice fails/ }).uncheck();
   await expect(page.getByTestId("webhook-events-none")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save webhook" })).toBeDisabled();
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio", events: [] } })).status()).toBe(400);
   // A save from the API that leaves the events out keeps the choice.
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio" } })).status()).toBe(200);
-  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed", "translation.proofread_ready", "twin.completed", "twin.failed"]);
+  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed", "translation.proofread_ready", "twin.completed", "twin.failed", "job.completed", "job.failed"]);
 
   await page.reload();
   page.once("dialog", (d) => d.accept());
@@ -6854,6 +6857,46 @@ test("the scheduled background check takes only the cron secret, and moves a wai
     .toBe(true);
   await page.request.delete("/api/notifications");
   await page.request.delete(`/api/translate/${id}`);
+});
+
+test("the background check finishes a B-roll clip nobody is watching and sends job.completed", async ({ page }) => {
+  test.setTimeout(90_000);
+  // Only this event is sent, and nothing lists the clips, so the log shows what the check itself moved.
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/jobs", events: ["job.completed"] } })).status()).toBe(200);
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/footage", { data: { prompt: `A slow pan across a harbour at dawn ${tag}`, title: `Harbour ${tag}` } });
+  expect(made.status()).toBe(202);
+  const id = ((await made.json()) as { footage: { id: string } }).footage.id;
+  try {
+    // The demo makes a clip a few seconds after it is asked for; until then the check finds it still being made. Nothing
+    // else lists the clips meanwhile, so the check is what moves it.
+    let movedClips = 0;
+    await expect
+      .poll(
+        async () => {
+          const run = await page.request.get("/api/cron/checks", { headers: { authorization: "Bearer e2e-cron-secret" } });
+          const body = (await run.json()) as { ok: boolean; jobs: Record<string, { checked: number; moved: number }> };
+          expect(body.ok).toBe(true);
+          expect(Object.keys(body.jobs)).toEqual(["broll", "photo_shoot", "cleanup", "lipsync", "music", "voice_change", "instant_voice"]);
+          movedClips += body.jobs.broll.moved;
+          return movedClips;
+        },
+        { timeout: 60_000, intervals: [2_000] },
+      )
+      .toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(async () => ((await (await page.request.get("/api/notifications")).json()).webhook.deliveries ?? []).some((d: { event: string }) => d.event === "job.completed"), { timeout: 30_000 })
+      .toBe(true);
+    const clip = ((await (await page.request.get("/api/footage")).json()) as { footage: Array<{ id: string; status: string }> }).footage.find((f) => f.id === id);
+    expect(clip?.status).toBe("completed");
+    // Settings names the events and can send a sample of each.
+    await page.goto("/settings");
+    await expect(page.getByRole("group", { name: "Send when" }).getByRole("checkbox", { name: /or voice is ready/ })).toBeChecked();
+    await expect(page.getByLabel("Test to send").locator("option")).toContainText(["Sample: B-roll clip is ready", "Sample: B-roll clip fails"]);
+  } finally {
+    await page.request.delete("/api/notifications");
+    await page.request.delete(`/api/footage/${id}`);
+  }
 });
 
 test("Settings sends a marked sample of a webhook event, logged as a sample", async ({ page }) => {

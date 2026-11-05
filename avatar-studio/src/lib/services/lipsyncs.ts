@@ -14,7 +14,7 @@ import { owned, renameJob, stripUndefined, writeRefresh } from "./shared";
 import { getVideo, prepareClipOnce } from "./videos";
 import { findClip, getClip } from "./clips";
 import { freshVideoUrl } from "./highlights";
-import { jobChecker } from "./job-checks";
+import { checkWaitingJobs, jobChecker } from "./job-checks";
 import { withSuffix } from "../text";
 
 /** Lip-synced videos an account keeps; another needs one deleted first. */
@@ -68,6 +68,11 @@ export async function renameLipsync(id: string, title: string, ownerId: string =
 }
 
 const checks = jobChecker<LipsyncJob>((job) => refreshLipsync(job));
+
+/** The scheduled background check of these jobs, across every account (see checkWaitingJobs). */
+export function checkLipsyncsInBackground(max?: number, now?: number): Promise<{ checked: number; moved: number }> {
+  return checkWaitingJobs("lipsync", checks, max, now);
+}
 
 /** Forgets when lip syncs were last asked about (tests). */
 export function forgetLipsyncChecks(): void {

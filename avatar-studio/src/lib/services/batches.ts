@@ -163,14 +163,17 @@ export async function createBatch(input: z.infer<typeof batchRequestSchema>, own
 }
 
 /** The columns of a batch's links download, one row per recipient. */
-export const BATCH_LINK_COLUMNS = ["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created"] as const;
+export const BATCH_LINK_COLUMNS = ["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created", "views", "last_viewed", "watched_to_end", "cta_clicks"] as const;
 
 /**
  * A batch's videos as rows for a mail merge, one per recipient: in the order of the CSV it was made from (videos made
  * before rows were kept come after, oldest first). Where a row has several videos (a failed render and its retries),
  * the one kept is a ready one if there is one, else the newest. The share link is given only where a recipient can
  * open it (the video is ready and its link is on and not expired), so a blank cell means "do not send yet"; a link
- * that will expire, needs a password, or asks for an email says so in its own column.
+ * that will expire, needs a password, or asks for an email says so in its own column. A ready video also says how often
+ * its share page was viewed, when last, how many viewers played it to the end, and how many clicked its call to action
+ * (0 before any), so the recipients who have not watched yet can be followed up; the columns come last, so a mail merge
+ * set up on the earlier ones keeps working.
  */
 export function batchLinkRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof BATCH_LINK_COLUMNS)[number], string | number | undefined>> {
   const origin = base.replace(/\/$/, "");
@@ -187,6 +190,10 @@ export function batchLinkRows(videos: Video[], base: string, now = Date.now()): 
       email_required: live && v.shareGate ? "yes" : undefined,
       video_id: v.id,
       created: v.createdAt,
+      views: v.status === "completed" ? (v.views ?? 0) : undefined,
+      last_viewed: v.status === "completed" ? v.lastViewedAt : undefined,
+      watched_to_end: v.status === "completed" ? (v.watch?.q100 ?? 0) : undefined,
+      cta_clicks: v.status === "completed" ? (v.ctaClicks ?? 0) : undefined,
     };
   });
 }
@@ -238,6 +245,11 @@ export interface BatchSummary {
    * Retry failed to start again; a failed render already started again is not among them, as its newer copy stands in.
    */
   failedIds: string[];
+  /**
+   * Of the `ready` videos, those whose share page has been viewed at least once (by anyone with the link, the account's
+   * own check of it included), so most often the recipients who have opened theirs.
+   */
+  viewed: number;
   /** When its first video was started. */
   startedAt: string;
 }
@@ -288,6 +300,7 @@ export function batchSummaries(videos: Video[], limit = RECENT_BATCHES): BatchSu
       making: kept.filter((v) => v.status === "queued" || v.status === "processing").length,
       failed: failed.length,
       failedIds: failed.map((v) => v.id),
+      viewed: kept.filter((v) => v.status === "completed" && (v.views ?? 0) > 0).length,
       startedAt,
     };
   });

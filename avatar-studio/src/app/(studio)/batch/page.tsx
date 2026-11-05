@@ -583,6 +583,7 @@ export default function BatchPage() {
                   </Link>
                   <div className="text-xs text-slate-500" data-testid="recent-batch-counts">
                     {b.videos} {b.videos === 1 ? "video" : "videos"} · {b.ready} ready
+                    {b.ready ? ` · ${b.viewed} viewed` : ""}
                     {b.making ? ` · ${b.making} being made` : ""}
                     {b.failed ? ` · ${b.failed} failed` : ""} · started {formatDate(b.startedAt)}
                   </div>

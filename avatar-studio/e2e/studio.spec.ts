@@ -5736,6 +5736,17 @@ test("the Batch page lists recent batches, each leading to its videos and its li
   const csv = await (await page.request.get(`/api/videos/batch/${batchId}`)).text();
   expect(csv.split("\n")[0]).toContain("recipient");
   expect(csv).toContain("Ana");
+  // Once both are ready, a view of Ana's share page shows on the row and in the links file.
+  const { videos } = (await made.json()) as { videos: Array<{ id: string; rowLabel: string }> };
+  const ana = videos.find((v) => v.rowLabel === "Ana")!;
+  await Promise.all(videos.map((v) => expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed")));
+  expect((await (await page.request.post(`/api/videos/${ana.id}/view`)).json()).counted).toBe(true);
+  await page.reload();
+  await expect(row.getByTestId("recent-batch-counts")).toHaveText(/^2 videos · 2 ready · 1 viewed · started /);
+  const lines = (await (await page.request.get(`/api/videos/batch/${batchId}`)).text()).replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+  expect(lines[0]).toMatch(/,"?views"?,"?last_viewed"?,"?watched_to_end"?,"?cta_clicks"?$/);
+  expect(lines.find((l) => l.includes(ana.id))).toMatch(/,"?1"?,"?\d{4}-\d\d-\d\dT[^,]*,"?0"?,"?0"?$/);
+  expect(lines.find((l) => l.includes("Ben") && !l.includes(ana.id))).toMatch(/,"?0"?,"?"?,"?0"?,"?0"?$/);
   await row.getByRole("link", { name: new RegExp(`^Recent ${tag}, started `) }).click();
   await expect(page).toHaveURL(new RegExp(`/videos\\?batch=${batchId}$`));
   await expect(page.getByText(`Recent ${tag} – Ana`)).toBeVisible();
@@ -5968,7 +5979,7 @@ test("personalized batch creates one video per CSV row", async ({ page }) => {
   const linksDownload = page.waitForEvent("download");
   await page.getByRole("link", { name: "Download links (CSV)" }).click();
   const links = parseCsv(await readFile(await (await linksDownload).path(), "utf8"));
-  expect(links.columns).toEqual(["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created"]);
+  expect(links.columns).toEqual(["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created", "views", "last_viewed", "watched_to_end", "cta_clicks"]);
   expect(links.rows.map((r) => [r.row, r.recipient, r.title])).toEqual([["1", "Jordan", "Welcome video – Jordan"], ["2", "Priya", "Welcome video – Priya"]]);
   for (const r of links.rows) expect(r.share_link).toBe(r.status === "completed" ? `http://localhost:3100/share/${r.video_id}` : "");
   expect((await page.request.get("/api/videos/batch/batch_nosuch")).status()).toBe(404);

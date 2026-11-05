@@ -75,6 +75,33 @@ describe("batch links", () => {
     assert.deepEqual(csv.columns, [...BATCH_LINK_COLUMNS]);
   });
 
+  it("says how each ready recipient's video was watched, and leaves those cells blank for one not ready", () => {
+    const at = "2026-01-01T00:00:00.000Z";
+    const v = (id: string, batchRow: number, extra: Partial<Video>) =>
+      ({ id, title: `Hi – ${id}`, script: "Hi", avatarId: "a", voiceId: "v", aspect: "16:9", status: "completed", provider: "mock", createdAt: at, updatedAt: at, batchId: "batch_v", batchRow, rowLabel: id, ...extra }) as Video;
+    const rows = batchLinkRows(
+      [
+        v("seen", 1, { views: 4, lastViewedAt: "2026-01-03T10:00:00.000Z", watch: { q25: 3, q50: 2, q75: 2, q100: 1 }, ctaClicks: 2 }),
+        v("unseen", 2, {}),
+        v("making", 3, { status: "processing" }),
+        v("broke", 4, { status: "failed" }),
+      ],
+      "https://studio.example",
+    );
+    assert.deepEqual(
+      rows.map((r) => [r.video_id, r.views, r.last_viewed, r.watched_to_end, r.cta_clicks]),
+      [
+        ["seen", 4, "2026-01-03T10:00:00.000Z", 1, 2],
+        ["unseen", 0, undefined, 0, 0],
+        ["making", undefined, undefined, undefined, undefined],
+        ["broke", undefined, undefined, undefined, undefined],
+      ],
+    );
+    // The new columns come after the ones a mail merge may already be set up on.
+    assert.deepEqual(BATCH_LINK_COLUMNS.slice(0, 10), ["row", "recipient", "title", "status", "share_link", "share_expires", "password_required", "email_required", "video_id", "created"]);
+    assert.deepEqual(BATCH_LINK_COLUMNS.slice(10), ["views", "last_viewed", "watched_to_end", "cta_clicks"]);
+  });
+
   it("keeps the row when a failed render of the batch is retried", async () => {
     // Stamped with the same instant as its retry will be, so only the retry link tells them apart.
     const failed: Video = { id: "vid_batch_failed", ownerId: OWNER, batchId: "batch_y", rowLabel: "Gus", batchRow: 7, title: "Open house – Gus", script: "Hi Gus.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, status: "failed", provider: "mock", error: "boom", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as Video;

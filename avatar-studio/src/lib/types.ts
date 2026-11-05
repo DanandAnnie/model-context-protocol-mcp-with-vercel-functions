@@ -2,12 +2,18 @@ import type { DescribedAspect, LookPackAspect, LookPackKey } from "./look-packs"
 import { graphemes } from "./text";
 // Shared domain types for Avatar Studio.
 
-export type AspectRatio = "16:9" | "9:16" | "1:1";
+export type AspectRatio = "16:9" | "9:16" | "1:1" | "4:5";
+
+/** Every frame shape a video can be made in, in the order pickers list them (4:5 is the portrait feed post). */
+export const ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:5"] as const satisfies readonly AspectRatio[];
+/** What each shape is called next to its ratio. */
+export const ASPECT_NAMES: Record<AspectRatio, string> = { "16:9": "landscape", "9:16": "portrait", "1:1": "square", "4:5": "portrait feed" };
 
 export const ASPECT_DIMENSIONS: Record<AspectRatio, { width: number; height: number }> = {
   "16:9": { width: 1920, height: 1080 },
   "9:16": { width: 1080, height: 1920 },
   "1:1": { width: 1080, height: 1080 },
+  "4:5": { width: 1080, height: 1350 },
 };
 
 /** Output quality; the short side of the frame in pixels. */

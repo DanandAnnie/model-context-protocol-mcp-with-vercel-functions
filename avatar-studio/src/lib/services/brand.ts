@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { nowIso } from "../ids";
 import { getStore } from "../store";
-import { MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, WATERMARK_CORNERS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, type BrandKit } from "../types";
+import { ASPECT_RATIOS, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, WATERMARK_CORNERS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, type BrandKit } from "../types";
 import { silentProblem } from "../pauses";
 import { graphemes } from "../text";
 import { LOCAL_OWNER } from "../owner-id";
@@ -107,7 +107,7 @@ export const brandKitSchema = z.object({
   writingStyle: z.string().trim().max(MAX_WRITING_STYLE, `The writing style must be ${MAX_WRITING_STYLE} characters or fewer`).optional(),
   defaultAvatarId: z.string().trim().max(200).optional(),
   defaultVoiceId: z.string().trim().max(200).optional(),
-  defaultAspect: z.enum(["16:9", "9:16", "1:1"]).optional(),
+  defaultAspect: z.enum(ASPECT_RATIOS).optional(),
   defaultResolution: z.enum(["720p", "1080p"]).optional(),
   captionsByDefault: z.boolean().optional(),
   captionStyle: captionStyleSchema.optional(),

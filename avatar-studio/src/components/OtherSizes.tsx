@@ -5,14 +5,14 @@ import { Button, Card } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { api } from "@/lib/client";
-import { sceneTextFits, type AspectRatio, type Video } from "@/lib/types";
+import { ASPECT_NAMES as SHAPE_NAMES, ASPECT_RATIOS, sceneTextFits, type AspectRatio, type Video } from "@/lib/types";
 
-const ASPECTS: AspectRatio[] = ["16:9", "9:16", "1:1"];
-const ASPECT_NAMES: Record<AspectRatio, string> = { "16:9": "16:9 landscape", "9:16": "9:16 portrait", "1:1": "1:1 square" };
+const ASPECTS: readonly AspectRatio[] = ASPECT_RATIOS;
+const ASPECT_NAMES = Object.fromEntries(ASPECT_RATIOS.map((a) => [a, `${a} ${SHAPE_NAMES[a]}`])) as Record<AspectRatio, string>;
 type Size = Pick<Video, "id" | "title" | "aspect" | "status">;
 
 /**
- * "Make other sizes": renders the video again in the frame shapes it does not have yet (a portrait cut for stories and
+ * "Make other sizes": renders the video again in the frame shapes it does not have yet (a 4:5 or 9:16 portrait cut for feeds, stories, and
  * reels, a square for feeds), each as a new video with the same scenes and settings, and links the sizes it has. Says
  * which on-screen text would not fit one line in a shape, before anything is rendered.
  */

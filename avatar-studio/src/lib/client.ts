@@ -89,7 +89,7 @@ export function emailSnippet(video: { id: string; title: string; aspect?: string
   const share = `${base.replace(/\/$/, "")}/share/${video.id}`;
   // Sized in the video's shape, so a mail client that ignores the style (Outlook) keeps it; a cover, which the picture
   // may be (a link asking for an email first) and can be of any shape, is sized by its width alone.
-  const [width, height] = video.aspect === "9:16" ? [270, 480] : video.aspect === "1:1" ? [360, 360] : [480, 270];
+  const [width, height] = video.aspect === "9:16" ? [270, 480] : video.aspect === "1:1" ? [360, 360] : video.aspect === "4:5" ? [320, 400] : [480, 270];
   const sized = video.cover ? "" : ` height="${height}"`;
   const alt = escapeHtml(`Watch the video: ${video.title}`);
   const html = `<a href="${escapeHtml(share)}"><img src="${escapeHtml(`${share}/preview.gif`)}" alt="${alt}" width="${width}"${sized} style="display:block;max-width:100%;height:auto;border:0"></a>`;
@@ -211,13 +211,16 @@ export function shareAttention(videos: { shareDisabled?: boolean; shareExpiresAt
 /** The library's "made within" windows, in days: rolling windows of 24-hour days counted back from `now`. */
 export const CREATED_WITHIN_DAYS = { "7d": 7, "30d": 30, "90d": 90 } as const;
 
-/** The library's shape filter, by the aspect ratio a video was made in: landscape 16:9, portrait 9:16, square 1:1. */
-export const SHAPE_ASPECT = { landscape: "16:9", portrait: "9:16", square: "1:1" } as const;
+/**
+ * The library's shape filter, by the aspect ratio a video was made in: landscape 16:9, portrait 9:16 or the 4:5
+ * portrait feed post, square 1:1.
+ */
+export const SHAPE_ASPECT = { landscape: ["16:9"], portrait: ["9:16", "4:5"], square: ["1:1"] } as const;
 export const SHAPE_FILTERS = Object.keys(SHAPE_ASPECT) as (keyof typeof SHAPE_ASPECT)[];
 
 /** Whether a video was made in a shape; one stored without an aspect ratio was made in the 16:9 default. */
 export function inShape(video: { aspect?: string }, shape: keyof typeof SHAPE_ASPECT): boolean {
-  return (video.aspect ?? "16:9") === SHAPE_ASPECT[shape];
+  return (SHAPE_ASPECT[shape] as readonly string[]).includes(video.aspect ?? "16:9");
 }
 
 /** The library's length filter, by a finished video's running time: under a minute, one to three minutes, over three. */

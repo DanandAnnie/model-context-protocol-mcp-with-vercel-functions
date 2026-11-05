@@ -614,6 +614,7 @@ export default function BrandPage() {
                 <option value="16:9">16:9 landscape</option>
                 <option value="9:16">9:16 vertical</option>
                 <option value="1:1">1:1 square</option>
+                <option value="4:5">4:5 portrait feed</option>
               </select>
             </Field>
             <Field label="Default output quality">

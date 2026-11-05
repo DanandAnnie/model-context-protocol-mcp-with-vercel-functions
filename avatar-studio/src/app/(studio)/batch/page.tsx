@@ -501,6 +501,7 @@ export default function BatchPage() {
                 <option value="16:9">16:9 Landscape</option>
                 <option value="9:16">9:16 Portrait</option>
                 <option value="1:1">1:1 Square</option>
+                <option value="4:5">4:5 Portrait feed</option>
               </select>
             </Field>
             <Field label="Output quality">

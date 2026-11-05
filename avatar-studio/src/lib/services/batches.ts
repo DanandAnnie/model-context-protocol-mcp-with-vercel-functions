@@ -5,7 +5,7 @@ import { getStore } from "../store";
 import type { Video } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
+import { ASPECT_RATIOS, BULK_MAX, MAX_RETRY_AT_ONCE } from "../types";
 import { NotFoundError, ValidationError } from "../errors";
 import { fillTemplate, parseCsv, placeholdersIn } from "../csv";
 import { sendableShareLink, shareOffline, shareState } from "../client";
@@ -59,7 +59,7 @@ export const batchRequestSchema = z.object({
   csv: z.string().min(1).max(200_000),
   avatarId: z.string().min(1),
   voiceId: z.string().min(1),
-  aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
+  aspect: z.enum(ASPECT_RATIOS).default("16:9"),
   resolution: z.enum(["720p", "1080p"]).default("1080p"),
   /** Behind every row; when absent, the brand kit's background (its default, else its primary colour), else light grey. */
   background: backgroundSchema.optional(),

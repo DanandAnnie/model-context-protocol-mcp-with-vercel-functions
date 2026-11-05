@@ -38,7 +38,7 @@ import { amendLast, emptyHistory, record, redo, undo, type History, type History
 import { graphemes, withSuffix } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { draftKeyFor, restorableScenes } from "@/lib/editor-draft";
-import { DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { ASPECT_NAMES, ASPECT_RATIOS, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -1654,7 +1654,7 @@ function CreateInner() {
     return () => window.removeEventListener("keydown", onKey);
   }, [canGenerate]);
 
-  const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : "aspect-video";
+  const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : aspect === "4:5" ? "aspect-[4/5]" : "aspect-video";
   // A transparent stage is drawn as a light checkerboard, whatever background the scene keeps.
   // A scene's clip that is gone or not ready (once the list has loaded) is said under the picker, before Generate.
   const clipMissing = !!footageData && !!footageIdOf(background) && !readyFootage.some((f) => f.id === footageIdOf(background));
@@ -1743,7 +1743,7 @@ function CreateInner() {
 
           <Card className="overflow-hidden">
             {/* A portrait stage is sized by its height and takes its width from the ratio, so it really is 9:16 (a width-first box capped in height came out near square and cropped portrait slides); the height is also capped by the screen's width, so a narrow phone keeps the shape. */}
-            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden [container-type:size]`} style={sentTransparent ? { backgroundColor: "#fff", backgroundImage: "repeating-conic-gradient(#e2e8f0 0 25%, #fff 0 50%)", backgroundSize: "24px 24px" } : background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")} data-transparent={sentTransparent ? "" : undefined}>
+            <div data-testid="stage" className={`relative mx-auto ${aspect === "9:16" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*16/9))] max-w-full" : aspect === "4:5" ? "h-[min(520px,70vh,calc((100vw_-_5rem)*5/4))] max-w-full" : "w-full"} ${stageAspect} flex items-end justify-center overflow-hidden [container-type:size]`} style={sentTransparent ? { backgroundColor: "#fff", backgroundImage: "repeating-conic-gradient(#e2e8f0 0 25%, #fff 0 50%)", backgroundSize: "24px 24px" } : background.type === "color" ? { background: background.value } : background.type === "image" ? { backgroundImage: `url(${background.value})`, backgroundSize: background.fit ?? "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat", backgroundColor: "#000" } : { background: background.fit ? "#000" : "#0f172a" }} data-fit={background.type === "color" ? undefined : (background.fit ?? "cover")} data-transparent={sentTransparent ? "" : undefined}>
               {/* Only a complete URL is previewed, so a half-typed one is not requested keystroke by keystroke. */}
               {!sentTransparent && background.type === "video" && (/^https?:\/\/\S+\.\S+/.test(background.value) || footageIdOf(background)) && (
                 <video key={background.value} src={background.value} muted loop autoPlay playsInline aria-hidden="true" data-testid="stage-video" className={`absolute inset-0 h-full w-full ${background.fit === "contain" ? "object-contain" : "object-cover"}`} />
@@ -2792,8 +2792,8 @@ function CreateInner() {
               <div className="space-y-5">
                 <div role="group" aria-label="Aspect ratio">
                   <div className="mb-2 text-sm font-medium text-slate-700">Aspect ratio</div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(["16:9", "9:16", "1:1"] as AspectRatio[]).map((a) => (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {ASPECT_RATIOS.map((a) => (
                       <button
                         key={a}
                         type="button"
@@ -2802,7 +2802,7 @@ function CreateInner() {
                         className={`rounded-lg border px-3 py-3 text-sm font-medium ${aspect === a ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"}`}
                       >
                         {a}
-                        <div className="text-[11px] font-normal text-slate-600">{a === "16:9" ? "Landscape" : a === "9:16" ? "Portrait" : "Square"}</div>
+                        <div className="text-[11px] font-normal text-slate-600">{ASPECT_NAMES[a].charAt(0).toUpperCase() + ASPECT_NAMES[a].slice(1)}</div>
                       </button>
                     ))}
                   </div>

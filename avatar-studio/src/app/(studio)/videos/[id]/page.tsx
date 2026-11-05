@@ -25,6 +25,7 @@ import { silentSeconds, stripPauses } from "@/lib/pauses";
 import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired, shareNotYet } from "@/lib/client";
+import { embedSize } from "@/lib/oembed";
 import { socialShareLinks } from "@/lib/social";
 import { fileToCover } from "@/lib/image-upload";
 import { TRASH_RETENTION_DAYS, type Video } from "@/lib/types";
@@ -553,8 +554,8 @@ export default function VideoDetailPage() {
 
   async function copyEmbed() {
     if (!video) return;
-    const w = video.aspect === "9:16" ? 360 : video.aspect === "1:1" ? 480 : 640;
-    const h = video.aspect === "9:16" ? 640 : video.aspect === "1:1" ? 480 : 360;
+    // The same size oEmbed answers with, so a pasted link and a copied snippet show the same player.
+    const { width: w, height: h } = embedSize(video.aspect);
     // The embed page is the player alone, filling the iframe.
     const query = ["embed=1", embedAutoplay ? "autoplay=1" : "", embedLoop ? "loop=1" : ""].filter(Boolean).join("&");
     const src = `${shareBase()}/share/${video.id}?${query}`;
@@ -1032,7 +1033,7 @@ export default function VideoDetailPage() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
             <Card className="overflow-hidden">
               <div className="flex items-center justify-center bg-slate-950 p-0">
-               <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : "aspect-video w-full"}`}>
+               <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : video.aspect === "4:5" ? "aspect-[4/5] w-full max-w-[480px]" : "aspect-video w-full"}`}>
                 {video.status === "completed" && video.videoUrl ? (
                   <video
                     ref={player}

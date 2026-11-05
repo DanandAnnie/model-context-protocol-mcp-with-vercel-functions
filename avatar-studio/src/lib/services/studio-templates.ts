@@ -3,6 +3,7 @@
 import { z } from "zod";
 import { getAvatarProvider } from "../providers";
 import type { AspectRatio, StudioTemplate, StudioTemplateDetail, StudioVariable, Video } from "../types";
+import { ASPECT_RATIOS } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, ValidationError } from "../errors";
 import { createHash } from "node:crypto";
@@ -152,7 +153,6 @@ export function filledScript(template: StudioTemplateDetail, variables: Record<s
   return (script || template.name).slice(0, MAX_SCRIPT);
 }
 
-const ASPECTS: AspectRatio[] = ["16:9", "9:16", "1:1"];
 
 /** Renders one of the renderer's templates with the account's values, as a library video counted like any render. */
 export async function renderStudioTemplate(id: string, input: z.infer<typeof studioRenderSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; onStarted?: () => void } = {}): Promise<Video> {
@@ -188,7 +188,7 @@ export async function renderStudioTemplate(id: string, input: z.infer<typeof stu
       // The template's own presenter and voice, for the library's labels; the template decides what renders.
       avatarId: first("character")?.avatar_id || "studio-template",
       voiceId: first("voice")?.voice_id || "studio-template",
-      aspect: ASPECTS.includes(template.aspect as AspectRatio) ? (template.aspect as AspectRatio) : "16:9",
+      aspect: (ASPECT_RATIOS as readonly string[]).includes(template.aspect ?? "") ? (template.aspect as AspectRatio) : "16:9",
       background: { type: "color", value: "#000000" },
       captions: input.captions,
       speed: 1,

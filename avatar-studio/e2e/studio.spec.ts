@@ -10373,6 +10373,7 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   // The text that would run off a portrait frame is named before anything renders.
   await expect(page.getByText("On-screen text in scene 1 may not fit one line at 9:16.")).toBeVisible();
   await page.getByLabel("1:1 square").uncheck();
+  await page.getByLabel("4:5 portrait feed").uncheck();
   await page.getByRole("button", { name: "Make 1 size" }).click();
   const made = page.getByTestId("other-sizes").getByRole("link");
   await expect(made).toHaveText(/ \(9:16\)$/);
@@ -10382,7 +10383,7 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   // The card asks again while the size renders, so it stops saying so without a reload.
   await expect(page.getByTestId("other-sizes")).toContainText("rendering");
   await expect(page.getByTestId("other-sizes")).not.toContainText("rendering", { timeout: 30_000 });
-  await expect(page.getByRole("button", { name: "Make 1 size" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Make 2 sizes" })).toBeVisible();
   await page.reload();
   await expect(page.getByTestId("other-sizes").getByRole("link")).toHaveText(/ \(9:16\)$/);
   // The card has loaded (it offers the square) before the portrait's absence means anything.
@@ -10400,9 +10401,16 @@ test("a video can be made in other sizes, each a new video with the same scenes"
   await expect(page.getByLabel("1:1 square")).toBeVisible();
   await expect(page.getByLabel("16:9 landscape")).toHaveCount(0);
   // Made from the copy, the square is linked beside the original, and the focus goes to it, not the first link.
+  await page.getByLabel("4:5 portrait feed").uncheck();
   await page.getByRole("button", { name: "Make 1 size" }).click();
   await expect(page.getByRole("link", { name: `${sizesTitle} (1:1)` })).toBeFocused();
+  // The 4:5 feed post is the one shape left; made too, the video has every size.
+  await expect(page.getByLabel("1:1 square")).toHaveCount(0);
+  await page.getByRole("button", { name: "Make 1 size" }).click();
+  await expect(page.getByRole("link", { name: `${sizesTitle} (4:5)` })).toBeFocused();
   await expect(page.getByText("This video has every size.")).toBeVisible();
+  const feed = (await (await page.request.get(`/api/videos?q=${encodeURIComponent(`${sizesTitle} (4:5)`)}`)).json()).videos as Array<{ aspect: string }>;
+  expect(feed.map((f) => f.aspect)).toEqual(["4:5"]);
   await page.getByRole("link", { name: sizesTitle, exact: true }).first().click();
   await page.waitForURL(new RegExp(`/videos/${v.id}`));
 });
@@ -11816,25 +11824,26 @@ test("the library filters by when videos were made", async ({ page }) => {
   expect(axe.violations.map((v) => v.id)).toEqual([]);
 });
 
-test("the library filters by shape: landscape, portrait, or square", async ({ page }) => {
+test("the library filters by shape: landscape, portrait (9:16 or 4:5), or square", async ({ page }) => {
   const tag = Date.now().toString(36);
   const wide = await createVideoViaApi(page, `Wide ${tag}`, { aspect: "16:9" });
   const tall = await createVideoViaApi(page, `Tall ${tag}`, { aspect: "9:16" });
+  const feed = await createVideoViaApi(page, `Feed ${tag}`, { aspect: "4:5" });
   const box = await createVideoViaApi(page, `Box ${tag}`, { aspect: "1:1" });
   // The server filters, so the API answers the same as the page; an aspect ratio is not a shape name.
   const listed = async (shape: string) => ((await (await page.request.get(`/api/videos?q=${tag}&shape=${shape}`)).json()).videos as { id: string }[]).map((v) => v.id);
-  expect(await listed("portrait")).toEqual([tall.id]);
+  expect((await listed("portrait")).sort()).toEqual([tall.id, feed.id].sort());
   expect(await listed("landscape")).toEqual([wide.id]);
   expect(await listed("square")).toEqual([box.id]);
   expect((await page.request.get("/api/videos?shape=9:16")).status()).toBe(400);
   // The analytics CSV follows the filter too.
   const csv = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${tag}&shape=portrait`)).text());
-  expect(csv.rows.map((r) => r.title)).toEqual([`Tall ${tag}`]);
+  expect(csv.rows.map((r) => r.title).sort()).toEqual([`Feed ${tag}`, `Tall ${tag}`]);
 
   // The address can ask for a shape, as for the other filters.
   await page.goto(`/videos?shape=portrait`);
   const filter = page.getByLabel("Filter by shape");
-  await expect(filter.locator("option:checked")).toHaveText("Portrait 9:16");
+  await expect(filter.locator("option:checked")).toHaveText("Portrait 9:16 or 4:5");
   await page.getByLabel("Search videos").fill(tag);
   const card = (v: { id: string }) => page.locator(`a[href="/videos/${v.id}"]`);
   await expect(card(tall)).toBeVisible();
@@ -11857,6 +11866,42 @@ test("the library filters by shape: landscape, portrait, or square", async ({ pa
   await expect(card(box)).toBeVisible();
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
+});
+
+test("a video is made as a 4:5 feed post: chosen in the editor, played in its own frame, and refused music", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto("/create");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const aspect = page.getByRole("group", { name: "Aspect ratio" });
+  await expect(aspect.getByRole("button")).toHaveCount(4);
+  await aspect.getByRole("button", { name: /4:5/ }).click();
+  await expect(aspect.getByRole("button", { name: /4:5/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(aspect.getByRole("button", { name: /4:5/ })).toContainText("Portrait feed");
+  await expect(page.getByTestId("stage")).toHaveClass(/aspect-\[4\/5\]/);
+  // An aspect ratio the renderer has no frame for is refused.
+  const bad = await page.request.post("/api/videos", { data: { title: "Odd", script: "Hello there.", avatarId: "stock_2", voiceId: "stock_voice_2", aspect: "5:4" } });
+  expect(bad.status()).toBe(400);
+  const tag = Date.now().toString(36);
+  const v = await createVideoViaApi(page, `Feed post ${tag}`, { aspect: "4:5" });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 60_000 }).toBe("completed");
+  await page.goto(`/videos/${v.id}`);
+  await expect(page.locator("video").first().locator("xpath=ancestor::div[contains(@class, 'aspect-[4/5]')][1]")).toBeVisible();
+  // HeyGen's HyperFrames renders a music mix in 16:9, 9:16, or 1:1 only, so a 4:5 video is refused with what to do.
+  const music = await page.request.post("/api/music", { data: { videoId: v.id, trackId: "demo_track_1", query: "calm piano" } });
+  expect(music.status()).toBe(400);
+  expect(await music.text()).toMatch(/4:5 video/);
+  // The share page and oEmbed keep the shape.
+  const live = await page.request.patch(`/api/videos/${v.id}`, { data: { shareDisabled: false } });
+  expect(live.status()).toBe(200);
+  await page.goto(`/share/${v.id}`);
+  await expect(page.locator("video").first().locator("xpath=ancestor::*[contains(@class, 'aspect-[4/5]')][1]")).toBeVisible();
+  // The Music page does not offer it.
+  await page.goto("/music");
+  await expect(page.getByRole("option", { name: new RegExp(`Feed post ${tag}`) })).toHaveCount(0);
+  const embed = await page.request.get(`/api/oembed?url=${encodeURIComponent(`${new URL(page.url()).origin}/share/${v.id}`)}`);
+  expect(embed.status()).toBe(200);
+  const o = (await embed.json()) as { width: number; height: number };
+  expect(o.width / o.height).toBeCloseTo(4 / 5, 2);
 });
 
 test("the Shared presenters list is searched and sorted, and the sort is remembered", async ({ page }) => {

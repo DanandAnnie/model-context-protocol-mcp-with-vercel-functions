@@ -1,6 +1,6 @@
 // Hands a Video Agent plan from the agent page to the editor, once, through session storage.
 import { restoredCaptionStyle } from "./caption-style";
-import { RESOLUTIONS, isDefaultCaptionStyle, type AspectRatio, type Background, type CaptionStyle, type Resolution, type SceneLayout } from "./types";
+import { ASPECT_RATIOS, RESOLUTIONS, isDefaultCaptionStyle, type AspectRatio, type Background, type CaptionStyle, type Resolution, type SceneLayout } from "./types";
 
 export const AGENT_DRAFT_KEY = "avatar-studio:agent-draft";
 
@@ -29,7 +29,7 @@ export function takeAgentDraft(): AgentDraft | null {
     // Settings this build does not offer fall back to the editor's defaults.
     return {
       ...d,
-      aspect: (["16:9", "9:16", "1:1"] as const).includes(d.aspect) ? d.aspect : "16:9",
+      aspect: (ASPECT_RATIOS as readonly string[]).includes(d.aspect) ? d.aspect : "16:9",
       resolution: RESOLUTIONS.includes(d.resolution) ? d.resolution : "1080p",
       captions: d.captions === true,
       captionStyle: d.captionStyle && !isDefaultCaptionStyle(restoredCaptionStyle(d.captionStyle)) ? restoredCaptionStyle(d.captionStyle) : undefined,

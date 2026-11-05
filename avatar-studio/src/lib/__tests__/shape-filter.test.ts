@@ -1,4 +1,4 @@
-// The library filtered by shape: landscape 16:9, portrait 9:16, square 1:1, with the other filters. Run with: npm test
+// The library filtered by shape: landscape 16:9, portrait 9:16 or 4:5, square 1:1, with the other filters. Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
@@ -11,18 +11,20 @@ const made = (id: string, aspect: Video["aspect"] | undefined, patch: Partial<Vi
   ({ id, title: id, script: "Hi.", avatarId: "a", voiceId: "v", status: "completed", provider: "mock", aspect, createdAt: new Date(Date.now() - Number(id.replace(/\D/g, "") || 0) * 1000).toISOString(), updatedAt: new Date().toISOString(), ...patch }) as Video;
 
 describe("shape filter", () => {
-  const videos = [made("wide1", "16:9"), made("tall2", "9:16"), made("box3", "1:1"), made("tall4", "9:16"), made("old5", undefined)];
+  const videos = [made("wide1", "16:9"), made("tall2", "9:16"), made("box3", "1:1"), made("tall4", "9:16"), made("old5", undefined), made("feed8", "4:5")];
   const ids = (q: Record<string, string>) => filterVideos(videos, videoQuerySchema.parse(q)).map((v) => v.id);
 
   it("keeps the videos made in the shape asked for; one with no aspect stored is the 16:9 default", () => {
-    assert.deepEqual(ids({ shape: "portrait" }), ["tall2", "tall4"]);
+    assert.deepEqual(ids({ shape: "portrait" }), ["tall2", "tall4", "feed8"], "a 4:5 feed post is portrait too");
     assert.deepEqual(ids({ shape: "square" }), ["box3"]);
     assert.deepEqual(ids({ shape: "landscape" }), ["wide1", "old5"]);
-    assert.equal(ids({}).length, 5, "absent means any shape");
-    assert.equal(ids({ shape: "all" }).length, 5);
+    assert.equal(ids({}).length, 6, "absent means any shape");
+    assert.equal(ids({ shape: "all" }).length, 6);
     assert.deepEqual(SHAPE_FILTERS, ["landscape", "portrait", "square"]);
     assert.equal(inShape({}, "landscape"), true);
     assert.equal(inShape({ aspect: "9:16" }, "landscape"), false);
+    assert.equal(inShape({ aspect: "4:5" }, "portrait"), true);
+    assert.equal(inShape({ aspect: "4:5" }, "square"), false);
   });
 
   it("combines with the other filters and the sort, and refuses an unknown shape", () => {
@@ -30,7 +32,7 @@ describe("shape filter", () => {
     const pick = (q: Record<string, string>) => filterVideos(more, videoQuerySchema.parse(q)).map((v) => v.id);
     assert.deepEqual(pick({ shape: "portrait", status: "failed" }), ["tall6"]);
     assert.deepEqual(pick({ shape: "portrait", starred: "1" }), ["tall7"]);
-    assert.deepEqual(pick({ shape: "portrait", sort: "oldest" }), ["tall7", "tall6", "tall4", "tall2"]);
+    assert.deepEqual(pick({ shape: "portrait", sort: "oldest" }), ["feed8", "tall7", "tall6", "tall4", "tall2"]);
     assert.deepEqual(pick({ shape: "portrait", q: "tall2" }), ["tall2"]);
     assert.equal(videoQuerySchema.safeParse({ shape: "9:16" }).success, false);
     assert.equal(videoQuerySchema.safeParse({ shape: "round" }).success, false);

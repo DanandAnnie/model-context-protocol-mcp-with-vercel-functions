@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
-import { BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { ASPECT_RATIOS, BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
 export { videoNeeds, videoPresenters, videoVoices };
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
@@ -77,7 +77,7 @@ export const videoRequestSchema = z
       .optional(),
     avatarId: z.string().min(1),
     voiceId: z.string().min(1),
-    aspect: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
+    aspect: z.enum(ASPECT_RATIOS).default("16:9"),
     resolution: z.enum(["720p", "1080p"]).default("1080p"),
     background: backgroundSchema.default({ type: "color", value: "#f1f5f9" }),
     captions: z.boolean().default(false),
@@ -1839,14 +1839,14 @@ function requestOf(video: Video): VideoRequest {
 
 export const resizeSchema = z.object({
   aspects: z
-    .array(z.enum(["16:9", "9:16", "1:1"]))
+    .array(z.enum(ASPECT_RATIOS))
     .min(1, "Choose at least one size")
-    .max(3)
+    .max(ASPECT_RATIOS.length * 2, `Choose at most ${ASPECT_RATIOS.length} sizes`)
     .transform((a) => Array.from(new Set(a))),
 });
 
 /** The shapes a title of another size ends with, so a size made from a size is titled from the original. */
-const SIZE_SUFFIX = / \((?:16:9|9:16|1:1)\)$/;
+const SIZE_SUFFIX = / \((?:16:9|9:16|1:1|4:5)\)$/;
 
 /** A video's family: the original and every size made from it, trashed ones included, the original first. */
 async function sizeFamily(video: Video, ownerId: string): Promise<Video[]> {

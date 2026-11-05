@@ -18,8 +18,8 @@ export function ShareWatch({ body, autoplay, loop, start, focus = false, embed =
   }, [focus]);
   // Embedded, the player is all there is: the largest box of the video's shape that fits the frame it was given, centred
   // in it (after the email form too), so the logo and captions sit on the picture rather than in black bars.
-  const frame = embed ? "fixed inset-0 m-auto" : body.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : body.aspect === "1:1" ? "aspect-square max-w-[640px]" : "aspect-video";
-  const ratio = body.aspect === "9:16" ? 9 / 16 : body.aspect === "1:1" ? 1 : 16 / 9;
+  const frame = embed ? "fixed inset-0 m-auto" : body.aspect === "9:16" ? "aspect-[9/16] max-w-[420px]" : body.aspect === "1:1" ? "aspect-square max-w-[640px]" : body.aspect === "4:5" ? "aspect-[4/5] max-w-[540px]" : "aspect-video";
+  const ratio = body.aspect === "9:16" ? 9 / 16 : body.aspect === "1:1" ? 1 : body.aspect === "4:5" ? 4 / 5 : 16 / 9;
   const embedBox = embed ? { width: `min(100vw, ${+(ratio * 100).toFixed(4)}vh)`, height: `min(100vh, ${+(100 / ratio).toFixed(4)}vw)` } : undefined;
   const { player, cta } = body;
   return (

@@ -12,9 +12,9 @@ describe("pageText", () => {
 });
 
 describe("slideAspect", () => {
-  it("frames wide pages, 4:3 included, as landscape, tall ones as portrait, and near-square ones square", async () => {
+  it("frames wide pages, 4:3 included, as landscape, near-square ones square, slightly tall ones 4:5, and tall ones portrait", async () => {
     const { slideAspect } = await import("../pdf-slides");
-    assert.deepEqual([slideAspect(960, 540), slideAspect(1024, 768), slideAspect(612, 792), slideAspect(540, 960), slideAspect(500, 500)], ["16:9", "16:9", "9:16", "9:16", "1:1"]);
+    assert.deepEqual([slideAspect(960, 540), slideAspect(1024, 768), slideAspect(612, 792), slideAspect(1080, 1350), slideAspect(595, 842), slideAspect(540, 960), slideAspect(500, 500)], ["16:9", "16:9", "4:5", "4:5", "4:5", "9:16", "1:1"]);
   });
 });
 

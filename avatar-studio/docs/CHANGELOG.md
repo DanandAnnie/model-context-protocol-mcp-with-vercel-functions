@@ -1597,3 +1597,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Rotating during an overlap now says the earlier secret stops at once, and the checkbox is disabled while a change is being sent.
     - The docs' verifier compares byte lengths, so an odd header can't make it throw, and it rejects a timestamp that isn't digits.
     - Tests cover a save racing a rotation, the export, and a read-only key, which sees neither secret and can't rotate.
+- Send a sample of a webhook event (`b393d7e`). Send test could only send a `test` ping, so a receiver's handling of a finished render, a failed one, or a new lead couldn't be tried until a real one happened. A "Test to send" choice now sits beside Send test: Test ping (as before), or a sample of a render completing, a render failing, or a visitor leaving an email.
+  - **Behaviour:** a sample carries the event's own name in `X-Studio-Event` and the body, and data shaped like the real event's but made up (ids start `sample_`; addresses and links are on example.com). It is marked twice, `"test": true` in the body and `X-Studio-Test: true` as a header, so a receiver can try its handling and still drop it. It is sent whatever events the webhook is chosen to send, as a test always is. The log marks it "sample", and sent again from the log it is still a sample.
+  - **API:** `POST /api/notifications/test` takes `{ "event"? }` (`test`, the default, or one of the three events; anything else is a `400`). A bare POST still sends the ping. Logged deliveries carry `test: true` for a sample.
+  - Also: recording a delivery on settings saved before revision ids existed is now a conditional write, like every other write to the webhook.
+  - An independent review found nothing blocking. From its optional findings:
+    - A sample now leaves out fields with no value, as a real event does, instead of sending them as null.
+    - The docs say the lead sample is the share-page kind.
+    - Last delivery in Settings says "(sample)".
+    - Sending a sample again is announced as a sample, and its button's label says so.
+    - A visible hint under the choice, not a tooltip, warns that a receiver checking neither mark will act on a sample.
+    - The unit test now checks each sample against the data a real event sends, field by field and type by type, and covers logging on settings without a revision id.
+    - The end-to-end test finds the sample by what it is rather than by its place in the log.

@@ -1583,6 +1583,7 @@ export type ActivityKind =
   | "invite.revoked"
   | "apikey.created"
   | "apikey.revoked"
+  | "apikey.renamed"
   | "brand.saved"
   | "brand.removed"
   | "agent.created"
@@ -1610,6 +1611,8 @@ export interface ActivityEvent {
   role?: string;
   /** For a replace, the presenter or voice put in the place of `subject`. */
   replacement?: string;
+  /** For a rename, the name before it (`subject` is the new one). */
+  previous?: string;
   /** For a replace, whether a presenter or a voice was replaced, and how many of each kind of thing were changed. */
   replaced?: { kind: "avatar" | "voice"; agents: number; templates: number; brand: boolean; avatars: number };
   createdAt: string;

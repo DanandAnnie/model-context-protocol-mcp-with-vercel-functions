@@ -65,6 +65,18 @@ export async function createApiKey(
   return { key: publicKey(key), secret };
 }
 
+/** Renames a key, returning it with the name it had, or null when it is not this owner's. Its secret is unchanged. */
+export async function renameApiKey(id: string, ownerId: string, name: string): Promise<{ key: Omit<ApiKey, "hash">; previous: string } | null> {
+  // Written only over the key as read, so a key revoked meanwhile stays revoked (null) and two renames do not cross.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const key = await getStore().get<ApiKey>("apikey", id);
+    if (!key || key.ownerId !== ownerId) return null;
+    const renamed = { ...key, name };
+    if (await getStore().putIf("apikey", renamed, "name", key.name)) return { key: publicKey(renamed), previous: key.name };
+  }
+  throw new Error("The key changed while it was being renamed; try again");
+}
+
 export async function revokeApiKey(id: string, ownerId: string): Promise<boolean> {
   const key = await getStore().get<ApiKey>("apikey", id);
   if (!key || key.ownerId !== ownerId) return false;
@@ -94,7 +106,8 @@ export async function apiKeyForSecret(secret: string): Promise<ApiKey | null> {
   if (apiKeyExpired(key)) throw new UnauthorizedError(`This API key expired on ${key.expiresAt!.slice(0, 16).replace("T", " ")} UTC; create a new one in Settings`);
   // Best effort, at most once a minute per key: a failed or skipped timestamp write never blocks the request.
   if (!key.lastUsedAt || Date.now() - Date.parse(key.lastUsedAt) > LAST_USED_WRITE_INTERVAL_MS) {
-    getStore().put("apikey", { ...key, lastUsedAt: nowIso() }).catch(() => {});
+    // Written only over the key as read: a key revoked meanwhile is not brought back, and a rename is not undone.
+    getStore().putIf("apikey", { ...key, lastUsedAt: nowIso() }, "name", key.name).catch(() => {});
   }
   return key;
 }

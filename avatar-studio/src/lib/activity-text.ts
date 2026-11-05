@@ -38,6 +38,7 @@ const AREA_OF_KIND: Record<ActivityKind, ActivityArea> = {
   "invite.revoked": "members",
   "apikey.created": "keys",
   "apikey.revoked": "keys",
+  "apikey.renamed": "keys",
   "brand.saved": "brand",
   "brand.removed": "brand",
   "agent.created": "presenters",
@@ -117,6 +118,8 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} created the API key ${what}`.trimEnd();
     case "apikey.revoked":
       return `${who} revoked the API key ${what}`.trimEnd();
+    case "apikey.renamed":
+      return e.previous ? `${who} renamed the API key "${e.previous}" to ${what}`.trimEnd() : `${who} renamed an API key to ${what}`.trimEnd();
     case "brand.saved":
       return `${who} saved the brand kit${what ? ` ${what}` : ""}`;
     case "brand.removed":

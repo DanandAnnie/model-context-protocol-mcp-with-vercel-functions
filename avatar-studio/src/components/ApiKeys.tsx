@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy, KeyRound, Pencil, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
@@ -22,7 +22,7 @@ const LIFETIMES = [
 ] as const;
 
 
-/** Settings section: create, list, and revoke personal API keys. The secret is shown once. */
+/** Settings section: create, list, rename, and revoke personal API keys. The secret is shown once. */
 export function ApiKeys() {
   const { data, error, refetch } = useApi<{ keys: PublicKey[] }>("/api/keys");
   const [name, setName] = useState("");
@@ -30,8 +30,23 @@ export function ApiKeys() {
   const [access, setAccess] = useState<ApiKeyAccess>("full");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [fresh, setFresh] = useState<{ name: string; secret: string; readOnly: boolean } | null>(null);
+  // The key just made, matched by id (two keys may share a name), with its one-time secret.
+  const [fresh, setFresh] = useState<{ id: string; secret: string; readOnly: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
+  // The key being renamed, and the name typed for it.
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  // The key whose new name is being saved.
+  const [renameBusy, setRenameBusy] = useState<string | null>(null);
+  const renameOpeners = useRef(new Map<string, HTMLButtonElement | null>());
+  // The key whose Rename button takes focus once the form has closed (and the list has re-rendered).
+  const [focusRename, setFocusRename] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusRename || renaming?.id === focusRename) return;
+    // Another key's form took focus meanwhile: leave it there.
+    if (renaming) return setFocusRename(null);
+    renameOpeners.current.get(focusRename)?.focus();
+    setFocusRename(null);
+  }, [focusRename, renaming, data]);
 
   async function create() {
     if (!name.trim()) return;
@@ -39,7 +54,7 @@ export function ApiKeys() {
     setErr(null);
     try {
       const res = await api<{ key: PublicKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name, ...(lifetime ? { expiresInDays: Number(lifetime) } : {}), ...(access === "read" ? { access } : {}) }) });
-      setFresh({ name: res.key.name, secret: res.secret, readOnly: res.key.access === "read" });
+      setFresh({ id: res.key.id, secret: res.secret, readOnly: res.key.access === "read" });
       setName("");
       await refetch();
     } catch (e) {
@@ -49,12 +64,36 @@ export function ApiKeys() {
     }
   }
 
+  /** Closes the rename form and puts focus back on the Rename button it came from. */
+  function closeRename(id: string) {
+    // Only this key's form: one opened on another key while this one saved stays open.
+    setRenaming((r) => (r?.id === id ? null : r));
+    setFocusRename(id);
+  }
+
+  async function rename(key: PublicKey) {
+    if (!renaming || !renaming.name.trim()) return;
+    if (renaming.name.trim() === key.name) return closeRename(key.id);
+    const name = renaming.name;
+    setRenameBusy(key.id);
+    setErr(null);
+    try {
+      await api(`/api/keys/${key.id}`, { method: "PATCH", body: JSON.stringify({ name }) });
+      await refetch();
+      closeRename(key.id);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not rename the key");
+    } finally {
+      setRenameBusy(null);
+    }
+  }
+
   async function revoke(key: PublicKey) {
     if (!window.confirm(`Revoke "${key.name}"? Scripts using it will stop working immediately.`)) return;
     setErr(null);
     try {
       await api(`/api/keys/${key.id}`, { method: "DELETE" });
-      if (fresh && fresh.name === key.name) setFresh(null);
+      if (fresh?.id === key.id) setFresh(null);
       await refetch();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Could not revoke the key");
@@ -82,7 +121,7 @@ export function ApiKeys() {
             <KeyRound className="h-4 w-4 text-slate-400" /> Developer API
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Call every <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">/api/*</code> endpoint from scripts with <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">Authorization: Bearer &lt;key&gt;</code>. Keys act as your account; a read-only key can list and fetch (and download exports) but not create, change, or delete. Creating and revoking keys needs a signed-in session.
+            Call every <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">/api/*</code> endpoint from scripts with <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">Authorization: Bearer &lt;key&gt;</code>. Keys act as your account; a read-only key can list and fetch (and download exports) but not create, change, or delete. Creating, renaming, and revoking keys needs a signed-in session.
           </p>
         </div>
       </div>
@@ -138,6 +177,36 @@ export function ApiKeys() {
         {data?.keys.map((k) => (
           <li key={k.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="min-w-0">
+              {renaming?.id === k.id ? (
+                <form
+                  className="flex flex-wrap items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void rename(k);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape" && renameBusy !== k.id) {
+                      e.preventDefault();
+                      closeRename(k.id);
+                    }
+                  }}
+                >
+                  <input
+                    aria-label={`New name for ${k.name}`}
+                    value={renaming.name}
+                    onChange={(e) => setRenaming({ id: k.id, name: e.target.value })}
+                    maxLength={60}
+                    autoFocus
+                    className={`${inputClass} max-w-xs py-1 text-sm`}
+                  />
+                  <Button type="submit" className="px-2.5 py-1 text-xs" loading={renameBusy === k.id} disabled={!renaming.name.trim()}>
+                    Save
+                  </Button>
+                  <Button type="button" variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => closeRename(k.id)} disabled={renameBusy === k.id}>
+                    Cancel
+                  </Button>
+                </form>
+              ) : (
               <div className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-sm font-medium text-slate-900">{k.name}</span>
                 {k.access === "read" && (
@@ -146,6 +215,7 @@ export function ApiKeys() {
                   </span>
                 )}
               </div>
+              )}
               <div className="text-xs text-slate-500">
                 <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{k.prefix}…</code> · created {formatDate(k.createdAt)}
                 {k.lastUsedAt ? ` · last used ${formatDate(k.lastUsedAt)}` : " · never used"}
@@ -160,9 +230,22 @@ export function ApiKeys() {
                 )}
               </div>
             </div>
-            <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => revoke(k)} aria-label={`Revoke ${k.name}`}>
-              <Trash2 className="h-3.5 w-3.5" /> Revoke
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                ref={(el: HTMLButtonElement | null) => {
+                  renameOpeners.current.set(k.id, el);
+                }}
+                variant="secondary"
+                className="px-2.5 py-1 text-xs"
+                onClick={() => setRenaming({ id: k.id, name: k.name })}
+                aria-label={`Rename ${k.name}`}
+              >
+                <Pencil className="h-3.5 w-3.5" /> Rename
+              </Button>
+              <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => revoke(k)} aria-label={`Revoke ${k.name}`}>
+                <Trash2 className="h-3.5 w-3.5" /> Revoke
+              </Button>
+            </div>
           </li>
         ))}
       </ul>

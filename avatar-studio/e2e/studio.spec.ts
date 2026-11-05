@@ -6845,6 +6845,41 @@ test("API keys are made in Settings with an optional lifetime, shown once, liste
   expect((await page.request.get("/api/videos?limit=1", { headers: { Authorization: `Bearer ${secret}` } })).status()).toBe(401);
 });
 
+test("an API key is renamed from its row in Settings, keeping its secret", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = (await (await page.request.post("/api/keys", { data: { name: `Before ${tag}` } })).json()) as { key: { id: string }; secret: string };
+  try {
+    // Checked like a new key's name; a key cannot rename itself or another; an unknown key is not found.
+    expect((await page.request.patch(`/api/keys/${made.key.id}`, { data: { name: "  " } })).status()).toBe(400);
+    expect((await page.request.patch(`/api/keys/${made.key.id}`, { data: { name: "x" }, headers: { Authorization: `Bearer ${made.secret}` } })).status()).toBe(403);
+    expect((await page.request.patch("/api/keys/key_nosuch", { data: { name: "x" } })).status()).toBe(404);
+    await page.goto("/settings");
+    const row = page.getByRole("listitem").filter({ hasText: `Before ${tag}` });
+    const opener = row.getByRole("button", { name: `Rename Before ${tag}` });
+    // Escape leaves it as it was, with focus back on Rename.
+    await opener.click();
+    await page.getByLabel(`New name for Before ${tag}`).fill("Discarded");
+    await page.keyboard.press("Escape");
+    await expect(page.getByLabel(`New name for Before ${tag}`)).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await opener.click();
+    const field = page.getByLabel(`New name for Before ${tag}`);
+    await expect(field).toHaveValue(`Before ${tag}`);
+    await field.fill(`After ${tag}`);
+    await field.press("Enter");
+    const renamed = page.getByRole("listitem").filter({ hasText: `After ${tag}` });
+    await expect(renamed).toHaveCount(1);
+    await expect(renamed.getByRole("button", { name: `Rename After ${tag}` })).toBeFocused();
+    expect(((await (await page.request.get("/api/keys")).json()) as { keys: Array<{ id: string; name: string }> }).keys.find((k) => k.id === made.key.id)!.name).toBe(`After ${tag}`);
+    // The secret is the same one.
+    expect((await page.request.get("/api/videos?limit=1", { headers: { Authorization: `Bearer ${made.secret}` } })).status()).toBe(200);
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+  } finally {
+    await page.request.delete(`/api/keys/${made.key.id}`);
+  }
+});
+
 test("read-only API keys list and fetch, download exports, and are refused anything that creates, changes, or deletes", async ({ page }) => {
   const tag = Date.now().toString(36);
   const v = await createVideoViaApi(page, `Keyed ${tag}`);

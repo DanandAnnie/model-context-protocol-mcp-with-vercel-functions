@@ -52,6 +52,8 @@ export interface ActivityDetails {
   role?: string;
   replacement?: string;
   replaced?: ActivityEvent["replaced"];
+  /** For a rename, the name before it. */
+  previous?: string;
 }
 
 /**
@@ -71,6 +73,7 @@ export async function recordActivity(ownerId: string, actor: User, kind: Activit
       ...(details.count !== undefined ? { count: details.count } : {}),
       ...(details.role ? { role: details.role } : {}),
       ...(details.replacement ? { replacement: Array.from(details.replacement.trim()).slice(0, MAX_SUBJECT).join("") } : {}),
+      ...(details.previous ? { previous: Array.from(details.previous.trim()).slice(0, MAX_SUBJECT).join("") } : {}),
       ...(details.replaced ? { replaced: { kind: details.replaced.kind, agents: details.replaced.agents, templates: details.replaced.templates, brand: details.replaced.brand, avatars: details.replaced.avatars } } : {}),
       createdAt: stamp(),
     };
@@ -147,7 +150,7 @@ export async function activityLinks(ownerId: string, events: ActivityEvent[]): P
   const linkFor = async (e: ActivityEvent): Promise<string | null> => {
     if (VIDEO_KINDS.has(e.kind)) return e.subjectId && (await exists("video", e.subjectId)) ? `/videos/${encodeURIComponent(e.subjectId)}` : null;
     if (e.kind === "agent.created" || e.kind === "agent.duplicated") return e.subjectId && (await exists("agent", e.subjectId)) ? "/interactive" : null;
-    if (e.kind === "apikey.created") return e.subjectId && (await exists("apikey", e.subjectId)) ? "/settings" : null;
+    if (e.kind === "apikey.created" || e.kind === "apikey.renamed") return e.subjectId && (await exists("apikey", e.subjectId)) ? "/settings" : null;
     if (e.kind === "brand.saved") return (await exists("brand", `brand_${ownerId}`)) ? "/brand" : null;
     if (e.kind === "usage.replaced") return e.replaced?.kind === "voice" ? "/voices" : e.replaced?.kind === "avatar" ? "/avatars" : null;
     return null;

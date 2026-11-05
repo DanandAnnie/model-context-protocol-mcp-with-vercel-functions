@@ -1032,6 +1032,14 @@ describe("activity feed", () => {
     assert.deepEqual(Object.keys(ACTIVITY_AREA_LABELS), [...ACTIVITY_AREAS]);
     assert.equal(activityArea("agent.duplicated"), "presenters");
     assert.equal(activityArea("apikey.revoked"), "keys");
+    assert.equal(activityArea("apikey.renamed"), "keys");
+    {
+      const { describeActivity } = await import("../activity-text");
+      const renamed = (await recordActivity("ws_rename", { id: "u_dan", email: "dan@example.com" }, "apikey.renamed", { subject: "Zapier (prod)", subjectId: "key_r", previous: "Zapier" }))!;
+      assert.equal(renamed.previous, "Zapier");
+      assert.equal(describeActivity(renamed), 'dan@example.com renamed the API key "Zapier" to "Zapier (prod)"');
+      assert.equal(describeActivity({ ...renamed, previous: undefined }), 'dan@example.com renamed an API key to "Zapier (prod)"');
+    }
     assert.equal(activityArea("video.purged"), "videos");
     assert.equal(parseActivityArea("brand"), "brand");
     assert.equal(parseActivityArea("toString"), null);
@@ -2458,6 +2466,55 @@ describe("api keys", () => {
     assert.equal(gone.expired, true);
     assert.equal(listed.find((k) => k.id === forever.key.id)!.expired, false);
     assert.equal((await listApiKeys("u4", Date.now() - 86_400_000)).find((k) => k.id === month.key.id)!.expired, false, "judged at the time given");
+  });
+
+  it("renames a key, keeping its secret, and only for its own owner", async () => {
+    const { renameApiKey } = await import("../api-keys");
+    const made = await createApiKey("Old name", "u6", "u6", 30, "read");
+    assert.equal(await renameApiKey(made.key.id, "someone-else", "Taken"), null, "another owner's key is not found");
+    const renamed = (await renameApiKey(made.key.id, "u6", "New name"))!;
+    assert.equal(renamed.previous, "Old name");
+    assert.equal(renamed.key.name, "New name");
+    assert.equal((renamed.key as Record<string, unknown>).hash, undefined, "the hash is never returned");
+    assert.equal(await ownerForApiKey(made.secret), "u6", "the secret still works");
+    const listed = (await listApiKeys("u6")).find((k) => k.id === made.key.id)!;
+    assert.equal(listed.name, "New name");
+    assert.equal(listed.expiresAt, made.key.expiresAt, "its lifetime is unchanged");
+    assert.equal(listed.access, "read", "and its access");
+    assert.equal(await renameApiKey("key_nosuch", "u6", "X"), null);
+
+    // A key revoked while a rename is saved stays revoked, and a last-use stamp never undoes a rename or revives a key.
+    const store = getStore();
+    const realPutIf = store.putIf.bind(store);
+    const racing = await createApiKey("Racing", "u6");
+    store.putIf = (async (kind: Parameters<typeof store.putIf>[0], item: { id: string }, field: string, expected: string) => {
+      if (kind === "apikey" && item.id === racing.key.id) await revokeApiKey(racing.key.id, "u6");
+      return realPutIf(kind, item, field, expected);
+    }) as typeof store.putIf;
+    try {
+      assert.equal(await renameApiKey(racing.key.id, "u6", "Renamed"), null, "gone, so not found");
+    } finally {
+      store.putIf = realPutIf;
+    }
+    assert.equal(await getStore().get("apikey", racing.key.id), null, "and not written back");
+    assert.equal(await ownerForApiKey(racing.secret), null, "its secret stays refused");
+
+    const used = await createApiKey("Used", "u6");
+    const { apiKeyForSecret } = await import("../api-keys");
+    store.putIf = (async (kind: Parameters<typeof store.putIf>[0], item: { id: string }, field: string, expected: string) => {
+      if (kind === "apikey" && item.id === used.key.id) {
+        store.putIf = realPutIf;
+        await renameApiKey(used.key.id, "u6", "Renamed while used");
+      }
+      return realPutIf(kind, item, field, expected);
+    }) as typeof store.putIf;
+    try {
+      await apiKeyForSecret(used.secret);
+      await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      store.putIf = realPutIf;
+    }
+    assert.equal((await getStore().get<ApiKey>("apikey", used.key.id))!.name, "Renamed while used", "the stamp did not undo the rename");
   });
 
   it("gives a key full access unless it is made read-only, and lists what each may do", async () => {

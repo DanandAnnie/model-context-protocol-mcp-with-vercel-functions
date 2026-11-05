@@ -1680,3 +1680,17 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A finished job is never moved back to "being made" by an answer that was out of date when it arrived, for example from a check on another server. Before, such an answer could overwrite a made clip, which would then finish, and send its webhook, a second time. A unit test covers it and fails without the guard.
     - The end-to-end test now proves the background check itself moved the clip, from its `broll.moved` count, rather than any finished job in the shared demo store.
     - The docs no longer promise a fresh link for voice recordings, whose links are not renewed, or for instant voices, which have none.
+- Completion emails for dubs and digital twins, with a choice of kinds (`1526a2d`). The address in Settings used to get one email per rendered video, but nothing when a dub or a digital twin finished. Those take longest, and the owner is least likely to be watching. They now email too.
+  - **Dub email:** names the language and links to Video translate.
+  - **Twin email:** links to Avatars, where a ready twin is listed as a presenter.
+  - **Failures:** a failure says why. Every field in the HTML is escaped.
+  - **Choice of kinds:** Settings has checkboxes for Videos, Dubs, and Digital twins under the address, all ticked by default. `PUT /api/prefs` takes `emailKinds`. Leaving it out keeps the earlier choice, so a change of address, or turning emails off and on again, keeps it. Choosing every kind is stored as none, so kinds added later are emailed too. An address saved before keeps getting video emails and now gets dubs and twins as well, until they are unticked.
+  - **When:** each email goes out from the check or callback that finished the job, including the scheduled background check for dubs and twins.
+  - An independent review found nothing blocking. From its optional findings:
+    - `emailKinds` sent without the address is a `400`. Before, the save would have quietly turned emails off, since leaving the address out turns them off.
+    - The Settings form stays locked until the saved choice has loaded, so nothing typed or ticked first is replaced by it. This also removes a race from the end-to-end test.
+    - Dub emails link to Video translate rather than the provider's download link, which expires long before an email may be read.
+    - The email and the webhook go out side by side, so a slow mail provider cannot hold the webhook back. A unit test shows a failing provider leaves the webhook untouched.
+    - The kinds group is labelled by its visible text, and "Tick at least one kind to save" is announced. The confirmation reads "Results for dubs and digital twins will be emailed to …".
+    - More tests: escaping of the language and twin name, starring keeps the kinds, and Turn off keeps them in the browser.
+    - The docs say a retried dub can email again, and that only dubs and twins come from the background check.

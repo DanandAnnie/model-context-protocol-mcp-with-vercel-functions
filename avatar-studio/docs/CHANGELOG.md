@@ -1552,3 +1552,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - With a length filter and Not viewed yet together, renders in flight were not counted, so the library did not say they were left out. They are counted now.
     - The note now also shows for Not viewed yet on its own.
     - The batch banner now names the views filter.
+- Webhook delivery log and Redeliver (`84fdb88`). Settings showed only the last webhook delivery, so a delivery the receiving system missed (it was down, or answered with an error) could not be found or sent again. The webhook card now lists the last 20 deliveries to its URL under Recent deliveries, newest first. Each shows whether it was delivered (with the HTTP status) or why it failed, its event, and its time, and editors can Redeliver it.
+  - **Ids:** each delivery's body now starts with an event `id` (`whe_…`) inside the signed body, and it stays the same when the delivery is sent again, so a receiver can ignore a repeat. Each attempt also carries its own id in the `X-Studio-Delivery` header (`whd_…`). A redelivery sends the same body with a fresh timestamp and signature, names the first attempt in `X-Studio-Redelivery-Of`, and is logged as "sent again".
+  - **API:** `GET /api/notifications` lists `deliveries` as `{ id, at, event, ok, status?, error?, redeliveryOf?, resendable }`. `POST /api/notifications/deliveries/:id/redeliver` is for editors only and answers `{ "delivery" }`. An id no longer in the log is a `404`, and a body too large to have been kept (over 16,000 characters) is a `400`.
+  - **Privacy:** the bodies sent, lead emails among them, stay on the server. Neither the API nor the account export returns them, and viewers see the log without Redeliver. The log starts over when the URL changes.
+  - **Writes:** deliveries are now recorded with a conditional write over the settings as they are at that moment. Two deliveries at once keep each other's entries. A delivery that finishes after the webhook was removed, made again, or pointed elsewhere is not recorded. Before this, such a delivery could bring a removed webhook back.
+  - An independent review found nothing blocking. From its optional findings:
+    - the account export left the bodies in and now leaves them out;
+    - the record is a conditional write rather than a read then a write;
+    - the event id is inside the signed body, so a redelivery can be recognised;
+    - focus moves to the newest row when redelivering the oldest entry of a full log pushes it out;
+    - a refresh no longer wipes a URL being edited.

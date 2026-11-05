@@ -37,6 +37,47 @@ test("health endpoint and email preferences", async ({ request }) => {
   expect((await (await request.get("/api/prefs")).json()).prefs.emailOnComplete).toBeUndefined();
 });
 
+test("Settings chooses which results are emailed: videos, dubs, digital twins", async ({ page }) => {
+  expect((await page.request.put("/api/prefs", { data: { emailOnComplete: "dana@example.com", emailKinds: [] } })).status()).toBe(400);
+  expect((await page.request.put("/api/prefs", { data: { emailOnComplete: "dana@example.com", emailKinds: ["clips"] } })).status()).toBe(400);
+  // Kinds without the address would turn emails off, so they are refused rather than saved.
+  expect((await page.request.put("/api/prefs", { data: { emailKinds: ["dubs"] } })).status()).toBe(400);
+  try {
+    await page.goto("/settings");
+    const card = page.getByTestId("email-prefs");
+    const kinds = card.getByRole("group", { name: "Email results for" });
+    for (const name of ["Videos", "Dubs", "Digital twins"]) await expect(kinds.getByRole("checkbox", { name })).toBeChecked();
+    await card.getByLabel("Notification email").fill("dana@example.com");
+    await kinds.getByRole("checkbox", { name: "Videos" }).uncheck();
+    await card.getByRole("button", { name: "Save" }).click();
+    await expect(card).toContainText("Results for dubs and digital twins will be emailed to dana@example.com.");
+    await expect.poll(async () => (await (await page.request.get("/api/prefs")).json()).prefs.emailKinds).toEqual(["dubs", "twins"]);
+    await page.reload();
+    await expect(kinds.getByRole("checkbox", { name: "Videos" })).not.toBeChecked();
+    await expect(kinds.getByRole("checkbox", { name: "Dubs" })).toBeChecked();
+    // Turning emails off keeps the choice for the next time an address is saved.
+    await card.getByRole("button", { name: "Turn off" }).click();
+    await expect(card).toContainText("Result emails are off.");
+    expect((await (await page.request.get("/api/prefs")).json()).prefs.emailKinds).toEqual(["dubs", "twins"]);
+    await expect(kinds.getByRole("checkbox", { name: "Videos" })).not.toBeChecked();
+    // None at all cannot be saved.
+    await kinds.getByRole("checkbox", { name: "Dubs" }).uncheck();
+    await kinds.getByRole("checkbox", { name: "Digital twins" }).uncheck();
+    await expect(card.getByTestId("email-kinds-none")).toBeVisible();
+    await expect(card.getByRole("button", { name: "Save" })).toBeDisabled();
+    // A save from the API that leaves the kinds out keeps the choice; ticking every kind stores none.
+    expect((await page.request.put("/api/prefs", { data: { emailOnComplete: "sam@example.com" } })).status()).toBe(200);
+    expect((await (await page.request.get("/api/prefs")).json()).prefs.emailKinds).toEqual(["dubs", "twins"]);
+    expect((await page.request.put("/api/prefs", { data: { emailOnComplete: "sam@example.com", emailKinds: ["twins", "dubs", "videos"] } })).status()).toBe(200);
+    expect((await (await page.request.get("/api/prefs")).json()).prefs.emailKinds).toBeUndefined();
+    const axe = await new AxeBuilder({ page }).include('[data-testid="email-prefs"]').withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+  } finally {
+    await page.request.put("/api/prefs", { data: { emailOnComplete: "dana@example.com", emailKinds: ["videos", "dubs", "twins"] } });
+    await page.request.put("/api/prefs", { data: {} });
+  }
+});
+
 test("status reports demo mode", async ({ request }) => {
   const status = await (await request.get("/api/status")).json();
   expect(status.mode).toBe("demo");

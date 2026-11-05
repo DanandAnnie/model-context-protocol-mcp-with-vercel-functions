@@ -1395,12 +1395,18 @@ export interface WebhookDelivery {
 }
 
 /** Per-owner preferences that are not provider settings. */
+/** The results that can be emailed to the address in Settings, in the order Settings lists them. */
+export const EMAIL_KINDS = ["videos", "dubs", "twins"] as const;
+export type EmailKind = (typeof EMAIL_KINDS)[number];
+
 export interface Prefs {
   /** `prefs_<ownerId>` */
   id: string;
   ownerId: string;
-  /** Send an email when a render completes or fails. */
+  /** Send an email when a render, dub, or digital twin completes or fails. */
   emailOnComplete?: string;
+  /** Which results are emailed; absent means every kind. */
+  emailKinds?: EmailKind[];
   /** Starred avatars and voices, listed first in every picker. */
   favoriteAvatarIds?: string[];
   favoriteVoiceIds?: string[];

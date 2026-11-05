@@ -8,8 +8,8 @@ import { LOCAL_OWNER } from "./owner-id";
 import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
-import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Translation, type TwinJob, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
-import { getEmailProvider } from "./providers/email";
+import { EMAIL_KINDS, WEBHOOK_EVENTS, type EmailKind, type NotifyEvent, type NotifySettings, type Prefs, type Translation, type TwinJob, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
+import { escapeHtml, getEmailProvider } from "./providers/email";
 import { config } from "./config";
 
 export const notifySchema = z.object({
@@ -261,7 +261,16 @@ export async function redeliverNotification(deliveryId: string, ownerId: string 
 // ---------- Preferences (email on completion) ----------
 
 export const prefsId = (ownerId: string) => `prefs_${ownerId}`;
-export const prefsSchema = z.object({ emailOnComplete: z.string().trim().email().max(200).optional() });
+export const prefsSchema = z.object({
+  emailOnComplete: z.string().trim().email().max(200).optional(),
+  // Which results are emailed: at least one; repeats are dropped. Left out, the choice made before is kept.
+  emailKinds: z
+    .array(z.enum(EMAIL_KINDS, `Each kind is one of ${EMAIL_KINDS.join(", ")}`))
+    .min(1, "Choose at least one kind of result to email")
+    .max(EMAIL_KINDS.length * 4)
+    .transform((kinds) => EMAIL_KINDS.filter((k) => kinds.includes(k)))
+    .optional(),
+}).refine((p) => !p.emailKinds || p.emailOnComplete, { message: "Give the address to email results to with the kinds: a save without it turns result emails off", path: ["emailOnComplete"] });
 
 export async function getPrefs(ownerId: string = LOCAL_OWNER): Promise<Prefs | null> {
   const p = await getStore().get<Prefs>("prefs", prefsId(ownerId));
@@ -273,7 +282,66 @@ export async function savePrefs(input: z.infer<typeof prefsSchema>, ownerId: str
   // Favourites live on the same record and survive an email change.
   const next: Prefs = { ...(existing ?? { id: prefsId(ownerId), ownerId }), emailOnComplete: input.emailOnComplete, updatedAt: nowIso() };
   if (!next.emailOnComplete) delete next.emailOnComplete;
+  // Choosing every kind is the same as choosing none: new kinds added later are emailed too.
+  if (input.emailKinds) next.emailKinds = input.emailKinds.length === EMAIL_KINDS.length ? undefined : input.emailKinds;
+  if (!next.emailKinds) delete next.emailKinds;
   return getStore().put("prefs", next);
+}
+
+/** The address results of this kind are emailed to, or null when none is set or the kind is not chosen. */
+async function resultEmailAddress(ownerId: string, kind: EmailKind): Promise<string | null> {
+  const prefs = await getPrefs(ownerId).catch(() => null);
+  if (!prefs?.emailOnComplete) return null;
+  return !prefs.emailKinds || prefs.emailKinds.includes(kind) ? prefs.emailOnComplete : null;
+}
+
+/** Sends a result email built from plain text and already-escaped html. Never throws. */
+async function sendResultEmail(to: string, subject: string, text: string, html: string): Promise<boolean> {
+  try {
+    await getEmailProvider().send({ to, subject, text, html });
+    return true;
+  } catch (err) {
+    console.error("result email failed:", err);
+    return false;
+  }
+}
+
+const appLink = (path: string) => `${config.appUrl.replace(/\/$/, "")}${path}`;
+
+/**
+ * Emails the owner that a dub is ready or failed, with its language and the Video translate page (not the provider's
+ * download link, which expires long before an email may be read). Never throws.
+ */
+export async function emailTranslationResult(dub: Translation): Promise<boolean> {
+  const to = await resultEmailAddress(dub.ownerId ?? LOCAL_OWNER, "dubs");
+  if (!to) return false;
+  const link = appLink("/translate");
+  const ok = dub.status === "completed";
+  const what = `"${dub.title}" in ${dub.targetLanguage}`;
+  const subject = ok ? `Your dub ${what} is ready` : `Your dub ${what} could not be made`;
+  const text = ok
+    ? `The ${dub.targetLanguage} dub of "${dub.title}" is ready to watch and download.\n\nOpen Video translate: ${link}`
+    : `The ${dub.targetLanguage} dub of "${dub.title}" failed.${dub.error ? `\n\nReason: ${dub.error}` : ""}\n\nOpen Video translate: ${link}`;
+  const html = ok
+    ? `<p>The ${escapeHtml(dub.targetLanguage)} dub of <strong>${escapeHtml(dub.title)}</strong> is ready to watch and download.</p><p><a href="${escapeHtml(link)}">Open Video translate</a></p>`
+    : `<p>The ${escapeHtml(dub.targetLanguage)} dub of <strong>${escapeHtml(dub.title)}</strong> failed.${dub.error ? ` Reason: ${escapeHtml(dub.error)}` : ""}</p><p><a href="${escapeHtml(link)}">Open Video translate</a></p>`;
+  return sendResultEmail(to, subject, text, html);
+}
+
+/** Emails the owner that a digital twin is ready to use or failed, with a link to the Avatars page. Never throws. */
+export async function emailTwinResult(twin: TwinJob): Promise<boolean> {
+  const to = await resultEmailAddress(twin.ownerId ?? LOCAL_OWNER, "twins");
+  if (!to) return false;
+  const ok = twin.status === "completed";
+  const link = appLink("/avatars");
+  const subject = ok ? `Your digital twin "${twin.name}" is ready` : `Your digital twin "${twin.name}" could not be made`;
+  const text = ok
+    ? `The digital twin "${twin.name}" is trained and can present videos now: it is listed with your avatars.\n\nOpen Avatars: ${link}`
+    : `The digital twin "${twin.name}" could not be made.${twin.error ? `\n\nReason: ${twin.error}` : ""}\n\nOpen Avatars: ${link}`;
+  const html = ok
+    ? `<p>The digital twin <strong>${escapeHtml(twin.name)}</strong> is trained and can present videos now: it is listed with your avatars.</p><p><a href="${escapeHtml(link)}">Open Avatars</a></p>`
+    : `<p>The digital twin <strong>${escapeHtml(twin.name)}</strong> could not be made.${twin.error ? ` Reason: ${escapeHtml(twin.error)}` : ""}</p><p><a href="${escapeHtml(link)}">Open Avatars</a></p>`;
+  return sendResultEmail(to, subject, text, html);
 }
 
 export const MAX_FAVORITES = 50;
@@ -292,48 +360,47 @@ export async function toggleFavorite(input: z.infer<typeof favoriteSchema>, owne
 
 /** Emails the owner that a render finished. Never throws. */
 export async function emailVideoResult(video: Video): Promise<boolean> {
-  const prefs = await getPrefs(video.ownerId ?? LOCAL_OWNER).catch(() => null);
-  if (!prefs?.emailOnComplete) return false;
+  const to = await resultEmailAddress(video.ownerId ?? LOCAL_OWNER, "videos");
+  if (!to) return false;
   const link = `${config.appUrl.replace(/\/$/, "")}/videos/${video.id}`;
   const ok = video.status === "completed";
   const subject = ok ? `Your video "${video.title}" is ready` : `Your video "${video.title}" could not be rendered`;
   const text = ok
     ? `"${video.title}" finished rendering${video.durationSec ? ` (${video.durationSec}s)` : ""}.\n\nOpen it: ${link}${video.videoUrl ? `\nDownload: ${video.videoUrl}` : ""}`
     : `"${video.title}" failed to render.${video.error ? `\n\nReason: ${video.error}` : ""}\n\nOpen it: ${link}`;
-  const esc = (v: string) => v.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
+  const esc = escapeHtml;
   const html = ok
     ? `<p><strong>${esc(video.title)}</strong> finished rendering${video.durationSec ? ` (${video.durationSec}s)` : ""}.</p><p><a href="${esc(link)}">Open the video</a>${video.videoUrl ? ` · <a href="${esc(video.videoUrl)}">Download</a>` : ""}</p>`
     : `<p><strong>${esc(video.title)}</strong> failed to render.${video.error ? ` Reason: ${esc(video.error)}` : ""}</p><p><a href="${esc(link)}">Open the video</a></p>`;
-  try {
-    await getEmailProvider().send({ to: prefs.emailOnComplete, subject, text, html });
-    return true;
-  } catch (err) {
-    console.error("result email failed:", err);
-    return false;
-  }
+  return sendResultEmail(to, subject, text, html);
 }
 
 export async function notifyVideoTransition(prev: Video, next: Video): Promise<void> {
   if (next.status === prev.status) return;
   if (next.status !== "completed" && next.status !== "failed") return;
-  await emailVideoResult(next);
-  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
-  if (!settings) return;
-  const { id, title, status, videoUrl, thumbnailUrl, durationSec, error, folder, batchId, rowLabel, createdAt, updatedAt } = next;
-  await dispatchNotification(settings, status === "completed" ? "video.completed" : "video.failed", {
-    id,
-    title,
-    status,
-    videoUrl,
-    thumbnailUrl,
-    durationSec,
-    error,
-    folder,
-    batchId,
-    rowLabel,
-    createdAt,
-    updatedAt,
-  });
+  // The email and the webhook go out side by side, so a slow mail provider does not hold the webhook back.
+  await Promise.all([
+    emailVideoResult(next),
+    (async () => {
+      const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+      if (!settings) return;
+      const { id, title, status, videoUrl, thumbnailUrl, durationSec, error, folder, batchId, rowLabel, createdAt, updatedAt } = next;
+      await dispatchNotification(settings, status === "completed" ? "video.completed" : "video.failed", {
+        id,
+        title,
+        status,
+        videoUrl,
+        thumbnailUrl,
+        durationSec,
+        error,
+        folder,
+        batchId,
+        rowLabel,
+        createdAt,
+        updatedAt,
+      });
+    })(),
+  ]);
 }
 
 /**
@@ -345,21 +412,27 @@ export async function notifyVideoTransition(prev: Video, next: Video): Promise<v
 export async function notifyTranslationTransition(prev: Translation, next: Translation): Promise<void> {
   if (next.status === prev.status) return;
   if (next.status !== "completed" && next.status !== "failed") return;
-  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
-  if (!settings) return;
-  const { id, title, status, targetLanguage, sourceVideoUrl, videoUrl, captionUrls, error, createdAt, updatedAt } = next;
-  await dispatchNotification(settings, status === "completed" ? "translation.completed" : "translation.failed", {
-    id,
-    title,
-    status,
-    targetLanguage,
-    sourceVideoUrl,
-    videoUrl,
-    captionUrls,
-    error,
-    createdAt,
-    updatedAt,
-  });
+  // The email and the webhook go out side by side, so a slow mail provider does not hold the webhook back.
+  await Promise.all([
+    emailTranslationResult(next),
+    (async () => {
+      const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+      if (!settings) return;
+      const { id, title, status, targetLanguage, sourceVideoUrl, videoUrl, captionUrls, error, createdAt, updatedAt } = next;
+      await dispatchNotification(settings, status === "completed" ? "translation.completed" : "translation.failed", {
+        id,
+        title,
+        status,
+        targetLanguage,
+        sourceVideoUrl,
+        videoUrl,
+        captionUrls,
+        error,
+        createdAt,
+        updatedAt,
+      });
+    })(),
+  ]);
 }
 
 /**
@@ -395,10 +468,16 @@ export async function notifyProofreadReady(prev: Translation, next: Translation)
 export async function notifyTwinTransition(prev: TwinJob, next: TwinJob): Promise<void> {
   if (next.status === prev.status) return;
   if (next.status !== "completed" && next.status !== "failed") return;
-  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
-  if (!settings) return;
-  const { id, name, status, consent, avatarId, error, createdAt, updatedAt } = next;
-  await dispatchNotification(settings, status === "completed" ? "twin.completed" : "twin.failed", { id, name, status, consent, avatarId, error, createdAt, updatedAt });
+  // The email and the webhook go out side by side, so a slow mail provider does not hold the webhook back.
+  await Promise.all([
+    emailTwinResult(next),
+    (async () => {
+      const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+      if (!settings) return;
+      const { id, name, status, consent, avatarId, error, createdAt, updatedAt } = next;
+      await dispatchNotification(settings, status === "completed" ? "twin.completed" : "twin.failed", { id, name, status, consent, avatarId, error, createdAt, updatedAt });
+    })(),
+  ]);
 }
 
 /**

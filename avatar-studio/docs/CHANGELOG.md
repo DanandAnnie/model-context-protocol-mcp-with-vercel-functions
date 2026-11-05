@@ -1563,3 +1563,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - the event id is inside the signed body, so a redelivery can be recognised;
     - focus moves to the newest row when redelivering the oldest entry of a full log pushes it out;
     - a refresh no longer wipes a URL being edited.
+- API key expiry (`7071f18`). A personal API key worked until someone remembered to revoke it, so a key given to a contractor or a short-lived script stayed usable indefinitely. When you create a key in Settings, you can now give it a lifetime: Never expires (the default, as before), 30 days, 90 days, or 1 year.
+  - **After it expires:** every request made with the key is refused with a `401` that says so ("This API key expired on <date and time> UTC; create a new one in Settings"), so the script's owner doesn't mistake it for a typo. The key's last use stops being updated. An expired key stays listed, shown in red as expired, until it is revoked, and it still counts toward the ten keys an account can hold.
+  - **API:** `POST /api/keys` takes `expiresInDays` (`30`, `90`, or `365`; anything else is a `400`) and the key carries `expiresAt`. `GET /api/keys` adds `expired` to each key, judged by the server's clock.
+  - An independent review found nothing blocking. It confirmed that every route that accepts an API key checks it through the same code, so an expired key cannot get in another way. From its optional findings:
+    - The list now marks expired keys using the server's clock, not the browser's.
+    - The refusal message says its date is in UTC.
+    - A code comment that described the key check wrongly was corrected.
+    - A test now covers an expired key.

@@ -58,7 +58,7 @@ import { setScriptProvider } from "../providers";
 import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
 import { getStore } from "../store";
 import { UnauthorizedError } from "../errors";
-import type { ApiKey } from "../types";
+import type { ApiKey, Translation } from "../types";
 import { createHmac } from "node:crypto";
 import { parseCsv, toCsv } from "../csv";
 import { conversationMatches } from "../transcripts";
@@ -2611,7 +2611,7 @@ describe("outbound webhooks", () => {
       assert.deepEqual(sent, ["video.failed", "test"]);
       // A save that leaves the events out (a URL change from the API) keeps the choice; choosing every one is the same as none.
       assert.deepEqual((await saveNotifySettings({ url: `${HOOK}/v2` }, "ev1")).events, ["video.completed", "video.failed"]);
-      assert.equal((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["lead.captured", "video.failed", "video.completed"] }), "ev1")).events, undefined);
+      assert.equal((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["lead.captured", "translation.failed", "video.failed", "translation.completed", "video.completed"] }), "ev1")).events, undefined);
       assert.equal(notifySchema.safeParse({ url: HOOK, events: [] }).success, false, "at least one");
       assert.deepEqual((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed", "video.failed", "video.failed", "video.failed"] }), "ev1")).events, ["video.failed"], "repeats are dropped, not refused");
       assert.equal(notifySchema.safeParse({ url: HOOK, events: ["test"] }).success, false, "a test is not an event to choose");
@@ -2836,6 +2836,96 @@ describe("outbound webhooks", () => {
       const afterLegacy = (await getNotifySettings("smp1"))!;
       assert.equal(afterLegacy.deliveries![0].event, "video.failed");
       assert.ok(afterLegacy.rev, "and carry a rev from then on");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("sends translation.completed and translation.failed once when a dub finishes or fails, shaped like its sample", async () => {
+    const { notifyTranslationTransition, sampleEventData, sendTestNotification, notifySchema } = await import("../notifications");
+    const { getTranslation, listTranslations, applyTranslationWebhook } = await import("../services/translations");
+    const { MockTranslateProvider } = await import("../providers/translate/mock");
+    const calls: Array<{ event: string; body: Record<string, unknown> }> = [];
+    setNotificationFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push({ event: (init?.headers as Record<string, string>)["X-Studio-Event"], body });
+      return new Response("", { status: 200 });
+    });
+    try {
+      await saveNotifySettings(notifySchema.parse({ url: HOOK }), "dub1");
+      const dub = await createTranslation({ title: "Tour", sourceVideoUrl: "https://example.com/tour.mp4", targetLanguage: "Spanish" }, "dub1");
+      assert.equal(dub.status, "processing");
+      assert.equal(calls.length, 0, "nothing is sent while the dub is being made");
+      // The demo provider reports a job started long ago as finished; reading the dub moves it on and sends the event,
+      // once, though two reads race to do it.
+      await getStore().put("translation", { ...(await getStore().get<Translation>("translation", dub.id))!, providerJobId: "mock_tr_1", proofreadToken: "secret-token-302" });
+      const [done] = await Promise.all([getTranslation(dub.id, "dub1"), getTranslation(dub.id, "dub1")]);
+      assert.equal(done.status, "completed");
+      assert.equal(calls.length, 1);
+      assert.ok(!JSON.stringify(calls[0].body).includes("secret-token-302"), "the proofread link's secret is not sent");
+      assert.equal(calls[0].event, "translation.completed");
+      const data = calls[0].body.data as Record<string, unknown>;
+      assert.equal(data.id, dub.id);
+      assert.equal(data.title, "Tour");
+      assert.equal(data.targetLanguage, "Spanish");
+      assert.equal(data.sourceVideoUrl, "https://example.com/tour.mp4");
+      assert.equal(data.status, "completed");
+      assert.ok(String(data.videoUrl).length > 0);
+      assert.equal(data.providerJobId, undefined, "the provider's job id is not sent");
+      // Read again (and listed), a finished dub sends nothing more.
+      await getTranslation(dub.id, "dub1");
+      await listTranslations("dub1");
+      assert.equal(calls.length, 1, "sent once");
+
+      // A failure is sent as translation.failed with its reason; a dub refused when asked for is not sent (the
+      // caller has the refusal in the answer).
+      const refused = await createTranslation({ title: "No", sourceVideoUrl: "https://example.com/no.mp4?demo=refuse", targetLanguage: "French" }, "dub1");
+      assert.equal(refused.status, "failed");
+      assert.equal(calls.length, 1);
+      // A failure the provider calls back with is sent once, with its reason; reading the dub after sends nothing more.
+      const proto = MockTranslateProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
+      proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
+      try {
+        const doomed = await createTranslation({ title: "Doomed", sourceVideoUrl: "https://example.com/d.mp4", targetLanguage: "German" }, "dub1");
+        await getStore().put("translation", { ...(await getStore().get<Translation>("translation", doomed.id))!, providerJobId: "mock_tr_2" });
+        assert.equal((await applyTranslationWebhook("mock", { id: "mock_tr_2" }))!.status, "failed");
+        await applyTranslationWebhook("mock", { id: "mock_tr_2" }); // a repeated callback
+        await getTranslation(doomed.id, "dub1");
+        const failures = calls.filter((c) => c.event === "translation.failed");
+        assert.equal(failures.length, 1, "sent once");
+        assert.equal((failures[0].body.data as Record<string, unknown>).id, doomed.id);
+        assert.equal((failures[0].body.data as Record<string, unknown>).error, "provider error");
+        assert.equal((failures[0].body.data as Record<string, unknown>).videoUrl, undefined);
+      } finally {
+        delete proto.parseWebhook;
+      }
+      calls.splice(1);
+      const running = { ...done, id: "tr_sample_fail", status: "processing" as const, videoUrl: undefined };
+      await notifyTranslationTransition(running, { ...running, status: "failed", error: "It broke" });
+      assert.equal(calls.at(-1)!.event, "translation.failed");
+      assert.equal((calls.at(-1)!.body.data as Record<string, unknown>).error, "It broke");
+      // Not a move to an end: nothing.
+      await notifyTranslationTransition(running, { ...running, updatedAt: "later" });
+      assert.equal(calls.length, 2);
+
+      // Each sample has the fields of the real event, of the same types.
+      const shape = (d: Record<string, unknown>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v]).sort());
+      await notifyTranslationTransition(running, { ...running, status: "completed", videoUrl: "https://cdn/es.mp4", captionUrls: { srt: "https://cdn/es.srt", vtt: "https://cdn/es.vtt" } });
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("translation.completed")))), shape(calls.at(-1)!.body.data as Record<string, unknown>));
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("translation.failed")))), shape(calls[1].body.data as Record<string, unknown>));
+      for (const event of ["translation.completed", "translation.failed"] as const) {
+        const sent = (await sendTestNotification("dub1", event))!;
+        assert.equal(sent.ok, true);
+        assert.equal(calls.at(-1)!.event, event);
+        assert.equal(calls.at(-1)!.body.test, true);
+        assert.match(String((calls.at(-1)!.body.data as Record<string, unknown>).id), /^sample_/);
+      }
+
+      // A webhook chosen to send only renders is not sent dubs.
+      await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.completed", "video.failed"] }), "dub1");
+      const before = calls.length;
+      await notifyTranslationTransition(running, { ...running, status: "failed", error: "Again" });
+      assert.equal(calls.length, before);
     } finally {
       setNotificationFetch(null);
     }

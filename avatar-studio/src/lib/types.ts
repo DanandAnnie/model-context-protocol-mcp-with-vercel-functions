@@ -1341,13 +1341,13 @@ export interface ApiKey {
 export const API_KEY_ACCESS = ["full", "read"] as const;
 export type ApiKeyAccess = (typeof API_KEY_ACCESS)[number];
 
-export type NotifyEvent = "video.completed" | "video.failed" | "lead.captured" | "test";
+export type NotifyEvent = WebhookEvent | "test";
 
 /** The events a webhook can be sent, in the order Settings lists them; "test" is sent only when asked for, whatever is chosen. */
-export const WEBHOOK_EVENTS = ["video.completed", "video.failed", "lead.captured"] as const;
+export const WEBHOOK_EVENTS = ["video.completed", "video.failed", "translation.completed", "translation.failed", "lead.captured"] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
-/** Outbound webhook: one endpoint per owner, called when a render finishes. */
+/** Outbound webhook: one endpoint per owner, called when a render or dub finishes or fails, or a lead is captured. */
 export interface NotifySettings {
   /** `notify_<ownerId>` */
   id: string;

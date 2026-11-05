@@ -5750,11 +5750,14 @@ test("the Batch page lists recent batches, each leading to its videos and its li
   await row.getByRole("link", { name: new RegExp(`^Recent ${tag}, started `) }).click();
   await expect(page).toHaveURL(new RegExp(`/videos\\?batch=${batchId}$`));
   await expect(page.getByText(`Recent ${tag} – Ana`)).toBeVisible();
-  await page.goto("/batch");
   // Checked once the page has settled: Generate is enabled only once the debounced preview answers, and a button
   // fading from disabled to enabled reads as low contrast mid-fade.
+  const previewed = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/videos/batch" && r.request().method() === "PUT");
+  await page.goto("/batch");
   await expect(row).toBeVisible();
-  await page.waitForLoadState("networkidle");
+  await previewed;
+  // Two frames for the answer to be drawn, so the fade (if any) has started before it is waited out.
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done(null)))));
   await page.waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition)));
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((x) => x.id)).toEqual([]);
@@ -6697,21 +6700,24 @@ test("webhook settings reject private hosts and show the signing secret", async 
   // Choose which events are sent: every one to start with; none at all cannot be saved.
   await page.reload();
   const events = page.getByRole("group", { name: "Send when" });
-  for (const name of [/A render completes/, /A render fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
+  for (const name of [/A render completes/, /A render fails/, /A dub is ready/, /A dub fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
   await events.getByRole("checkbox", { name: /A visitor leaves an email/ }).uncheck();
   await expect(page.getByText("Save the webhook to send these events.")).toBeVisible();
   await page.getByRole("button", { name: "Save webhook" }).click();
-  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed"]);
+  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed"]);
   await page.reload();
   await expect(events.getByRole("checkbox", { name: /A visitor leaves an email/ })).not.toBeChecked();
   await events.getByRole("checkbox", { name: /A render completes/ }).uncheck();
   await events.getByRole("checkbox", { name: /A render fails/ }).uncheck();
+  await events.getByRole("checkbox", { name: /A dub is ready/ }).uncheck();
+  await expect(page.getByTestId("webhook-events-none")).toHaveCount(0);
+  await events.getByRole("checkbox", { name: /A dub fails/ }).uncheck();
   await expect(page.getByTestId("webhook-events-none")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save webhook" })).toBeDisabled();
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio", events: [] } })).status()).toBe(400);
   // A save from the API that leaves the events out keeps the choice.
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio" } })).status()).toBe(200);
-  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed"]);
+  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed"]);
 
   await page.reload();
   page.once("dialog", (d) => d.accept());
@@ -6822,7 +6828,8 @@ test("the webhook is paused and resumed from Settings, keeping its URL and secre
 });
 
 test("Settings sends a marked sample of a webhook event, logged as a sample", async ({ page }) => {
-  // Two deliveries to an unroutable address, each waiting out the 10-second timeout.
+  // Three deliveries to an unroutable address, each waiting out the 10-second timeout.
+  test.setTimeout(90_000);
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/samples", events: ["video.failed"] } })).status()).toBe(200);
   try {
     expect((await page.request.post("/api/notifications/test", { data: { event: "video.deleted" } })).status()).toBe(400);
@@ -6854,6 +6861,13 @@ test("Settings sends a marked sample of a webhook event, logged as a sample", as
     await expect(page.getByTestId("webhook-note")).toHaveText(/^Sample lead\.captured \(presenter\) failed: /, { timeout: 20_000 });
     const afterPresenter = (await (await page.request.get("/api/notifications")).json()).webhook.deliveries as Array<{ event: string; test?: boolean }>;
     expect(afterPresenter.some((d) => d.test && d.event === "lead.captured")).toBe(true);
+    // Dubs have samples too: ready (with the dub's video and subtitle links) and failed.
+    await expect(choice.locator("option")).toContainText(["Sample: dub is ready", "Sample: dub fails"]);
+    await choice.selectOption("translation.failed");
+    await page.getByRole("button", { name: "Send test" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText(/^Sample translation\.failed failed: /, { timeout: 20_000 });
+    const afterDub = (await (await page.request.get("/api/notifications")).json()).webhook.deliveries as Array<{ event: string; test?: boolean }>;
+    expect(afterDub.some((d) => d.test && d.event === "translation.failed")).toBe(true);
     const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
     expect(axe.violations.map((x) => x.id)).toEqual([]);
   } finally {
@@ -13217,11 +13231,13 @@ test("home names the open comments that mention you, opening the library filtere
     await page.reload();
     await expect(line).toHaveText("1 open comment mentions you, on 1 video.Show videos that mention you");
     await page.unroute("**/api/videos");
-    // Let the reload's link prefetches settle: a click while one for the same page is cancelled can leave the router
-    // fetching the page without ever moving to it.
-    await page.waitForLoadState("networkidle");
-    await line.getByRole("link", { name: "Show videos that mention you" }).click();
-    await expect(page).toHaveURL(/\/videos\?comments=mentions$/);
+    // A click while the reload's prefetch of the same page is being cancelled can leave the router fetching the page
+    // without moving to it, so the link is clicked again until the address changes.
+    const mentionsLink = line.getByRole("link", { name: "Show videos that mention you" });
+    await expect(async () => {
+      if (!/\/videos\?comments=mentions$/.test(page.url())) await mentionsLink.click({ timeout: 2_000 });
+      await expect(page).toHaveURL(/\/videos\?comments=mentions$/, { timeout: 3_000 });
+    }).toPass({ timeout: 15_000 });
     // The library asks for the filter, which here matches nothing, and says so; Open comments is the other choice, not both.
     const toggle = page.getByTestId("mentions-toggle");
     await expect(toggle).toHaveAttribute("aria-pressed", "true");

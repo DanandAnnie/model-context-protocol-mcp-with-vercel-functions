@@ -8,7 +8,7 @@ import { LOCAL_OWNER } from "./owner-id";
 import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
-import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
+import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Translation, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
 import { getEmailProvider } from "./providers/email";
 import { config } from "./config";
 
@@ -336,6 +336,32 @@ export async function notifyVideoTransition(prev: Video, next: Video): Promise<v
   });
 }
 
+/**
+ * Sends translation.completed or translation.failed when a dub reaches either, from the write that moved it there (each
+ * transition is written once, conditionally, so it is sent once). A dub can reach an end more than once: a proofread dub
+ * tried again keeps its id, and a late callback can finish one that had failed. A dub refused as it was asked for (by
+ * the request or a retry) is not sent: the caller has the refusal in the answer.
+ */
+export async function notifyTranslationTransition(prev: Translation, next: Translation): Promise<void> {
+  if (next.status === prev.status) return;
+  if (next.status !== "completed" && next.status !== "failed") return;
+  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+  if (!settings) return;
+  const { id, title, status, targetLanguage, sourceVideoUrl, videoUrl, captionUrls, error, createdAt, updatedAt } = next;
+  await dispatchNotification(settings, status === "completed" ? "translation.completed" : "translation.failed", {
+    id,
+    title,
+    status,
+    targetLanguage,
+    sourceVideoUrl,
+    videoUrl,
+    captionUrls,
+    error,
+    createdAt,
+    updatedAt,
+  });
+}
+
 /** What Settings can send to try the receiver: a plain ping, or a sample of one of the real events. */
 export const TEST_EVENTS = ["test", ...WEBHOOK_EVENTS] as const;
 export type TestEvent = (typeof TEST_EVENTS)[number];
@@ -355,6 +381,12 @@ export function sampleEventData(event: WebhookEvent, now = nowIso(), source: Lea
     return source === "presenter"
       ? { source: "presenter", agentId: "sample_presenter", agentName: "Sample presenter", conversationId: "sample_conversation", email: "visitor@example.com", name: "Sample Visitor", lastMessage: "Can someone call me about pricing?", capturedAt: now }
       : { source: "share", videoId: "sample_video", videoTitle: "Sample video", email: "viewer@example.com", name: "Sample Viewer", capturedAt: now };
+  }
+  if (event === "translation.completed" || event === "translation.failed") {
+    const dub = { id: "sample_translation", title: "Sample video (Spanish)", targetLanguage: "Spanish", sourceVideoUrl: "https://example.com/source.mp4", createdAt: now, updatedAt: now };
+    return event === "translation.completed"
+      ? { ...dub, status: "completed", videoUrl: "https://example.com/sample-es.mp4", captionUrls: { srt: "https://example.com/sample-es.srt", vtt: "https://example.com/sample-es.vtt" } }
+      : { ...dub, status: "failed", error: "Sample failure: the dub could not be made" };
   }
   const base = { id: "sample_video", title: "Sample video", createdAt: now, updatedAt: now };
   return event === "video.completed"

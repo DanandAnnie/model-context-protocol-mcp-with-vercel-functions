@@ -11,7 +11,8 @@ import { TRANSLATION_GONE } from "../providers/types";
 import { getStore } from "../store";
 import { MAX_TRANSLATION_SPEAKERS, TRANSLATION_QUALITIES, type CaptionCue, type Translation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { owned, stripUndefined } from "./shared";
+import { notifyTranslationTransition } from "../notifications";
+import { afterResponse, owned, stripUndefined } from "./shared";
 import { MAX_CAPTION_CUE_CHARS, MAX_CAPTION_CUES } from "./videos";
 import { getBrandKit } from "./brand";
 import { foldTerm, forcedFor } from "../glossary";
@@ -188,6 +189,14 @@ const GONE_AFTER_MS = 30 * 60 * 1000;
 const lastChecked = new Map<string, number>();
 
 const running = (t: Translation) => t.status === "processing" || t.status === "queued";
+
+/**
+ * Sends the owner's webhook, after the response, for a dub a write just moved to completed or failed. Called only once
+ * the conditional write landed, so of two pollers or a poll and a callback, only the one that moved the dub sends it.
+ */
+async function announce(prev: Translation, next: Translation): Promise<void> {
+  if (next.status !== prev.status) await afterResponse(() => notifyTranslationTransition(prev, next));
+}
 function linksExpire(t: Translation): boolean {
   try {
     return !!getTranslateProviderByName(t.provider).linksExpire;
@@ -232,7 +241,10 @@ async function refreshProofread(item: Translation): Promise<Translation> {
     const cues: CaptionCue[] = result.cues.map(({ startMs, endMs, text }) => ({ startMs, endMs, text: text.slice(0, MAX_CAPTION_CUE_CHARS) }));
     next = { ...item, proofreadStage: "ready", proofreadCues: cues, updatedAt: after(item.updatedAt) };
   }
-  if (await getStore().putIf("translation", next, "updatedAt", item.updatedAt)) return next;
+  if (await getStore().putIf("translation", next, "updatedAt", item.updatedAt)) {
+    await announce(item, next);
+    return next;
+  }
   return (await getStore().get<Translation>("translation", item.id)) ?? item;
 }
 
@@ -266,7 +278,10 @@ async function refreshTranslation(item: Translation): Promise<Translation> {
   if (running(current) && update.status === current.status) return current;
   const next: Translation = { ...current, ...stripUndefined(update), updatedAt: after(current.updatedAt) };
   // Written only over the row as it was read: a callback or a delete landing meanwhile wins.
-  if (await getStore().putIf("translation", next, "updatedAt", current.updatedAt)) return next;
+  if (await getStore().putIf("translation", next, "updatedAt", current.updatedAt)) {
+    await announce(current, next);
+    return next;
+  }
   return (await getStore().get<Translation>("translation", item.id)) ?? item;
 }
 
@@ -516,7 +531,10 @@ export async function applyTranslationWebhook(providerName: string, body: unknow
   for (let attempt = 0; attempt < 3 && current; attempt++) {
     if (current.status === "completed" || (current.status === "failed" && update.status === "failed")) return current;
     const next: Translation = { ...current, ...stripUndefined(update), updatedAt: after(current.updatedAt) };
-    if (await getStore().putIf("translation", next, "updatedAt", current.updatedAt)) return next;
+    if (await getStore().putIf("translation", next, "updatedAt", current.updatedAt)) {
+      await announce(current, next);
+      return next;
+    }
     current = await getStore().get<Translation>("translation", item.id);
   }
   return current;

@@ -584,6 +584,14 @@ export default function BatchPage() {
                   <div className="text-xs text-slate-500" data-testid="recent-batch-counts">
                     {b.videos} {b.videos === 1 ? "video" : "videos"} · {b.ready} ready
                     {b.ready ? ` · ${b.viewed} viewed` : ""}
+                    {b.ready > b.viewed && (
+                      <>
+                        {" · "}
+                        <Link href={`/videos?batch=${encodeURIComponent(b.batchId)}&viewed=no`} className="text-brand-700 underline underline-offset-2 hover:text-brand-900" aria-label={`${b.ready - b.viewed} not viewed yet in ${b.title}, started ${formatDate(b.startedAt)}`} title="Open the ready videos no one has viewed yet in the library, to copy their links or follow up">
+                          {b.ready - b.viewed} not viewed yet
+                        </Link>
+                      </>
+                    )}
                     {b.making ? ` · ${b.making} being made` : ""}
                     {b.failed ? ` · ${b.failed} failed` : ""} · started {formatDate(b.startedAt)}
                   </div>

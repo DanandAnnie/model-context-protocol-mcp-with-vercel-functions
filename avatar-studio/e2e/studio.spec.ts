@@ -4091,7 +4091,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Search videos").fill(tag);
   await expect(notedCard).toHaveCount(0);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, share link, or turn off Open comments.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, share link, or turn off Open comments.")).toBeVisible();
   await page.getByTestId("open-comments-toggle").click();
   await expect(notedCard).toBeVisible();
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
@@ -5742,7 +5742,7 @@ test("the Batch page lists recent batches, each leading to its videos and its li
   await Promise.all(videos.map((v) => expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed")));
   expect((await (await page.request.post(`/api/videos/${ana.id}/view`)).json()).counted).toBe(true);
   await page.reload();
-  await expect(row.getByTestId("recent-batch-counts")).toHaveText(/^2 videos · 2 ready · 1 viewed · started /);
+  await expect(row.getByTestId("recent-batch-counts")).toHaveText(/^2 videos · 2 ready · 1 viewed · 1 not viewed yet · started /);
   const lines = (await (await page.request.get(`/api/videos/batch/${batchId}`)).text()).replace(/^\uFEFF/, "").trim().split(/\r?\n/);
   expect(lines[0]).toMatch(/,"?views"?,"?last_viewed"?,"?watched_to_end"?,"?cta_clicks"?$/);
   expect(lines.find((l) => l.includes(ana.id))).toMatch(/,"?1"?,"?\d{4}-\d\d-\d\dT[^,]*,"?0"?,"?0"?$/);
@@ -11330,7 +11330,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.
@@ -11412,7 +11412,7 @@ test("the library filters by shape: landscape, portrait, or square", async ({ pa
   await expect(card(tall)).toHaveCount(0);
   // A shape that hides every match is named in the empty state's advice.
   await page.getByLabel("Search videos").fill(`Tall ${tag}`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, or share link.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, or share link.")).toBeVisible();
   // Clear filters takes the shape back to any, and off the address.
   await page.getByTestId("clear-filters").click();
   await expect(filter.locator("option:checked")).toHaveText("Any shape");
@@ -11517,7 +11517,7 @@ test("the library filters by length: under a minute, one to three minutes, or ov
   await expect(card(medium)).toHaveCount(0);
   // A length that hides every match is named in the empty state's advice.
   await page.getByLabel("Search videos").fill(`Lengthy ${tag}`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, or share link.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, or share link.")).toBeVisible();
   // Clear filters takes the length back to any, and off the address.
   await page.getByTestId("clear-filters").click();
   await expect(filter.locator("option:checked")).toHaveText("Any length");
@@ -11525,6 +11525,61 @@ test("the library filters by length: under a minute, one to three minutes, or ov
   await expect(page.getByTestId("length-note")).toHaveCount(0);
   await page.getByLabel("Search videos").fill(tag);
   for (const v of [short, medium, long, rendering]) await expect(card(v)).toBeVisible();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((v) => v.id)).toEqual([]);
+});
+
+test("the library filters by views, and a recent batch links the recipients who have not viewed theirs yet", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const made = await page.request.post("/api/videos/batch", {
+    data: { title: `Follow up ${tag}`, scriptTemplate: "Hello {name}.", csv: "name\nAna\nBen\nCy", avatarId: "stock_1", voiceId: "stock_voice_1" },
+  });
+  expect(made.status()).toBe(201);
+  const { batchId, videos } = (await made.json()) as { batchId: string; videos: Array<{ id: string; rowLabel: string }> };
+  const ana = videos.find((v) => v.rowLabel === "Ana")!;
+  await Promise.all(videos.map((v) => expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed")));
+  expect((await (await page.request.post(`/api/videos/${ana.id}/view`)).json()).counted).toBe(true);
+  // A render still running is in neither view.
+  const rendering = await createVideoViaApi(page, `Unwatched render ${tag}`);
+  // The server filters, so the API answers the same as the page; anything but yes or no is refused.
+  const listed = async (viewed: string) => ((await (await page.request.get(`/api/videos?q=${tag}&viewed=${viewed}`)).json()) as { videos: { id: string }[] }).videos.map((v) => v.id);
+  expect(await listed("yes")).toEqual([ana.id]);
+  expect((await listed("no")).sort()).toEqual(videos.filter((v) => v !== ana).map((v) => v.id).sort());
+  expect(await listed("all")).toContain(rendering.id);
+  expect((await page.request.get("/api/videos?viewed=true")).status()).toBe(400);
+  const csv = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${tag}&viewed=yes`)).text());
+  expect(csv.rows.map((r) => r.title)).toEqual([`Follow up ${tag} – Ana`]);
+
+  // The batch row says how many are not viewed yet and opens the library at them.
+  await page.goto("/batch");
+  const row = page.getByTestId("recent-batch").filter({ hasText: `Follow up ${tag}` });
+  await expect(row.getByTestId("recent-batch-counts")).toHaveText(/^3 videos · 3 ready · 1 viewed · 2 not viewed yet · started /);
+  await row.getByRole("link", { name: new RegExp(`^2 not viewed yet in Follow up ${tag}, started `) }).click();
+  await expect(page).toHaveURL(new RegExp(`/videos\\?batch=${batchId}&viewed=no$`));
+  const filter = page.getByLabel("Filter by views");
+  await expect(filter.locator("option:checked")).toHaveText("Not viewed yet");
+  await expect(page.getByText("Showing one personalized batch, only the videos not viewed yet.")).toBeVisible();
+  const card = (id: string) => page.locator(`a[href="/videos/${id}"]`);
+  for (const v of videos.filter((v) => v !== ana)) await expect(card(v.id)).toBeVisible();
+  await expect(card(ana.id)).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /^Download analytics/ })).toHaveAttribute("href", /viewed=no/);
+  await filter.selectOption("yes");
+  await expect(card(ana.id)).toBeVisible();
+  await expect(card(videos.find((v) => v.rowLabel === "Ben")!.id)).toHaveCount(0);
+  // Clear filters takes the views filter back to any, and off the address with the batch.
+  await page.getByTestId("clear-filters").click();
+  await expect(filter.locator("option:checked")).toHaveText("Any views");
+  await expect(page).not.toHaveURL(/viewed=|batch=/);
+  await page.getByLabel("Search videos").fill(tag);
+  for (const id of [...videos.map((v) => v.id), rendering.id]) await expect(card(id)).toBeVisible();
+  // A render in flight has no share page yet, so Not viewed yet says it is left out until it finishes; Viewed does not.
+  await createVideoViaApi(page, `Fresh render ${tag}`);
+  await filter.selectOption("no");
+  await expect(page.getByTestId("length-note")).toHaveText(/^\d+ videos? still rendering (is|are) left out until (it finishes|they finish)\.$/);
+  await filter.selectOption("yes");
+  await expect(card(ana.id)).toBeVisible();
+  await expect(page.getByTestId("length-note")).toHaveCount(0);
+  await filter.selectOption("all");
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((v) => v.id)).toEqual([]);
 });

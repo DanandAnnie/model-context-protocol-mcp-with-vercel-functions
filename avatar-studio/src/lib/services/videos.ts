@@ -27,7 +27,7 @@ import { listVoices } from "./voices";
 import { PUBLIC_ACCESS, owned, scheduleNotification, stripUndefined } from "./shared";
 import { SHARE_PASSWORD_MAX, SHARE_PASSWORD_MIN, clearShareLock, setShareLock, shareUnlocked } from "../share-lock";
 import { clearCover, readCover, setCover } from "../cover";
-import { LENGTH_FILTERS, SHAPE_FILTERS, SHARE_FILTERS, inLength, inShape, inShareFilter, madeWithin, posterUrl, shareOffline } from "../client";
+import { LENGTH_FILTERS, SHAPE_FILTERS, SHARE_FILTERS, VIEWED_FILTERS, inLength, inShape, inShareFilter, inViewed, madeWithin, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
@@ -2149,6 +2149,11 @@ export const videoQuerySchema = z.object({
    */
   length: z.enum(["all", ...LENGTH_FILTERS]).default("all"),
   /**
+   * `yes`: only the videos whose share page has been viewed at least once; `no`: only the finished ones not viewed yet
+   * (with `batch`, the recipients still to follow up), in the trash too. A video still rendering, or one that failed, is in neither.
+   */
+  viewed: z.enum(["all", ...VIEWED_FILTERS]).default("all"),
+  /**
    * `open`: only the videos with a review thread no one has resolved yet; `mentions`: only those with an open thread that
    * names the reader (in the trash too).
    */
@@ -2208,8 +2213,9 @@ export interface VideoPage {
   /** Renders still in flight, across the whole library. */
   rendering: number;
   /**
-   * With a length filter, the renders in flight that match everything else the query asks for: they have no running time
-   * yet, so the filter leaves them out until they finish. 0 without a length filter, and in the trash view.
+   * With a length filter, or the views filter's "not viewed yet", the renders in flight that match everything else the
+   * query asks for: they have no running time and no share page yet, so the filter leaves them out until they finish
+   * (when they join "not viewed yet", as a new video has no views). 0 without either, and in the trash view.
    */
   lengthPending: number;
   /** Videos in the trash, so the library can offer the view. */
@@ -2281,6 +2287,7 @@ export function filterVideos(
       if (query.created !== "all" && !madeWithin(v, query.created, now)) return false;
       if (query.shape !== "all" && !inShape(v, query.shape)) return false;
       if (query.length !== "all" && !inLength(v, query.length)) return false;
+      if (query.viewed !== "all" && !inViewed(v, query.viewed)) return false;
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
@@ -2368,7 +2375,11 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     ...(readerId ? { you: readerId } : {}),
     // Renders in flight in the library, whichever view this is: the trash view must not poll for a trashed render.
     rendering: live.filter((v) => v.status === "processing" || v.status === "queued").length,
-    lengthPending: query.length === "all" || query.trash ? 0 : filterVideos(all, { ...query, length: "all" }, openComments, mentions, lastAt).filter((v) => v.status === "processing" || v.status === "queued").length,
+    // A finished render has no views yet, so "viewed" never waits on one, but "not viewed yet" does.
+    lengthPending:
+      (query.length === "all" && query.viewed !== "no") || query.trash || query.viewed === "yes"
+        ? 0
+        : filterVideos(all, { ...query, length: "all", viewed: "all" }, openComments, mentions, lastAt).filter((v) => v.status === "processing" || v.status === "queued").length,
     trashed,
   };
 }

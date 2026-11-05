@@ -235,6 +235,20 @@ export function inLength(video: { status?: string; durationSec?: number }, lengt
   return length === "short" ? d < 60 : length === "medium" ? d >= 60 && d <= 180 : d > 180;
 }
 
+/** The library's views filter: the finished videos whose share page has been viewed, or those not viewed yet. */
+export const VIEWED_FILTERS = ["yes", "no"] as const;
+export type ViewedFilter = (typeof VIEWED_FILTERS)[number];
+
+/**
+ * Whether a video is in a views filter: `yes` for one whose share page has been viewed at least once, `no` for a finished
+ * one with no view yet (a recipient still to follow up). Only a completed render can be viewed, so a video still
+ * rendering, or one that failed, is in neither.
+ */
+export function inViewed(video: { status?: string; views?: number }, viewed: ViewedFilter): boolean {
+  if (video.status !== "completed") return false;
+  return viewed === "yes" ? (video.views ?? 0) > 0 : !((video.views ?? 0) > 0);
+}
+
 export type CreatedWithin = keyof typeof CREATED_WITHIN_DAYS;
 
 /** Whether a video was made within `created` of `now`; an unreadable creation time (NaN) is in no window. */
@@ -407,7 +421,7 @@ export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: 
 }
 
 /** The library address's filter parameters (the ones the library reads, and a batch's results), which Clear filters takes off. */
-export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length"] as const;
+export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length", "viewed"] as const;
 
 /**
  * The library address's query without its filter parameters, as "?…" or "" when nothing else is left, or null when it

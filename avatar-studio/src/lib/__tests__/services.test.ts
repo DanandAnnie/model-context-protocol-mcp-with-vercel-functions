@@ -2611,7 +2611,7 @@ describe("outbound webhooks", () => {
       assert.deepEqual(sent, ["video.failed", "test"]);
       // A save that leaves the events out (a URL change from the API) keeps the choice; choosing every one is the same as none.
       assert.deepEqual((await saveNotifySettings({ url: `${HOOK}/v2` }, "ev1")).events, ["video.completed", "video.failed"]);
-      assert.equal((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["lead.captured", "translation.failed", "video.failed", "translation.completed", "video.completed"] }), "ev1")).events, undefined);
+      assert.equal((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["lead.captured", "twin.failed", "translation.failed", "video.failed", "twin.completed", "translation.completed", "video.completed"] }), "ev1")).events, undefined);
       assert.equal(notifySchema.safeParse({ url: HOOK, events: [] }).success, false, "at least one");
       assert.deepEqual((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed", "video.failed", "video.failed", "video.failed"] }), "ev1")).events, ["video.failed"], "repeats are dropped, not refused");
       assert.equal(notifySchema.safeParse({ url: HOOK, events: ["test"] }).success, false, "a test is not an event to choose");

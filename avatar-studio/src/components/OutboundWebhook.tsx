@@ -13,6 +13,8 @@ const EVENT_LABELS: Record<WebhookEvent, string> = {
   "video.failed": "A render fails",
   "translation.completed": "A dub is ready",
   "translation.failed": "A dub fails",
+  "twin.completed": "A digital twin is ready",
+  "twin.failed": "A digital twin fails",
   "lead.captured": "A visitor leaves an email",
 };
 
@@ -23,6 +25,8 @@ const TEST_CHOICES = [
   { value: "video.failed", label: "Sample: render fails" },
   { value: "translation.completed", label: "Sample: dub is ready" },
   { value: "translation.failed", label: "Sample: dub fails" },
+  { value: "twin.completed", label: "Sample: digital twin is ready" },
+  { value: "twin.failed", label: "Sample: digital twin fails" },
   { value: "lead.captured", label: "Sample: visitor leaves an email (share page)" },
   { value: "lead.captured:presenter", label: "Sample: visitor leaves an email (presenter)" },
 ] as const;
@@ -42,7 +46,7 @@ function outcome(d: Pick<WebhookDelivery, "ok" | "status" | "error">): string {
   return d.ok ? `Delivered (HTTP ${d.status})` : `Failed: ${d.error ?? "no response"}`;
 }
 
-/** Settings section: one signed outbound webhook per account, fired when a render or dub finishes or fails, or a visitor leaves an email. */
+/** Settings section: one signed outbound webhook per account, fired when a render, dub, or digital twin finishes or fails, or a visitor leaves an email. */
 export function OutboundWebhook() {
   const { data, error, refetch } = useApi<{ webhook: Shown | null }>("/api/notifications");
   const readOnly = useCanEdit() === false; // the workspace's setting: a viewer sees it, the server refuses their changes
@@ -175,7 +179,7 @@ export function OutboundWebhook() {
   }
 
   async function remove() {
-    if (!window.confirm("Remove the webhook? Renders, dubs, and leads will no longer be reported.")) return;
+    if (!window.confirm("Remove the webhook? Renders, dubs, digital twins, and leads will no longer be reported.")) return;
     setBusy("remove");
     setErr(null);
     setNote(null);
@@ -196,7 +200,7 @@ export function OutboundWebhook() {
         <Webhook className="h-4 w-4 text-slate-400" /> Webhook notifications
       </h3>
       <p className="mt-1 text-xs text-slate-500">
-        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), when a dub is ready or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret (after a rotation, accept <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature-Previous</code> too while you move over). Private and local hosts are rejected.
+        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), when a dub is ready or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.failed</code>), when a digital twin is ready to use or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">twin.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">twin.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret (after a rotation, accept <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature-Previous</code> too while you move over). Private and local hosts are rejected.
       </p>
       <ErrorBanner message={error ?? err} />
       {/* Always rendered, so a screen reader announces each outcome as it is written. */}

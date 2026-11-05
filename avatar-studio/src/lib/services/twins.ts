@@ -12,7 +12,8 @@ import { ConflictError, NotFoundError, ValidationError } from "../errors";
 import { assertPublicHttpUrl } from "../safe-url";
 import { loadImage } from "../providers/image";
 import type { FetchLike } from "../safe-fetch";
-import { owned } from "./shared";
+import { notifyTwinTransition } from "../notifications";
+import { afterResponse, owned } from "./shared";
 import { MAX_PORTRAIT_BYTES, rememberMadeLooks } from "./avatars";
 import { jobChecker } from "./job-checks";
 import { rememberMadeVoices } from "./voices";
@@ -148,6 +149,11 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
   return (await keepStart(job, out)) ?? job;
 }
 
+/** Sends the owner's webhook, after the response, for a twin a write just moved to completed or failed. */
+async function announce(prev: TwinJob, next: TwinJob): Promise<void> {
+  if (next.status !== prev.status) await afterResponse(() => notifyTwinTransition(prev, next));
+}
+
 /** Stores what the renderer made for a start (the look, character, and voice), noted as the studio's first. */
 async function keepStart(job: TwinJob, out: { lookId: string; groupId: string; voiceId?: string }): Promise<TwinJob | null> {
   // The look and voice are the studio's in the renderer's shared account from now on, whatever becomes of this twin.
@@ -173,7 +179,9 @@ async function resend(job: TwinJob): Promise<TwinJob | null> {
   const failed = (error: string): TwinJob => ({ ...job, training: "failed", status: "failed", error, updatedAt: nowIso() });
   if (Date.now() - Date.parse(job.createdAt) > TWIN_REPLAY_MS) {
     const next = failed("The renderer never confirmed this twin; train it again");
-    return (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) ? next : null;
+    if (!(await getStore().putIf("twin", next, "updatedAt", job.updatedAt))) return null;
+    await announce(job, next);
+    return next;
   }
   const provider = getAvatarProviderByName(job.provider);
   if (!provider.startTwin) return null;
@@ -186,7 +194,9 @@ async function resend(job: TwinJob): Promise<TwinJob | null> {
       throw err;
     }
     const next = failed(err.message);
-    return (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) ? next : null;
+    if (!(await getStore().putIf("twin", next, "updatedAt", job.updatedAt))) return null;
+    await announce(job, next);
+    return next;
   }
 }
 
@@ -342,7 +352,9 @@ async function refreshTwin(read: TwinJob): Promise<TwinJob> {
     const changed = next.training !== job.training || next.consent !== job.consent || next.status !== job.status || next.error !== job.error;
     next = { ...next, checkedAt: now, updatedAt: changed ? now : job.updatedAt };
     // Written only over the record that was read, so a forget meanwhile stays forgotten.
-    return (await getStore().putIf("twin", next, "updatedAt", job.updatedAt)) ? next : job;
+    if (!(await getStore().putIf("twin", next, "updatedAt", job.updatedAt))) return job;
+    await announce(job, next);
+    return next;
   } catch (err) {
     console.error(`twin check failed for ${job.id}:`, err);
     return job;

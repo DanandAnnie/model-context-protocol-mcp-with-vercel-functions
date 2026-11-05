@@ -98,6 +98,96 @@ describe("digital twins", () => {
     }
   });
 
+  it("sends twin.completed once the twin is a presenter, and twin.failed when the renderer never confirms it", async () => {
+    const { notifySchema, saveNotifySettings, setNotificationFetch, sampleEventData } = await import("../notifications");
+    const calls: Array<{ event: string; body: Record<string, unknown> }> = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ event: (init?.headers as Record<string, string>)["X-Studio-Event"], body: JSON.parse(String(init?.body)) });
+      return new Response("", { status: 200 });
+    });
+    const saved = clipMs.CLIP_MS;
+    try {
+      await saveNotifySettings(notifySchema.parse({ url: "https://203.0.113.5/hooks/twins" }), "u1");
+      const job = await startTwin(input(), "u1");
+      // Trained and asked for consent: still not a presenter, so nothing is sent.
+      await listTwins("u1");
+      clipMs.CLIP_MS = 60_000;
+      await requestTwinConsent(job.id, "u1");
+      forgetTwinChecks();
+      await listTwins("u1");
+      assert.equal(calls.length, 0, "not yet a presenter: nothing sent");
+      // Consent given: the twin becomes a presenter, and that is sent once, whatever reads it after.
+      clipMs.CLIP_MS = 0;
+      forgetTwinChecks();
+      const [twin] = await listTwins("u1");
+      assert.equal(twin.status, "completed");
+      forgetTwinChecks();
+      await listTwins("u1");
+      assert.deepEqual(calls.map((c) => c.event), ["twin.completed"]);
+      const data = calls[0].body.data as Record<string, unknown>;
+      assert.deepEqual([data.id, data.name, data.status, data.consent, data.avatarId], [job.id, "Dana Ruiz", "completed", "accepted", twin.avatarId]);
+      for (const hidden of ["lookId", "groupId", "voiceId", "imageUrl", "consentUrl", "footageUrl", "provider", "ownerId"]) assert.equal(hidden in data, false, `${hidden} is not sent`);
+      const shape = (d: Record<string, unknown>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v]).sort());
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("twin.completed")))), shape(data), "the sample is shaped like the real event");
+
+      // A start the renderer never confirmed within its replay window is marked failed, and that is sent.
+      const lost = await startTwin(input({ name: "Lost twin" }), "u1");
+      const old = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      await getStore().put("twin", { ...(await getStore().get<TwinJob>("twin", lost.id))!, lookId: "", groupId: "", createdAt: old, updatedAt: old });
+      forgetTwinChecks();
+      await listTwins("u1");
+      const failed = calls.filter((c) => c.event === "twin.failed");
+      assert.equal(failed.length, 1);
+      const failure = failed[0].body.data as Record<string, unknown>;
+      assert.equal(failure.id, lost.id);
+      assert.match(String(failure.error), /never confirmed this twin/);
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("twin.failed")))), shape(failure));
+      forgetTwinChecks();
+      await listTwins("u1");
+      assert.equal(calls.filter((c) => c.event === "twin.failed").length, 1, "sent once");
+
+      // A twin trained but whose picture cannot be fetched fails, and says why.
+      setTwinPictureFetch(async () => {
+        throw new Error("network down");
+      });
+      const proto = MockAvatarProvider.prototype as unknown as { portraitStatus: (id: string) => Promise<unknown> };
+      const realStatus = proto.portraitStatus;
+      proto.portraitStatus = async () => ({ status: "completed", imageUrl: "https://93.184.216.34/twin.png" });
+      const pictureless = await startTwin(input({ name: "No picture" }), "u1");
+      try {
+        forgetTwinChecks();
+        await listTwins("u1");
+      } finally {
+        proto.portraitStatus = realStatus;
+      }
+      const noPicture = calls.filter((c) => c.event === "twin.failed").map((c) => c.body.data as Record<string, unknown>).find((d) => d.id === pictureless.id);
+      assert.match(String(noPicture?.error), /picture could not be downloaded/);
+      setTwinPictureFetch(undefined);
+
+      // Samples of both are marked as tests.
+      const { sendTestNotification } = await import("../notifications");
+      for (const event of ["twin.completed", "twin.failed"] as const) {
+        assert.equal((await sendTestNotification("u1", event))!.ok, true);
+        assert.equal(calls.at(-1)!.event, event);
+        assert.equal(calls.at(-1)!.body.test, true);
+        assert.match(String((calls.at(-1)!.body.data as Record<string, unknown>).id), /^sample_/);
+      }
+
+      // A webhook chosen to send only renders is sent no twins.
+      await saveNotifySettings(notifySchema.parse({ url: "https://203.0.113.5/hooks/twins", events: ["video.completed"] }), "u1");
+      const before = calls.length;
+      const quiet = await startTwin(input({ name: "Quiet twin" }), "u1");
+      await getStore().put("twin", { ...(await getStore().get<TwinJob>("twin", quiet.id))!, lookId: "", groupId: "", createdAt: old, updatedAt: old });
+      forgetTwinChecks();
+      await listTwins("u1");
+      assert.equal((await getStore().get<TwinJob>("twin", quiet.id))!.status, "failed");
+      assert.equal(calls.length, before, "not chosen: not sent");
+    } finally {
+      clipMs.CLIP_MS = saved;
+      setNotificationFetch(null);
+    }
+  });
+
   it("offers a new consent link once the last is a day old, and none for a twin that could not be trained", async () => {
     const job = await startTwin(input(), "u1");
     const asked = await requestTwinConsent(job.id, "u1");

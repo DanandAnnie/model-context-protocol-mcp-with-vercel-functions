@@ -6700,11 +6700,11 @@ test("webhook settings reject private hosts and show the signing secret", async 
   // Choose which events are sent: every one to start with; none at all cannot be saved.
   await page.reload();
   const events = page.getByRole("group", { name: "Send when" });
-  for (const name of [/A render completes/, /A render fails/, /A dub is ready/, /A dub fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
+  for (const name of [/A render completes/, /A render fails/, /A dub is ready/, /A dub fails/, /A digital twin is ready/, /A digital twin fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
   await events.getByRole("checkbox", { name: /A visitor leaves an email/ }).uncheck();
   await expect(page.getByText("Save the webhook to send these events.")).toBeVisible();
   await page.getByRole("button", { name: "Save webhook" }).click();
-  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed"]);
+  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed", "twin.completed", "twin.failed"]);
   await page.reload();
   await expect(events.getByRole("checkbox", { name: /A visitor leaves an email/ })).not.toBeChecked();
   await events.getByRole("checkbox", { name: /A render completes/ }).uncheck();
@@ -6712,12 +6712,14 @@ test("webhook settings reject private hosts and show the signing secret", async 
   await events.getByRole("checkbox", { name: /A dub is ready/ }).uncheck();
   await expect(page.getByTestId("webhook-events-none")).toHaveCount(0);
   await events.getByRole("checkbox", { name: /A dub fails/ }).uncheck();
+  await events.getByRole("checkbox", { name: /A digital twin is ready/ }).uncheck();
+  await events.getByRole("checkbox", { name: /A digital twin fails/ }).uncheck();
   await expect(page.getByTestId("webhook-events-none")).toBeVisible();
   await expect(page.getByRole("button", { name: "Save webhook" })).toBeDisabled();
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio", events: [] } })).status()).toBe(400);
   // A save from the API that leaves the events out keeps the choice.
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio" } })).status()).toBe(200);
-  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed"]);
+  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed", "translation.completed", "translation.failed", "twin.completed", "twin.failed"]);
 
   await page.reload();
   page.once("dialog", (d) => d.accept());
@@ -6862,7 +6864,7 @@ test("Settings sends a marked sample of a webhook event, logged as a sample", as
     const afterPresenter = (await (await page.request.get("/api/notifications")).json()).webhook.deliveries as Array<{ event: string; test?: boolean }>;
     expect(afterPresenter.some((d) => d.test && d.event === "lead.captured")).toBe(true);
     // Dubs have samples too: ready (with the dub's video and subtitle links) and failed.
-    await expect(choice.locator("option")).toContainText(["Sample: dub is ready", "Sample: dub fails"]);
+    await expect(choice.locator("option")).toContainText(["Sample: dub is ready", "Sample: dub fails", "Sample: digital twin is ready", "Sample: digital twin fails"]);
     await choice.selectOption("translation.failed");
     await page.getByRole("button", { name: "Send test" }).click();
     await expect(page.getByTestId("webhook-note")).toHaveText(/^Sample translation\.failed failed: /, { timeout: 20_000 });

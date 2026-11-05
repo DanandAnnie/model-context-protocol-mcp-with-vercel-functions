@@ -8,7 +8,7 @@ import { LOCAL_OWNER } from "./owner-id";
 import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
-import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Translation, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
+import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Translation, type TwinJob, type Video, type WebhookDelivery, type WebhookEvent } from "./types";
 import { getEmailProvider } from "./providers/email";
 import { config } from "./config";
 
@@ -362,6 +362,21 @@ export async function notifyTranslationTransition(prev: Translation, next: Trans
   });
 }
 
+/**
+ * Sends twin.completed once a digital twin is trained, consented to, and kept as a photo avatar, or twin.failed when
+ * training or its picture fails, or the renderer refuses, never confirms, or loses the twin, from the write that moved
+ * it there. The renderer's ids,
+ * the consent link, and the picture are not sent; `avatarId` is the presenter to make videos with.
+ */
+export async function notifyTwinTransition(prev: TwinJob, next: TwinJob): Promise<void> {
+  if (next.status === prev.status) return;
+  if (next.status !== "completed" && next.status !== "failed") return;
+  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+  if (!settings) return;
+  const { id, name, status, consent, avatarId, error, createdAt, updatedAt } = next;
+  await dispatchNotification(settings, status === "completed" ? "twin.completed" : "twin.failed", { id, name, status, consent, avatarId, error, createdAt, updatedAt });
+}
+
 /** What Settings can send to try the receiver: a plain ping, or a sample of one of the real events. */
 export const TEST_EVENTS = ["test", ...WEBHOOK_EVENTS] as const;
 export type TestEvent = (typeof TEST_EVENTS)[number];
@@ -387,6 +402,12 @@ export function sampleEventData(event: WebhookEvent, now = nowIso(), source: Lea
     return event === "translation.completed"
       ? { ...dub, status: "completed", videoUrl: "https://example.com/sample-es.mp4", captionUrls: { srt: "https://example.com/sample-es.srt", vtt: "https://example.com/sample-es.vtt" } }
       : { ...dub, status: "failed", error: "Sample failure: the dub could not be made" };
+  }
+  if (event === "twin.completed" || event === "twin.failed") {
+    const twin = { id: "sample_twin", name: "Sample twin", createdAt: now, updatedAt: now };
+    return event === "twin.completed"
+      ? { ...twin, status: "completed", consent: "accepted", avatarId: "sample_avatar" }
+      : { ...twin, status: "failed", consent: "not_requested", error: "Sample failure: the renderer could not train a twin from that footage" };
   }
   const base = { id: "sample_video", title: "Sample video", createdAt: now, updatedAt: now };
   return event === "video.completed"

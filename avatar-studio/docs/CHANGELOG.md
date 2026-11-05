@@ -1579,3 +1579,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The card's intro now says only the chosen events are sent.
     - The "choose at least one" note is now tied to the Save button for screen readers.
     - The chosen events are worked out once when saving.
+- Read-only API keys (`1974076`). Every key could create, change, and delete, so a reporting script or a dashboard that only needed to read the library had to hold a key that could also delete it. Settings now offers "Full access" or "Read only" beside a new key's expiry, labels each read-only key in the list, and shows a read-only key's example as a plain fetch.
+  - **Behaviour:** a read-only key can list and fetch, and download the exports sent as `POST` (share links, captions, scripts). Anything that creates, changes, or deletes is refused with `403` and a message saying the key is read-only, review comments and asking for a review included. A read that workspace viewers can't make (a video's leads, a directed video's scenes) is still open to it. Like a viewer, it is not shown the webhook's signing secret or a digital twin's consent link. Keys made earlier keep full access.
+  - **API:** `POST /api/keys` takes `access` (`full`, the default, or `read`; anything else is a `400`), and every listed key carries `access`.
+  - An independent review found nothing blocking. From its optional findings:
+    - The four reads that only editors may make (a video's leads, a directed video's scenes, the music catalog, a portrait's progress) now work with a read-only key instead of being refused as writes.
+    - The docs now name the reads no key can make, and say what a read-only key isn't shown.
+    - Settings takes its access choices from the server's list.
+    - The end-to-end test also covers asking for a review, a scripts export, and a leads read.

@@ -1609,3 +1609,13 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A visible hint under the choice, not a tooltip, warns that a receiver checking neither mark will act on a sample.
     - The unit test now checks each sample against the data a real event sends, field by field and type by type, and covers logging on settings without a revision id.
     - The end-to-end test finds the sample by what it is rather than by its place in the log.
+- Rename an API key (`a37e813`). A key's name was fixed when it was made, so one named after a script that later moved, or named in a hurry, could only be fixed by revoking it and handing every script a new secret. Each key in Settings now has a Rename button next to Revoke. It opens a field with the current name; Enter saves, and Escape or Cancel leaves the name as it was. Either way focus goes back to Rename.
+  - **Behaviour:** only the name changes. The secret, lifetime, and access stay as they were, so scripts using the key keep working. Like making or revoking a key, renaming takes a signed-in session (a key can't rename itself or another), and in a workspace it takes an editor. The activity feed records it under API keys: "renamed the API key "Zapier" to "Zapier (prod)"". It links to Settings while the key exists and is included in the activity CSV.
+  - **API:** `PATCH /api/keys/:id` with `{ "name" }` (1 to 60 characters; blank is a `400`) returns the key. It is a `403` with a key and a `404` for a key that isn't the account's. Activity events of kind `apikey.renamed` carry the new name as `subject` and the old one as `previous`.
+  - An independent review found nothing blocking. From its optional findings:
+    - A rename is now written only over the key it read. A key revoked while its new name is being saved stays revoked (the rename answers `404`) instead of being written back.
+    - The once-a-minute last-use stamp a script's request writes is now conditional as well. It can no longer undo a rename made in the meantime, or bring back a key revoked while the request was in flight (which could already happen before renaming existed).
+    - Saving one key's new name no longer closes a rename form opened on another key meanwhile.
+    - The new-key banner follows its key by id, not by name, so two keys with the same name can't be confused.
+    - The card's help text mentions renaming.
+    - Unit tests cover a rename racing a revoke and a last-use stamp racing a rename.

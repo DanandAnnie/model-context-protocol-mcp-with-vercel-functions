@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Send, Trash2, Webhook } from "lucide-react";
+import { KeyRound, RotateCcw, Send, Trash2, Webhook } from "lucide-react";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
@@ -29,7 +29,9 @@ export function OutboundWebhook() {
   const readOnly = useCanEdit() === false; // the workspace's setting: a viewer sees it, the server refuses their changes
   const [url, setUrl] = useState("");
   // A redelivery is busy as the id of the delivery being sent again.
-  const [busy, setBusy] = useState<"save" | "test" | "remove" | { redeliver: string } | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | "remove" | "rotate" | "retire" | { redeliver: string } | null>(null);
+  // Whether a rotation keeps the old secret signing X-Studio-Signature-Previous for a day.
+  const [keepPrevious, setKeepPrevious] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const saved = data?.webhook ?? null;
@@ -97,6 +99,44 @@ export function OutboundWebhook() {
     }
   }
 
+  async function rotate() {
+    const message =
+      (keepPrevious
+        ? "Make a new signing secret? For the next 24 hours each delivery is also signed with the current one, in X-Studio-Signature-Previous, while you move your receiver over."
+        : "Make a new signing secret? The current one stops at once: a receiver still checking it will reject deliveries until it has the new one.") +
+      // Only one earlier secret signs at a time: the one before the current is dropped now.
+      (saved?.previousSecretExpiresAt ? ` The previous secret, kept until ${formatDate(saved.previousSecretExpiresAt)}, stops now.` : "");
+    if (!window.confirm(message)) return;
+    setBusy("rotate");
+    setErr(null);
+    setNote(null);
+    try {
+      await api("/api/notifications/secret", { method: "POST", body: JSON.stringify({ keepPrevious }) });
+      await refetch();
+      setNote(keepPrevious ? "New signing secret made. The old one also signs deliveries for 24 hours." : "New signing secret made. The old one no longer signs deliveries.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not make a new secret");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function retire() {
+    if (!window.confirm("Stop signing with the previous secret now? Do this once every receiver uses the new one.")) return;
+    setBusy("retire");
+    setErr(null);
+    setNote(null);
+    try {
+      await api("/api/notifications/secret", { method: "DELETE" });
+      await refetch();
+      setNote("The previous secret no longer signs deliveries.");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not stop the previous secret");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function remove() {
     if (!window.confirm("Remove the webhook? Finished renders will no longer be reported.")) return;
     setBusy("remove");
@@ -119,7 +159,7 @@ export function OutboundWebhook() {
         <Webhook className="h-4 w-4 text-slate-400" /> Webhook notifications
       </h3>
       <p className="mt-1 text-xs text-slate-500">
-        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret. Private and local hosts are rejected.
+        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret (after a rotation, accept <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature-Previous</code> too while you move over). Private and local hosts are rejected.
       </p>
       <ErrorBanner message={error ?? err} />
       {/* Always rendered, so a screen reader announces each outcome as it is written. */}
@@ -179,6 +219,30 @@ export function OutboundWebhook() {
               <dt className="w-28 text-slate-500">Signing secret</dt>
               <dd>
                 <code className="break-all rounded bg-slate-100 px-1 py-0.5 font-mono" data-testid="webhook-secret">{saved.secret}</code>
+                {!readOnly && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="secondary" className="px-2.5 py-1 text-xs" onClick={rotate} loading={busy === "rotate"} disabled={!!busy}>
+                      <KeyRound className="h-3.5 w-3.5" /> Rotate secret
+                    </Button>
+                    <label className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                      <input type="checkbox" checked={keepPrevious} disabled={!!busy} onChange={(e) => setKeepPrevious(e.target.checked)} />
+                      Keep the old secret working for 24 hours
+                    </label>
+                  </div>
+                )}
+              </dd>
+            </div>
+          )}
+          {saved.secret && saved.previousSecretExpiresAt && (
+            <div className="flex flex-wrap gap-2" data-testid="webhook-previous-secret">
+              <dt className="w-28 text-slate-500">Previous secret</dt>
+              <dd>
+                Also signs each delivery, in <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature-Previous</code>, until {formatDate(saved.previousSecretExpiresAt)}.
+                {!readOnly && (
+                  <Button type="button" variant="secondary" className="ml-2 px-2.5 py-1 text-xs" onClick={retire} loading={busy === "retire"} disabled={!!busy}>
+                    Stop using it now
+                  </Button>
+                )}
               </dd>
             </div>
           )}

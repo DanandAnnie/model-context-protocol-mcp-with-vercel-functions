@@ -38,6 +38,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER, { inviteAdd
       if (kind === "apikey") delete copy.hash;
       if (kind === "notify") {
         delete copy.secret;
+        delete copy.previousSecret;
         delete copy.rev;
         // The bodies the webhook sent (lead emails among them) stay on the server, as in the API.
         if (Array.isArray(copy.deliveries)) copy.deliveries = (copy.deliveries as WebhookDelivery[]).map(publicDelivery);

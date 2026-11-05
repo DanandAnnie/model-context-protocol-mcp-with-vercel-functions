@@ -39,32 +39,112 @@ export async function getNotifySettings(ownerId: string = LOCAL_OWNER): Promise<
   return s && s.ownerId === ownerId ? s : null;
 }
 
-/** Saves the endpoint. The signing secret is created once and kept across URL changes. */
+/**
+ * Saves the endpoint. The signing secret is created once and kept across URL changes, and a rotation's overlap with it.
+ * Written only over the settings as read (a conditional write, tried again when a rotation or a delivery wrote first), so
+ * a save never brings back a secret just rotated or stopped, and never drops a delivery logged meanwhile.
+ */
 export async function saveNotifySettings(input: z.infer<typeof notifySchema>, ownerId: string = LOCAL_OWNER): Promise<NotifySettings> {
   const url = (await assertPublicHttpUrl(input.url, "Webhook URL")).toString();
-  const existing = await getNotifySettings(ownerId);
-  const events = chosenEvents(input.events, existing?.events);
-  const now = nowIso();
-  const next: NotifySettings = {
-    id: notifyId(ownerId),
-    ownerId,
-    url,
-    secret: existing?.secret ?? `whsec_${randomBytes(24).toString("base64url")}`,
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-    rev: newId("rev"),
-    ...(events ? { events } : {}),
-    lastDelivery: existing?.url === url ? existing?.lastDelivery : undefined,
-    // The log is of deliveries to this URL; a new one starts it afresh.
-    deliveries: existing?.url === url ? existing?.deliveries : undefined,
-  };
-  return getStore().put("notify", next);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const existing = await getNotifySettings(ownerId);
+    const events = chosenEvents(input.events, existing?.events);
+    const now = nowIso();
+    const next: NotifySettings = {
+      id: notifyId(ownerId),
+      ownerId,
+      url,
+      secret: existing?.secret ?? newSigningSecret(),
+      // An overlap that has run out is not carried forward.
+      ...(existing && activePreviousSecret(existing) ? { previousSecret: existing.previousSecret, previousSecretExpiresAt: existing.previousSecretExpiresAt } : {}),
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+      rev: newId("rev"),
+      ...(events ? { events } : {}),
+      lastDelivery: existing?.url === url ? existing?.lastDelivery : undefined,
+      // The log is of deliveries to this URL; a new one starts it afresh.
+      deliveries: existing?.url === url ? existing?.deliveries : undefined,
+    };
+    if (existing ? await writeOver(existing, next) : await getStore().insert("notify", next)) return next;
+  }
+  throw new Error("The webhook changed while it was being saved; try again");
+}
+
+/** Writes `next` only over `latest` as read: by its `rev`, or by `updatedAt` for settings saved before `rev` existed. */
+function writeOver(latest: NotifySettings, next: NotifySettings): Promise<boolean> {
+  return latest.rev ? getStore().putIf("notify", next, "rev", latest.rev) : getStore().putIf("notify", next, "updatedAt", latest.updatedAt);
 }
 
 /** The events to keep: those given (in Settings' order, each once), else those chosen before; every event is kept as none. */
 function chosenEvents(given: NotifySettings["events"] | undefined, before: NotifySettings["events"] | undefined): NotifySettings["events"] {
   const events = given ? WEBHOOK_EVENTS.filter((e) => given.includes(e)) : before;
   return events && events.length < WEBHOOK_EVENTS.length ? events : undefined;
+}
+
+/** How long a rotated-out secret keeps signing `X-Studio-Signature-Previous`, unless retired sooner. */
+export const SECRET_OVERLAP_HOURS = 24;
+
+function newSigningSecret(): string {
+  return `whsec_${randomBytes(24).toString("base64url")}`;
+}
+
+/** The previous secret while its overlap lasts, else null. */
+export function activePreviousSecret(settings: Pick<NotifySettings, "previousSecret" | "previousSecretExpiresAt">, now = Date.now()): string | null {
+  return settings.previousSecret && settings.previousSecretExpiresAt && Date.parse(settings.previousSecretExpiresAt) > now ? settings.previousSecret : null;
+}
+
+/**
+ * Changes the settings with `change`, written only over the settings as read (a conditional write on `rev`, tried again
+ * when a delivery or a save wrote first), so a rotation never drops a logged delivery, never undoes a save, and never
+ * brings back a webhook removed meanwhile.
+ */
+async function updateNotifySettings(ownerId: string, change: (latest: NotifySettings) => NotifySettings): Promise<NotifySettings> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const latest = await getNotifySettings(ownerId);
+    if (!latest) throw new NotFoundError("Save a webhook URL first");
+    const next = { ...change(latest), rev: newId("rev"), updatedAt: nowIso() };
+    if (await writeOver(latest, next)) return next;
+  }
+  throw new Error("The webhook changed while it was being updated; try again");
+}
+
+/**
+ * Gives the webhook a new signing secret. With `keepPrevious` (the default) the old secret goes on signing
+ * `X-Studio-Signature-Previous` for SECRET_OVERLAP_HOURS, so a receiver can be moved over without dropping a delivery;
+ * without it the old secret stops at once. A rotation during an overlap replaces the secret it overlapped.
+ */
+export async function rotateNotifySecret(ownerId: string = LOCAL_OWNER, keepPrevious = true, now = Date.now()): Promise<NotifySettings> {
+  return updateNotifySettings(ownerId, (latest) => {
+    const { previousSecret: _p, previousSecretExpiresAt: _e, ...rest } = latest;
+    void _p;
+    void _e;
+    return {
+      ...rest,
+      secret: newSigningSecret(),
+      ...(keepPrevious ? { previousSecret: latest.secret, previousSecretExpiresAt: new Date(now + SECRET_OVERLAP_HOURS * 3_600_000).toISOString() } : {}),
+    };
+  });
+}
+
+/** Stops signing with the previous secret before its overlap ends (once every receiver uses the new one). */
+export async function retirePreviousSecret(ownerId: string = LOCAL_OWNER): Promise<NotifySettings> {
+  return updateNotifySettings(ownerId, (latest) => {
+    const { previousSecret: _p, previousSecretExpiresAt: _e, ...rest } = latest;
+    void _p;
+    void _e;
+    return rest;
+  });
+}
+
+/** The webhook as the API shows it: no previous secret, and when its overlap ends only while it lasts. */
+export function publicNotifySettings(settings: NotifySettings, now = Date.now()): Omit<NotifySettings, "previousSecret" | "deliveries"> & { deliveries: ReturnType<typeof publicDelivery>[] } {
+  const { previousSecret: _p, previousSecretExpiresAt, deliveries, ...rest } = settings;
+  void _p;
+  return {
+    ...rest,
+    ...(activePreviousSecret(settings, now) ? { previousSecretExpiresAt } : {}),
+    deliveries: (deliveries ?? []).map(publicDelivery),
+  };
 }
 
 export async function deleteNotifySettings(ownerId: string = LOCAL_OWNER): Promise<void> {
@@ -101,6 +181,7 @@ export async function dispatchNotification(settings: NotifySettings, event: Noti
 async function deliver(settings: NotifySettings, event: NotifyEvent, body: string, redeliveryOf?: string): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
   const timestamp = String(Math.floor(Date.now() / 1000));
   const id = newId("whd");
+  const previous = activePreviousSecret(settings);
   let result: NonNullable<NotifySettings["lastDelivery"]>;
   try {
     // Re-checked at send time and pinned to the vetted address: DNS can change between saving the URL and using it.
@@ -112,6 +193,7 @@ async function deliver(settings: NotifySettings, event: NotifyEvent, body: strin
         "X-Studio-Event": event,
         "X-Studio-Timestamp": timestamp,
         "X-Studio-Signature": `sha256=${signPayload(settings.secret, timestamp, body)}`,
+        ...(previous ? { "X-Studio-Signature-Previous": `sha256=${signPayload(previous, timestamp, body)}` } : {}),
         "X-Studio-Delivery": id,
         ...(redeliveryOf ? { "X-Studio-Redelivery-Of": redeliveryOf } : {}),
       },

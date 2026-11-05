@@ -1,15 +1,12 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
-import { deleteNotifySettings, getNotifySettings, notifySchema, publicDelivery, saveNotifySettings } from "@/lib/notifications";
-import type { NotifySettings } from "@/lib/types";
+import { deleteNotifySettings, getNotifySettings, notifySchema, publicNotifySettings, saveNotifySettings } from "@/lib/notifications";
 import { requireEditor, requireOwner } from "@/lib/owner";
 
 export const dynamic = "force-dynamic";
 
-/** The webhook as the API shows it: its delivery log without the bodies sent, which stay on the server for redelivery. */
-function shown(webhook: NotifySettings) {
-  return { ...webhook, deliveries: (webhook.deliveries ?? []).map(publicDelivery) };
-}
+/** The webhook as the API shows it: its delivery log without the bodies sent, which stay on the server for redelivery, and never a rotated-out secret. */
+const shown = publicNotifySettings;
 
 /** The workspace's webhook; a viewer sees where it goes but not the signing secret, which would let them forge deliveries. */
 export async function GET() {

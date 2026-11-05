@@ -1355,6 +1355,12 @@ export interface NotifySettings {
   url: string;
   /** HMAC-SHA256 signing secret, shown in Settings. */
   secret: string;
+  /**
+   * The secret replaced by the last rotation, still signing `X-Studio-Signature-Previous` until `previousSecretExpiresAt`
+   * so a receiver keeps verifying deliveries while it is moved to the new one. Never returned by the API.
+   */
+  previousSecret?: string;
+  previousSecretExpiresAt?: string;
   createdAt: string;
   updatedAt: string;
   lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string; id?: string };

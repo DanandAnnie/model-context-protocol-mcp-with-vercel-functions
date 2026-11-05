@@ -359,6 +359,7 @@ Returns `{ "reply": "…" }`.
 
 - `GET /api/keys`, `POST /api/keys` → `{ "name", "expiresInDays"?, "access"? }` → `201 { "key", "secret" }`, `DELETE /api/keys/:id`. `expiresInDays` (`30`, `90`, or `365`; anything else is a `400`) gives the key a lifetime: it carries `expiresAt`, works until then, and from then on every request with it is refused with `401` ("This API key expired on <date and time> UTC; create a new one in Settings") and its `lastUsedAt` is no longer updated; left out, the key never expires. `GET /api/keys` gives each key `expired`, judged by the server's clock. An expired key stays listed, with its `expiresAt`, until it is revoked, and counts toward the ten an account can hold. Settings offers the lifetime beside the key's name and lists each key's expiry, or that it expired `access` is `full` (the default) or `read` (anything else is a `400`); every key carries it, and a key made before access could be chosen reads as `full`. A read-only key can make every `GET` request a key may make (an account export and a workspace's people list take a signed-in session, whatever the key) and download the exports sent as `POST` (`/api/videos/links`, `/api/videos/captions`, `/api/videos/scripts`); like a workspace viewer, it is not shown the webhook's signing `secret` or a digital twin's consent link. It is refused with `403` ("This API key is read-only: it can list and fetch, not create, change, or delete. Use a key with full access, made in Settings") on any request that creates, changes, or deletes, review comments included. Settings offers Full access or Read only beside the expiry and labels each read-only key in the list.
 - `GET | PUT | DELETE /api/notifications` (`PUT` → `{ "url", "events"? }`), `POST /api/notifications/test`. `events` chooses which of `video.completed`, `video.failed`, and `lead.captured` the webhook is sent (at least one; an empty list, `test`, or another name is a `400`); left out, the choice made before is kept, and a new webhook is sent every event. The webhook's `events` lists the choice, absent when every event is sent. An event not chosen is neither sent nor logged; `POST /api/notifications/test` sends a test whatever is chosen, and a logged delivery can be redelivered either way. Settings offers the events as checkboxes under the URL. Every delivery's body is `{ "id", "event", "timestamp", "data" }`, `id` naming the event (`whe_…`), inside the signed body and the same when the delivery is sent again, so a receiver can ignore a repeat; its headers carry `X-Studio-Event`, `X-Studio-Timestamp`, `X-Studio-Signature`, and the attempt's own id as `X-Studio-Delivery` (`whd_…`). The webhook's `deliveries` lists the last 20 attempts to its URL, newest first, as `{ id, at, event, ok, status?, error?, redeliveryOf?, resendable }` (the bodies sent stay on the server, and the account export lists the log the same way; the log starts over when the URL changes, and a delivery that finishes after the webhook was removed, made again, or pointed elsewhere is not recorded; concurrent deliveries are recorded with a conditional write, so none overwrites another's entry). `POST /api/notifications/deliveries/:id/redeliver` (editors only) sends a logged delivery's body again with a fresh timestamp and signature, under a new delivery id, with `X-Studio-Redelivery-Of` naming the original (the first one, for a redelivery sent again) → `{ "delivery" }`, logged like any other; `404` for an id no longer in the log, `400` for a body too large to have been kept (over 16,000 characters). Settings lists the log under Recent deliveries, with Redeliver on each one kept
+- `POST /api/notifications/secret` → `{ "keepPrevious"? }` gives the webhook a new signing secret and returns the webhook (a bare `POST` with no body is enough; `404` with no webhook; editors only). With `keepPrevious` left out or `true`, the old secret goes on signing each delivery for 24 hours, in `X-Studio-Signature-Previous`, so a receiver keeps verifying while it is moved to the new one; the webhook carries `previousSecretExpiresAt` until then. With `false` the old secret stops at once. A rotation during an overlap replaces the secret it overlapped. `DELETE /api/notifications/secret` stops the previous secret before its 24 hours are up. The previous secret itself is never returned, by the API or the account export, and saving the webhook keeps the overlap as it keeps the secret. In Settings, Rotate secret sits under the signing secret with "Keep the old secret working for 24 hours" (ticked by default), and while an overlap lasts the card says until when, with Stop using it now.
 
 ## Billing
 
@@ -386,6 +387,7 @@ Content-Type: application/json
 X-Studio-Event: video.completed | video.failed | lead.captured | test
 X-Studio-Timestamp: 1761199200          (unix seconds)
 X-Studio-Signature: sha256=<hex HMAC-SHA256 of "<timestamp>.<raw body>" with your signing secret>
+X-Studio-Signature-Previous: sha256=<the same, with the secret before the last rotation>   (for 24 hours after a rotation)
 ```
 
 ```json
@@ -399,13 +401,18 @@ Verify before trusting a delivery (Node):
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export function verifyStudioWebhook(req, rawBody, secret, maxAgeSec = 300) {
-  const ts = req.headers["x-studio-timestamp"];
-  const sig = String(req.headers["x-studio-signature"] ?? "").replace(/^sha256=/, "");
-  if (!ts || !sig || Math.abs(Date.now() / 1000 - Number(ts)) > maxAgeSec) return false;
-  const expected = createHmac("sha256", secret).update(`${ts}.${rawBody}`).digest("hex");
-  return expected.length === sig.length && timingSafeEqual(Buffer.from(expected), Buffer.from(sig));
+  const ts = String(req.headers["x-studio-timestamp"] ?? "");
+  if (!/^\d+$/.test(ts) || Math.abs(Date.now() / 1000 - Number(ts)) > maxAgeSec) return false;
+  const expected = Buffer.from(createHmac("sha256", secret).update(`${ts}.${rawBody}`).digest("hex"));
+  // After a rotation the delivery is signed with both secrets for a day: accept either header.
+  return ["x-studio-signature", "x-studio-signature-previous"].some((name) => {
+    const sig = Buffer.from(String(req.headers[name] ?? "").replace(/^sha256=/, ""));
+    return sig.length === expected.length && timingSafeEqual(expected, sig);
+  });
 }
 ```
+
+To rotate without dropping a delivery: rotate with the overlap, give the receiver the new secret (it verifies `X-Studio-Signature` with it, and the verifier above also accepts `X-Studio-Signature-Previous` for one still holding the old one), then stop the previous secret or let its 24 hours run out.
 
 Deliveries are attempted once, after the response that completed the render, with a 10-second timeout and no redirects. The last outcome is shown in Settings. Endpoints on private or local addresses are rejected, and the delivery connects only to the addresses that passed that check.
 

@@ -6715,6 +6715,76 @@ test("webhook settings reject private hosts and show the signing secret", async 
   expect((await (await page.request.get("/api/notifications")).json()).webhook).toBeNull();
 });
 
+test("the webhook signing secret is rotated in Settings, the old one kept for a day or stopped at once, and never shown", async ({ page }) => {
+  // No webhook, nothing to rotate.
+  expect((await page.request.post("/api/notifications/secret")).status()).toBe(404);
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/rotate" } })).status()).toBe(200);
+  const first = (await (await page.request.get("/api/notifications")).json()).webhook as { secret: string };
+  try {
+    await page.goto("/settings");
+    const secret = page.getByTestId("webhook-secret");
+    await expect(secret).toContainText(first.secret);
+    await expect(page.getByTestId("webhook-previous-secret")).toHaveCount(0);
+    const keep = page.getByRole("checkbox", { name: "Keep the old secret working for 24 hours" });
+    await expect(keep).toBeChecked();
+    const dialogs: string[] = [];
+    page.on("dialog", (d) => {
+      dialogs.push(d.message());
+      void d.accept();
+    });
+    await page.getByRole("button", { name: "Rotate secret" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText("New signing secret made. The old one also signs deliveries for 24 hours.");
+    await expect(secret).not.toContainText(first.secret);
+    const rotated = (await (await page.request.get("/api/notifications")).json()).webhook as Record<string, string>;
+    expect(rotated.secret).toMatch(/^whsec_/);
+    expect(rotated.secret).not.toBe(first.secret);
+    // The old secret is never sent back, only when it stops.
+    expect(rotated).not.toHaveProperty("previousSecret");
+    expect(JSON.stringify(rotated)).not.toContain(first.secret);
+    const hours = (Date.parse(rotated.previousSecretExpiresAt) - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(23.9);
+    expect(hours).toBeLessThanOrEqual(24);
+    await expect(page.getByTestId("webhook-previous-secret")).toContainText("X-Studio-Signature-Previous, until");
+    const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+    expect(axe.violations.map((x) => x.id)).toEqual([]);
+    // Stopped early.
+    await page.getByRole("button", { name: "Stop using it now" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText("The previous secret no longer signs deliveries.");
+    await expect(page.getByTestId("webhook-previous-secret")).toHaveCount(0);
+    expect((await (await page.request.get("/api/notifications")).json()).webhook).not.toHaveProperty("previousSecretExpiresAt");
+    // Without the overlap, the old secret stops at once.
+    await keep.uncheck();
+    await page.getByRole("button", { name: "Rotate secret" }).click();
+    await expect(page.getByTestId("webhook-note")).toHaveText("New signing secret made. The old one no longer signs deliveries.");
+    await expect(secret).not.toContainText(rotated.secret);
+    await expect(page.getByTestId("webhook-previous-secret")).toHaveCount(0);
+    expect(dialogs).toEqual([
+      "Make a new signing secret? For the next 24 hours each delivery is also signed with the current one, in X-Studio-Signature-Previous, while you move your receiver over.",
+      "Stop signing with the previous secret now? Do this once every receiver uses the new one.",
+      "Make a new signing secret? The current one stops at once: a receiver still checking it will reject deliveries until it has the new one.",
+    ]);
+    // From the API: a bare POST keeps the old secret for a day, and the body is checked.
+    const bare = (await (await page.request.post("/api/notifications/secret")).json()).webhook as Record<string, string>;
+    expect(bare.previousSecretExpiresAt).toBeTruthy();
+    expect((await page.request.post("/api/notifications/secret", { data: { keepPrevious: "no" } })).status()).toBe(400);
+    // A read-only key sees when the overlap ends but neither secret, and cannot rotate.
+    const key = (await (await page.request.post("/api/keys", { data: { name: `Rotation reader ${Date.now().toString(36)}`, access: "read" } })).json()) as { key: { id: string }; secret: string };
+    try {
+      const auth = { Authorization: `Bearer ${key.secret}` };
+      const asReader = (await (await page.request.get("/api/notifications", { headers: auth })).json()).webhook as Record<string, unknown>;
+      expect(asReader.previousSecretExpiresAt).toBeTruthy();
+      expect(asReader).not.toHaveProperty("secret");
+      expect(asReader).not.toHaveProperty("previousSecret");
+      expect((await page.request.post("/api/notifications/secret", { headers: auth })).status()).toBe(403);
+      expect((await page.request.delete("/api/notifications/secret", { headers: auth })).status()).toBe(403);
+    } finally {
+      await page.request.delete(`/api/keys/${key.key.id}`);
+    }
+  } finally {
+    await page.request.delete("/api/notifications");
+  }
+});
+
 test("API keys are made in Settings with an optional lifetime, shown once, listed with their expiry, and revoked", async ({ page }) => {
   const tag = Date.now().toString(36);
   // A lifetime other than 30, 90, or 365 days is refused.

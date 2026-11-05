@@ -2564,6 +2564,99 @@ describe("outbound webhooks", () => {
     }
   });
 
+  it("rotates the signing secret, signing with the old one too for a day unless told not to, and never shows it", async () => {
+    const { rotateNotifySecret, retirePreviousSecret, publicNotifySettings, activePreviousSecret, SECRET_OVERLAP_HOURS } = await import("../notifications");
+    const calls: Array<{ headers: Record<string, string>; body: string }> = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("", { status: 200 });
+    });
+    const sig = (secret: string, c: (typeof calls)[number]) => `sha256=${signPayload(secret, c.headers["X-Studio-Timestamp"], c.body)}`;
+    try {
+      await assert.rejects(rotateNotifySecret("rot0"), /Save a webhook URL first/);
+      const first = await saveNotifySettings({ url: HOOK }, "rot1");
+      assert.equal((await dispatchNotification(first, "test", {}))!.ok, true);
+      assert.equal(calls[0].headers["X-Studio-Signature-Previous"], undefined, "no rotation, no second signature");
+
+      const before = Date.now();
+      const rotated = await rotateNotifySecret("rot1");
+      assert.notEqual(rotated.secret, first.secret);
+      assert.ok(rotated.secret.startsWith("whsec_"));
+      assert.equal(rotated.previousSecret, first.secret);
+      const ends = Date.parse(rotated.previousSecretExpiresAt!);
+      assert.ok(ends >= before + SECRET_OVERLAP_HOURS * 3_600_000 && ends <= Date.now() + SECRET_OVERLAP_HOURS * 3_600_000);
+      assert.equal((await getNotifySettings("rot1"))!.deliveries?.length, 1, "the log is kept");
+      await dispatchNotification(rotated, "video.completed", { id: "v" });
+      assert.equal(calls[1].headers["X-Studio-Signature"], sig(rotated.secret, calls[1]), "signed with the new secret");
+      assert.equal(calls[1].headers["X-Studio-Signature-Previous"], sig(first.secret, calls[1]), "and, for now, with the old one");
+
+      // The API and a save never give the old secret away, and a save keeps the overlap.
+      const shown = publicNotifySettings(rotated) as Record<string, unknown>;
+      assert.equal(shown.previousSecret, undefined);
+      assert.equal(shown.previousSecretExpiresAt, rotated.previousSecretExpiresAt);
+      assert.equal("previousSecretExpiresAt" in (publicNotifySettings(rotated, ends) as Record<string, unknown>), false, "an overlap that has ended is not shown");
+      const resaved = await saveNotifySettings({ url: `${HOOK}/v2` }, "rot1");
+      assert.equal(resaved.secret, rotated.secret);
+      assert.equal(resaved.previousSecret, first.secret);
+      assert.equal(activePreviousSecret(resaved, ends), null, "the overlap ends on time");
+
+      // Retired early: deliveries carry one signature again.
+      const retired = await retirePreviousSecret("rot1");
+      assert.equal(retired.previousSecret, undefined);
+      assert.equal(retired.secret, rotated.secret);
+      await dispatchNotification(retired, "test", {});
+      assert.equal(calls[2].headers["X-Studio-Signature-Previous"], undefined);
+
+      // Without the overlap the old secret stops at once; a rotation during an overlap replaces the secret it overlapped.
+      const twice = await rotateNotifySecret("rot1");
+      const thrice = await rotateNotifySecret("rot1");
+      assert.equal(thrice.previousSecret, twice.secret);
+      const abrupt = await rotateNotifySecret("rot1", false);
+      assert.equal(abrupt.previousSecret, undefined);
+      assert.equal(abrupt.previousSecretExpiresAt, undefined);
+
+      // A save keeps no overlap that has run out, and the export carries neither secret.
+      const again = await rotateNotifySecret("rot1");
+      await getStore().put("notify", { ...again, previousSecretExpiresAt: new Date(Date.now() - 1000).toISOString() });
+      const afterExpiry = await saveNotifySettings({ url: HOOK }, "rot1");
+      assert.equal(afterExpiry.previousSecret, undefined);
+      assert.equal(afterExpiry.previousSecretExpiresAt, undefined);
+      await rotateNotifySecret("rot1");
+      const { exportOwnerData } = await import("../services/account");
+      const exported = JSON.stringify(await exportOwnerData("rot1"));
+      const live = (await getNotifySettings("rot1"))!;
+      assert.ok(exported.includes(live.url));
+      assert.equal(exported.includes(live.secret), false);
+      assert.equal(exported.includes(live.previousSecret!), false);
+
+      // A save written over settings that changed after it read them is tried again, so it never brings back the
+      // secret a rotation replaced.
+      const store = getStore();
+      const realPutIf = store.putIf.bind(store);
+      let raced = false;
+      store.putIf = (async (kind: Parameters<typeof store.putIf>[0], item: { id: string }, field: string, expected: string) => {
+        if (!raced && kind === "notify") {
+          raced = true;
+          await rotateNotifySecret("rot1");
+        }
+        return realPutIf(kind, item, field, expected);
+      }) as typeof store.putIf;
+      let savedOver: Awaited<ReturnType<typeof saveNotifySettings>>;
+      try {
+        savedOver = await saveNotifySettings({ url: `${HOOK}/raced` }, "rot1");
+      } finally {
+        store.putIf = realPutIf;
+      }
+      const stored = (await getNotifySettings("rot1"))!;
+      assert.equal(raced, true);
+      assert.equal(stored.url, `${HOOK}/raced`);
+      assert.equal(stored.secret, savedOver.secret, "the save landed on top of the rotation");
+      assert.notEqual(stored.secret, live.secret, "and kept the rotated secret rather than the one it first read");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
   it("logs the last deliveries, redelivers one signed afresh, and starts the log over for a new URL", async () => {
     const { WEBHOOK_LOG_SIZE, publicDelivery, redeliverNotification, deleteNotifySettings } = await import("../notifications");
     const calls: Array<{ headers: Record<string, string>; body: string }> = [];

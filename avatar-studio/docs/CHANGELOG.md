@@ -1660,3 +1660,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - An independent review flagged that the first draft promised the event when the lines became ready, not when the app next checked. The docs and README now say when it is actually sent. From its optional findings:
     - The unit test now checks that a refused dub start and a retry that reopens the lines send nothing.
     - The docs note that a webhook chosen to send only some events gets this one once it is ticked.
+- Background check for work nobody is watching (`7f3e64f`). HeyGen calls back when a dub is made or fails, but not when proofread lines are ready or a digital twin is trained. Those, and any dub whose callback was lost, moved on only while someone had the Video translate or Avatars page open, or read the API. So their webhooks could arrive hours late. A scheduled check now moves them on.
+  - **Endpoint:** `GET /api/cron/checks` with `Authorization: Bearer $CRON_SECRET`, the header Vercel Cron sends. It asks about up to 20 running dubs or proofreads being translated, and up to 20 digital twins being trained or consented to, across every account. It works the least recently asked first, at the same pace a listing would. Whatever moves sends its webhook as if a page had seen it. The answer counts how many were checked and how many moved.
+  - **Access:** without `CRON_SECRET` the endpoint is off (`404`). Any other caller, a signed-in session included, gets `401`. It sits outside the sign-in wall, since it checks its own secret.
+  - **Schedule:** `vercel.json` runs it daily, which every Vercel plan allows. A Pro plan can run it more often, as can any outside scheduler calling it with the bearer token. `.env.example` and the docs say how.
+  - An independent review found nothing blocking. From its optional findings:
+    - Dubs take turns across runs by a `checkedAt` noted on each. A scheduled run rarely lands on the server instance that ran the last one, so the in-memory order alone would have picked the same oldest dubs every day, and a handful stuck at the provider could have held every place.
+    - The route has room to run (`maxDuration = 60`), so the webhooks sent after its answer are not cut off.
+    - Each kind is reported on its own. If one fails, the other's counts still come back, with `ok: false` and a `500`.
+    - The twin count says how many were really asked about. The dub `moved` count excludes changes a callback made meanwhile.
+    - The end-to-end test proves the check itself sent the event, from the webhook log with no listing read first. The password-server test no longer depends on a local `CRON_SECRET`.
+    - The docs define `checked` and `moved`, and note that on Hobby the daily run lands somewhere within the scheduled hour.

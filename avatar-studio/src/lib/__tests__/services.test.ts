@@ -2482,7 +2482,7 @@ describe("outbound webhooks", () => {
     });
     try {
       const settings = await saveNotifySettings({ url: HOOK }, "u1");
-      const result = await dispatchNotification(settings, "test", { hello: 1 });
+      const result = (await dispatchNotification(settings, "test", { hello: 1 }))!;
       assert.equal(result.ok, true);
       assert.equal(calls.length, 1);
       const [call] = calls;
@@ -2505,9 +2505,41 @@ describe("outbound webhooks", () => {
       assert.equal(calls.length, 2, "owners without a webhook are skipped");
 
       setNotificationFetch(async () => new Response("nope", { status: 500 }));
-      const failed = await dispatchNotification(settings, "test", {});
+      const failed = (await dispatchNotification(settings, "test", {}))!;
       assert.equal(failed.ok, false);
       assert.match(failed.error ?? "", /500/);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("sends only the events chosen, keeps the choice across saves that leave it out, and always sends a test", async () => {
+    const { sendsEvent, sendTestNotification, notifySchema } = await import("../notifications");
+    const sent: string[] = [];
+    setNotificationFetch(async (_input, init) => {
+      sent.push(JSON.parse(String(init?.body)).event);
+      return new Response("", { status: 200 });
+    });
+    try {
+      const all = await saveNotifySettings({ url: HOOK }, "ev1");
+      assert.equal(all.events, undefined, "a new webhook is sent every event");
+      assert.equal(sendsEvent(all, "lead.captured"), true);
+      // Chosen in any order, kept in Settings' order, each once.
+      const some = await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed", "video.completed", "video.failed"] }), "ev1");
+      assert.deepEqual(some.events, ["video.completed", "video.failed"]);
+      assert.equal(await dispatchNotification(some, "lead.captured", { email: "a@example.com" }), null, "not chosen: not sent");
+      assert.deepEqual(sent, []);
+      assert.equal((await getNotifySettings("ev1"))!.deliveries, undefined, "nor logged");
+      assert.equal((await dispatchNotification(some, "video.failed", {}))!.ok, true);
+      assert.equal((await sendTestNotification("ev1"))!.ok, true, "a test is sent whatever is chosen");
+      assert.deepEqual(sent, ["video.failed", "test"]);
+      // A save that leaves the events out (a URL change from the API) keeps the choice; choosing every one is the same as none.
+      assert.deepEqual((await saveNotifySettings({ url: `${HOOK}/v2` }, "ev1")).events, ["video.completed", "video.failed"]);
+      assert.equal((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["lead.captured", "video.failed", "video.completed"] }), "ev1")).events, undefined);
+      assert.equal(notifySchema.safeParse({ url: HOOK, events: [] }).success, false, "at least one");
+      assert.deepEqual((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed", "video.failed", "video.failed", "video.failed"] }), "ev1")).events, ["video.failed"], "repeats are dropped, not refused");
+      assert.equal(notifySchema.safeParse({ url: HOOK, events: ["test"] }).success, false, "a test is not an event to choose");
+      assert.equal(notifySchema.safeParse({ url: HOOK, events: ["video.deleted"] }).success, false);
     } finally {
       setNotificationFetch(null);
     }
@@ -2523,7 +2555,7 @@ describe("outbound webhooks", () => {
     });
     try {
       const settings = await saveNotifySettings({ url: HOOK }, "log1");
-      const first = await dispatchNotification(settings, "lead.captured", { email: "ana@example.com" });
+      const first = (await dispatchNotification(settings, "lead.captured", { email: "ana@example.com" }))!;
       assert.equal(first.ok, false);
       assert.ok(first.id?.startsWith("whd_"));
       assert.equal(calls[0].headers["X-Studio-Delivery"], first.id);
@@ -2559,7 +2591,7 @@ describe("outbound webhooks", () => {
       // Unknown, another owner's, and too large to keep.
       await assert.rejects(redeliverNotification("whd_nosuch", "log1"), /no longer in the log/);
       await assert.rejects(redeliverNotification(first.id!, "someone_else"), /no longer in the log/);
-      const big = await dispatchNotification((await getNotifySettings("log1"))!, "test", { pad: "x".repeat(20_000) });
+      const big = (await dispatchNotification((await getNotifySettings("log1"))!, "test", { pad: "x".repeat(20_000) }))!;
       assert.equal(publicDelivery((await getNotifySettings("log1"))!.deliveries![0]).resendable, false);
       await assert.rejects(redeliverNotification(big.id!, "log1"), /too large/);
 

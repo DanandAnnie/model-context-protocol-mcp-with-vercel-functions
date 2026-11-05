@@ -6689,6 +6689,25 @@ test("webhook settings reject private hosts and show the signing secret", async 
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 
+  // Choose which events are sent: every one to start with; none at all cannot be saved.
+  await page.reload();
+  const events = page.getByRole("group", { name: "Send when" });
+  for (const name of [/A render completes/, /A render fails/, /A visitor leaves an email/]) await expect(events.getByRole("checkbox", { name })).toBeChecked();
+  await events.getByRole("checkbox", { name: /A visitor leaves an email/ }).uncheck();
+  await expect(page.getByText("Save the webhook to send these events.")).toBeVisible();
+  await page.getByRole("button", { name: "Save webhook" }).click();
+  await expect.poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed"]);
+  await page.reload();
+  await expect(events.getByRole("checkbox", { name: /A visitor leaves an email/ })).not.toBeChecked();
+  await events.getByRole("checkbox", { name: /A render completes/ }).uncheck();
+  await events.getByRole("checkbox", { name: /A render fails/ }).uncheck();
+  await expect(page.getByTestId("webhook-events-none")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save webhook" })).toBeDisabled();
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio", events: [] } })).status()).toBe(400);
+  // A save from the API that leaves the events out keeps the choice.
+  expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/studio" } })).status()).toBe(200);
+  expect((await (await page.request.get("/api/notifications")).json()).webhook.events).toEqual(["video.completed", "video.failed"]);
+
   await page.reload();
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Remove webhook" }).click();

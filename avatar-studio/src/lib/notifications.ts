@@ -8,11 +8,25 @@ import { LOCAL_OWNER } from "./owner-id";
 import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
-import type { NotifyEvent, NotifySettings, Prefs, Video, WebhookDelivery } from "./types";
+import { WEBHOOK_EVENTS, type NotifyEvent, type NotifySettings, type Prefs, type Video, type WebhookDelivery } from "./types";
 import { getEmailProvider } from "./providers/email";
 import { config } from "./config";
 
-export const notifySchema = z.object({ url: z.string().trim().min(1).max(2000) });
+export const notifySchema = z.object({
+  url: z.string().trim().min(1).max(2000),
+  /** The events to send; left out, the ones chosen before are kept (every event for a new webhook). */
+  events: z
+    .array(z.enum(WEBHOOK_EVENTS))
+    .min(1, "Choose at least one event to send, or remove the webhook")
+    // Repeats are dropped when saved; the cap only keeps a request small.
+    .max(20)
+    .optional(),
+});
+
+/** Whether the webhook is sent an event: every event when none were chosen, and a test whenever one is asked for. */
+export function sendsEvent(settings: Pick<NotifySettings, "events">, event: NotifyEvent): boolean {
+  return event === "test" || !settings.events || (settings.events as NotifyEvent[]).includes(event);
+}
 export const notifyId = (ownerId: string) => `notify_${ownerId}`;
 const DELIVERY_TIMEOUT_MS = 10_000;
 /** How many recent deliveries the log keeps. */
@@ -29,6 +43,7 @@ export async function getNotifySettings(ownerId: string = LOCAL_OWNER): Promise<
 export async function saveNotifySettings(input: z.infer<typeof notifySchema>, ownerId: string = LOCAL_OWNER): Promise<NotifySettings> {
   const url = (await assertPublicHttpUrl(input.url, "Webhook URL")).toString();
   const existing = await getNotifySettings(ownerId);
+  const events = chosenEvents(input.events, existing?.events);
   const now = nowIso();
   const next: NotifySettings = {
     id: notifyId(ownerId),
@@ -38,11 +53,18 @@ export async function saveNotifySettings(input: z.infer<typeof notifySchema>, ow
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     rev: newId("rev"),
+    ...(events ? { events } : {}),
     lastDelivery: existing?.url === url ? existing?.lastDelivery : undefined,
     // The log is of deliveries to this URL; a new one starts it afresh.
     deliveries: existing?.url === url ? existing?.deliveries : undefined,
   };
   return getStore().put("notify", next);
+}
+
+/** The events to keep: those given (in Settings' order, each once), else those chosen before; every event is kept as none. */
+function chosenEvents(given: NotifySettings["events"] | undefined, before: NotifySettings["events"] | undefined): NotifySettings["events"] {
+  const events = given ? WEBHOOK_EVENTS.filter((e) => given.includes(e)) : before;
+  return events && events.length < WEBHOOK_EVENTS.length ? events : undefined;
 }
 
 export async function deleteNotifySettings(ownerId: string = LOCAL_OWNER): Promise<void> {
@@ -59,8 +81,12 @@ export function setNotificationFetch(impl: FetchLike | null) {
   fetchOverride = impl ?? undefined;
 }
 
-/** Delivers one event and records the outcome on the settings. Never throws. */
-export async function dispatchNotification(settings: NotifySettings, event: NotifyEvent, data: unknown): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
+/**
+ * Delivers one event and records the outcome on the settings, or does nothing (null) for an event the webhook was not
+ * chosen to be sent. Never throws.
+ */
+export async function dispatchNotification(settings: NotifySettings, event: NotifyEvent, data: unknown): Promise<NonNullable<NotifySettings["lastDelivery"]> | null> {
+  if (!sendsEvent(settings, event)) return null;
   // `id` names the event, inside the signed body, so it stays the same when the delivery is sent again: a receiver can
   // use it to ignore a repeat. (`X-Studio-Delivery` names each attempt.)
   return deliver(settings, event, JSON.stringify({ id: newId("whe"), event, timestamp: nowIso(), data }));
@@ -216,5 +242,5 @@ export async function notifyVideoTransition(prev: Video, next: Video): Promise<v
 export async function sendTestNotification(ownerId: string = LOCAL_OWNER) {
   const settings = await getNotifySettings(ownerId);
   if (!settings) return null;
-  return dispatchNotification(settings, "test", { message: "Avatar Studio webhook test" });
+  return deliver(settings, "test", JSON.stringify({ id: newId("whe"), event: "test", timestamp: nowIso(), data: { message: "Avatar Studio webhook test" } }));
 }

@@ -5,7 +5,14 @@ import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { api, formatDate } from "@/lib/client";
-import type { NotifySettings, WebhookDelivery } from "@/lib/types";
+import { WEBHOOK_EVENTS, type NotifySettings, type WebhookDelivery, type WebhookEvent } from "@/lib/types";
+
+/** What each event is sent for, as Settings names it. */
+const EVENT_LABELS: Record<WebhookEvent, string> = {
+  "video.completed": "A render completes",
+  "video.failed": "A render fails",
+  "lead.captured": "A visitor leaves an email",
+};
 
 /** A logged delivery as the API lists it: the body sent stays on the server, `resendable` says whether it was kept. */
 type LoggedDelivery = Omit<WebhookDelivery, "body"> & { resendable: boolean };
@@ -32,6 +39,12 @@ export function OutboundWebhook() {
   useEffect(() => {
     if (savedUrl) setUrl(savedUrl);
   }, [savedUrl]);
+  // The events to send, as saved (every one when none were chosen); like the URL, filled in again only when the saved choice changes.
+  const savedEvents = (saved?.events ?? WEBHOOK_EVENTS).join(" ");
+  const [events, setEvents] = useState<WebhookEvent[]>([...WEBHOOK_EVENTS]);
+  useEffect(() => {
+    setEvents(savedEvents.split(" ") as WebhookEvent[]);
+  }, [savedEvents]);
   const log = useRef<HTMLUListElement>(null);
 
   async function save() {
@@ -39,7 +52,7 @@ export function OutboundWebhook() {
     setErr(null);
     setNote(null);
     try {
-      await api("/api/notifications", { method: "PUT", body: JSON.stringify({ url }) });
+      await api("/api/notifications", { method: "PUT", body: JSON.stringify({ url, events }) });
       await refetch();
       setNote("Webhook saved.");
     } catch (e) {
@@ -106,7 +119,7 @@ export function OutboundWebhook() {
         <Webhook className="h-4 w-4 text-slate-400" /> Webhook notifications
       </h3>
       <p className="mt-1 text-xs text-slate-500">
-        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret. Private and local hosts are rejected.
+        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret. Private and local hosts are rejected.
       </p>
       <ErrorBanner message={error ?? err} />
       {/* Always rendered, so a screen reader announces each outcome as it is written. */}
@@ -123,7 +136,7 @@ export function OutboundWebhook() {
       >
         <fieldset disabled={readOnly} className="contents">
         <input aria-label="Webhook URL" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/hooks/avatar-studio" className={`${inputClass} min-w-[280px] flex-1`} />
-        <Button type="submit" loading={busy === "save"} disabled={!url.trim() || !!busy}>
+        <Button type="submit" loading={busy === "save"} disabled={!url.trim() || events.length === 0 || !!busy} aria-describedby={events.length === 0 ? "webhook-events-none" : undefined}>
           Save webhook
         </Button>
         {saved && (
@@ -136,6 +149,26 @@ export function OutboundWebhook() {
             </Button>
           </>
         )}
+        <fieldset className="mt-1 w-full">
+          <legend className="text-xs font-medium text-slate-700">Send when</legend>
+          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            {WEBHOOK_EVENTS.map((e) => (
+              <label key={e} className="inline-flex items-center gap-1.5 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={events.includes(e)}
+                  onChange={(ev) => setEvents((prev) => (ev.target.checked ? WEBHOOK_EVENTS.filter((x) => x === e || prev.includes(x)) : prev.filter((x) => x !== e)))}
+                />
+                {EVENT_LABELS[e]} <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-600">{e}</code>
+              </label>
+            ))}
+          </div>
+          {events.length === 0 ? (
+            <p id="webhook-events-none" className="mt-1 text-xs text-red-700" data-testid="webhook-events-none">Choose at least one event, or remove the webhook.</p>
+          ) : (
+            saved && savedEvents !== events.join(" ") && <p className="mt-1 text-xs text-slate-500">Save the webhook to send these events.</p>
+          )}
+        </fieldset>
         </fieldset>
       </form>
       {saved && (

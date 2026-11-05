@@ -1333,7 +1333,13 @@ export interface ApiKey {
   lastUsedAt?: string;
   /** When the key stops working (an optional lifetime chosen when it was made); absent for a key that never expires. */
   expiresAt?: string;
+  /** What the key may do: "read" keys may only read (GET requests and the exports), "full" keys may also create, change, and delete. Absent on keys made before access was chosen, which have full access. */
+  access?: ApiKeyAccess;
 }
+
+/** The access an API key can be given when it is made. */
+export const API_KEY_ACCESS = ["full", "read"] as const;
+export type ApiKeyAccess = (typeof API_KEY_ACCESS)[number];
 
 export type NotifyEvent = "video.completed" | "video.failed" | "lead.captured" | "test";
 

@@ -15,7 +15,7 @@ const WINDOW_MS = 60 * 60 * 1000;
  */
 export async function GET(req: Request) {
   try {
-    const owner = await requireEditor();
+    const owner = await requireEditor({ read: true });
     const limit = rateLimit(`musicsearch:${owner}`, PER_OWNER, WINDOW_MS);
     if (!limit.allowed) return json({ error: "Too many searches for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
     const params = new URL(req.url).searchParams;

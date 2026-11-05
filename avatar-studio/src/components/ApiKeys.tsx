@@ -4,10 +4,14 @@ import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { api, formatDate } from "@/lib/client";
-import type { ApiKey } from "@/lib/types";
+import { API_KEY_ACCESS, type ApiKey, type ApiKeyAccess } from "@/lib/types";
 
 /** A key as the server lists it, `expired` judged by the server's clock rather than this browser's. */
 type PublicKey = Omit<ApiKey, "hash"> & { expired?: boolean };
+
+/** What a key may do when it is made, as the server takes it, with how Settings names each. */
+const ACCESS_LABELS: Record<ApiKeyAccess, string> = { full: "Full access", read: "Read only" };
+const ACCESS = API_KEY_ACCESS.map((value) => ({ value, label: ACCESS_LABELS[value] }));
 
 /** The lifetimes offered when a key is made ("" for one that never expires), as the server takes them. */
 const LIFETIMES = [
@@ -23,9 +27,10 @@ export function ApiKeys() {
   const { data, error, refetch } = useApi<{ keys: PublicKey[] }>("/api/keys");
   const [name, setName] = useState("");
   const [lifetime, setLifetime] = useState<(typeof LIFETIMES)[number]["value"]>("");
+  const [access, setAccess] = useState<ApiKeyAccess>("full");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [fresh, setFresh] = useState<{ name: string; secret: string } | null>(null);
+  const [fresh, setFresh] = useState<{ name: string; secret: string; readOnly: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
 
   async function create() {
@@ -33,8 +38,8 @@ export function ApiKeys() {
     setBusy(true);
     setErr(null);
     try {
-      const res = await api<{ key: PublicKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name, ...(lifetime ? { expiresInDays: Number(lifetime) } : {}) }) });
-      setFresh({ name: res.key.name, secret: res.secret });
+      const res = await api<{ key: PublicKey; secret: string }>("/api/keys", { method: "POST", body: JSON.stringify({ name, ...(lifetime ? { expiresInDays: Number(lifetime) } : {}), ...(access === "read" ? { access } : {}) }) });
+      setFresh({ name: res.key.name, secret: res.secret, readOnly: res.key.access === "read" });
       setName("");
       await refetch();
     } catch (e) {
@@ -77,7 +82,7 @@ export function ApiKeys() {
             <KeyRound className="h-4 w-4 text-slate-400" /> Developer API
           </h3>
           <p className="mt-1 text-xs text-slate-500">
-            Call every <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">/api/*</code> endpoint from scripts with <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">Authorization: Bearer &lt;key&gt;</code>. Keys act as your account; creating and revoking keys needs a signed-in session.
+            Call every <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">/api/*</code> endpoint from scripts with <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">Authorization: Bearer &lt;key&gt;</code>. Keys act as your account; a read-only key can list and fetch (and download exports) but not create, change, or delete. Creating and revoking keys needs a signed-in session.
           </p>
         </div>
       </div>
@@ -97,6 +102,13 @@ export function ApiKeys() {
             </option>
           ))}
         </select>
+        <select aria-label="Key access" value={access} onChange={(e) => setAccess(e.target.value as typeof access)} title="A read-only key can list and fetch, not create, change, or delete" className={`${inputClass} w-auto`}>
+          {ACCESS.map((a) => (
+            <option key={a.value} value={a.value}>
+              {a.label}
+            </option>
+          ))}
+        </select>
         <Button type="submit" loading={busy} disabled={!name.trim()}>
           Create key
         </Button>
@@ -110,10 +122,15 @@ export function ApiKeys() {
               {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />} {copied ? "Copied" : "Copy"}
             </Button>
           </div>
-          <pre className="mt-3 overflow-x-auto rounded bg-slate-900 p-3 text-xs text-slate-100">{`curl ${origin}/api/videos \\
+          <pre className="mt-3 overflow-x-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
+            {fresh.readOnly
+              ? `curl ${origin}/api/videos \\
+  -H "Authorization: Bearer ${fresh.secret}"`
+              : `curl ${origin}/api/videos \\
   -H "Authorization: Bearer ${fresh.secret}" \\
   -H "Content-Type: application/json" \\
-  -d '{"title":"Hello","script":"Hi there.","avatarId":"stock_1","voiceId":"stock_voice_1","aspect":"16:9"}'`}</pre>
+  -d '{"title":"Hello","script":"Hi there.","avatarId":"stock_1","voiceId":"stock_voice_1","aspect":"16:9"}'`}
+          </pre>
         </div>
       )}
       <ul className="mt-4 divide-y divide-slate-100">
@@ -121,7 +138,14 @@ export function ApiKeys() {
         {data?.keys.map((k) => (
           <li key={k.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-slate-900">{k.name}</div>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium text-slate-900">{k.name}</span>
+                {k.access === "read" && (
+                  <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700" data-testid="key-read-only">
+                    Read only
+                  </span>
+                )}
+              </div>
               <div className="text-xs text-slate-500">
                 <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{k.prefix}…</code> · created {formatDate(k.createdAt)}
                 {k.lastUsedAt ? ` · last used ${formatDate(k.lastUsedAt)}` : " · never used"}

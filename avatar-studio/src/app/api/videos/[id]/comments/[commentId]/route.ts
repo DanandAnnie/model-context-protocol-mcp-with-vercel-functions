@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 /** `?replies=N` is how many replies the caller saw on the note and agreed to delete with it; more now is a 409. */
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string; commentId: string }> }) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireOwner({ write: true });
     const { id, commentId } = await ctx.params;
     const author = await userOrOwner(owner);
     const asked = new URL(req.url).searchParams.get("replies");
@@ -30,7 +30,7 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ id: string; 
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string; commentId: string }> }) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireOwner({ write: true });
     const { id, commentId } = await ctx.params;
     const patch = commentPatchSchema.parse(await readJson(req));
     const user = await userOrOwner(owner);

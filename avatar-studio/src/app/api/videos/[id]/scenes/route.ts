@@ -22,7 +22,7 @@ function readAllowed(owner: string): void {
 export async function GET(_req: Request, ctx: Ctx) {
   try {
     const { id } = await ctx.params;
-    const owner = await requireEditor();
+    const owner = await requireEditor({ read: true });
     readAllowed(owner);
     return json(await directedVideoScenes(id, owner));
   } catch (err) {

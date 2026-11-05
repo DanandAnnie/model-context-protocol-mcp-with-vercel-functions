@@ -6746,6 +6746,59 @@ test("API keys are made in Settings with an optional lifetime, shown once, liste
   expect((await page.request.get("/api/videos?limit=1", { headers: { Authorization: `Bearer ${secret}` } })).status()).toBe(401);
 });
 
+test("read-only API keys list and fetch, download exports, and are refused anything that creates, changes, or deletes", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const v = await createVideoViaApi(page, `Keyed ${tag}`);
+  // Access other than full or read is refused.
+  const bad = await page.request.post("/api/keys", { data: { name: `Bad ${tag}`, access: "write" } });
+  expect(bad.status()).toBe(400);
+  expect(await bad.text()).toMatch(/access must be full or read/);
+  await page.goto("/settings");
+  await page.getByLabel("Key name").fill(`Reader ${tag}`);
+  await expect(page.getByLabel("Key access").locator("option:checked")).toHaveText("Full access");
+  await page.getByLabel("Key access").selectOption("read");
+  await page.getByRole("button", { name: "Create key" }).click();
+  const fresh = page.getByTestId("fresh-key");
+  await expect(fresh).toContainText("Copy your new key now");
+  const secret = (await fresh.locator("code").first().textContent())!.trim();
+  // The example is a read, not a request the key would be refused.
+  await expect(fresh.locator("pre")).not.toContainText("-d '");
+  const row = page.getByRole("listitem").filter({ hasText: `Reader ${tag}` });
+  await expect(row.getByTestId("key-read-only")).toHaveText("Read only");
+  const listed = ((await (await page.request.get("/api/keys")).json()) as { keys: Array<{ name: string; access: string }> }).keys;
+  expect(listed.find((k) => k.name === `Reader ${tag}`)!.access).toBe("read");
+  const auth = { Authorization: `Bearer ${secret}` };
+  // Reads and exports work.
+  expect((await page.request.get("/api/videos?limit=1", { headers: auth })).status()).toBe(200);
+  expect((await page.request.get(`/api/videos/${v.id}`, { headers: auth })).status()).toBe(200);
+  expect((await page.request.get(`/api/videos/${v.id}/comments`, { headers: auth })).status()).toBe(200);
+  expect((await page.request.post("/api/videos/links", { headers: auth, data: { ids: [v.id] } })).status()).toBe(200);
+  expect((await page.request.post("/api/videos/scripts", { headers: auth, data: { ids: [v.id] } })).status()).not.toBe(403);
+  // Reads kept from workspace viewers are reads too.
+  expect((await page.request.get(`/api/videos/${v.id}/leads`, { headers: auth })).status()).toBe(200);
+  // Creating, changing, deleting, and commenting are refused with a message saying why.
+  const refused = [
+    await page.request.post("/api/videos", { headers: auth, data: { title: "No", script: "Hi there.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" } }),
+    await page.request.patch(`/api/videos/${v.id}`, { headers: auth, data: { title: "Renamed" } }),
+    await page.request.delete(`/api/videos/${v.id}`, { headers: auth }),
+    await page.request.post(`/api/videos/${v.id}/comments`, { headers: auth, data: { text: "From a script" } }),
+    await page.request.put("/api/prefs", { headers: auth, data: {} }),
+    await page.request.post(`/api/videos/${v.id}/review`, { headers: auth, data: { action: "request" } }),
+  ];
+  for (const res of refused) {
+    expect(res.status()).toBe(403);
+    expect(await res.text()).toMatch(/read-only: it can list and fetch/);
+  }
+  const after = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { title: string; deletedAt?: string };
+  expect(after.title).toBe(`Keyed ${tag}`);
+  expect(after.deletedAt).toBeUndefined();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
+  page.once("dialog", (d) => d.accept());
+  await row.getByRole("button", { name: `Revoke Reader ${tag}` }).click();
+  await expect(row).toHaveCount(0);
+});
+
 test("pages have no WCAG 2.1 AA violations", async ({ page }) => {
   const v = await createVideoViaApi(page, "Accessible video");
   const agent = (await (await page.request.post("/api/agents", { data: { name: "Axe agent", avatarId: "stock_1" } })).json()).agent as { id: string };

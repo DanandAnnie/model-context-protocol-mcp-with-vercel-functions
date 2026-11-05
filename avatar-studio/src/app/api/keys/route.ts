@@ -2,6 +2,7 @@ import { z } from "zod";
 import { KEY_LIFETIMES, createApiKey, listApiKeys, type KeyLifetime } from "@/lib/api-keys";
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { ValidationError } from "@/lib/errors";
+import { API_KEY_ACCESS } from "@/lib/types";
 import { currentUser, presentedApiKey, requireEditor, requireOwner } from "@/lib/owner";
 import { recordActivity } from "@/lib/services";
 
@@ -15,6 +16,8 @@ const createSchema = z.object({
     .int()
     .refine((n): n is KeyLifetime => (KEY_LIFETIMES as readonly number[]).includes(n), { message: `expiresInDays must be ${KEY_LIFETIMES.join(", ")}, or left out for a key that never expires` })
     .optional(),
+  /** "read" for a key that may only list and fetch; left out, the key has full access. */
+  access: z.enum(API_KEY_ACCESS, { error: `access must be ${API_KEY_ACCESS.join(" or ")}, or left out for full access` }).optional(),
 });
 
 export async function GET() {
@@ -30,9 +33,9 @@ export async function POST(req: Request) {
   try {
     if (await presentedApiKey()) return json({ error: "Sign in to create API keys" }, { status: 403 });
     const [owner, user] = await Promise.all([requireEditor(), currentUser()]);
-    const { name, expiresInDays } = createSchema.parse(await readJson(req));
+    const { name, expiresInDays, access } = createSchema.parse(await readJson(req));
     try {
-      const created = await createApiKey(name, owner, user.id, expiresInDays as KeyLifetime | undefined);
+      const created = await createApiKey(name, owner, user.id, expiresInDays as KeyLifetime | undefined, access);
       await recordActivity(owner, user, "apikey.created", { subject: name, subjectId: created.key.id });
       return json(created, { status: 201 });
     } catch (e) {

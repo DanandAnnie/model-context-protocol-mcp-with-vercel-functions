@@ -2459,6 +2459,25 @@ describe("api keys", () => {
     assert.equal(listed.find((k) => k.id === forever.key.id)!.expired, false);
     assert.equal((await listApiKeys("u4", Date.now() - 86_400_000)).find((k) => k.id === month.key.id)!.expired, false, "judged at the time given");
   });
+
+  it("gives a key full access unless it is made read-only, and lists what each may do", async () => {
+    const { apiKeyAccess, apiKeyForSecret } = await import("../api-keys");
+    const full = await createApiKey("full", "u5");
+    const read = await createApiKey("reader", "u5", "u5", undefined, "read");
+    assert.equal(full.key.access, "full");
+    assert.equal(read.key.access, "read");
+    assert.equal((await apiKeyForSecret(read.secret))!.access, "read", "the secret resolves to its access");
+    assert.equal(await ownerForApiKey(read.secret), "u5", "a read-only key still names its owner");
+    // A key made before access was chosen has full access.
+    const stored = (await getStore().get<ApiKey>("apikey", full.key.id))!;
+    const { access: _a, ...legacy } = stored;
+    void _a;
+    await getStore().put("apikey", legacy as ApiKey);
+    assert.equal(apiKeyAccess(legacy as ApiKey), "full");
+    const listed = await listApiKeys("u5");
+    assert.equal(listed.find((k) => k.id === full.key.id)!.access, "full");
+    assert.equal(listed.find((k) => k.id === read.key.id)!.access, "read");
+  });
 });
 
 describe("outbound webhooks", () => {

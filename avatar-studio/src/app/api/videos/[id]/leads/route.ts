@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     // Viewer emails are personal data: workspace viewers watch and comment, they do not get the list.
-    const owner = await requireEditor();
+    const owner = await requireEditor({ read: true });
     const { id } = await ctx.params;
     const leads = await listVideoLeads(id, owner);
     if (new URL(req.url).searchParams.get("format") === "csv") {

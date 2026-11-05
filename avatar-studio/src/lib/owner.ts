@@ -1,6 +1,6 @@
 // Resolves which workspace the current request belongs to.
 import { cookies, headers } from "next/headers";
-import { ownerForApiKey } from "./api-keys";
+import { READ_ONLY_KEY_MESSAGE, apiKeyAccess, apiKeyForSecret } from "./api-keys";
 import { SESSION_COOKIE, authMode, isValidSession } from "./auth";
 import { ForbiddenError, UnauthorizedError } from "./errors";
 import { createSupabaseServer } from "./supabase/server";
@@ -61,29 +61,39 @@ async function activeWorkspace(user: User): Promise<Workspace | null> {
   return workspaceForMember(id, user.id);
 }
 
+/** The owner a presented key acts for; an unknown key is a 401, and a read-only key asked to write is a 403. */
+async function keyOwner(secret: string, write: boolean): Promise<string> {
+  const key = await apiKeyForSecret(secret);
+  if (!key) throw new UnauthorizedError("Invalid API key");
+  if (write && apiKeyAccess(key) === "read") throw new ForbiddenError(READ_ONLY_KEY_MESSAGE);
+  return key.ownerId;
+}
+
 /**
  * Owner of the current request. An `Authorization: Bearer <api key>` header wins over the
  * session (so scripts work in every auth mode); an unknown key is rejected even in open mode.
  * Otherwise the active workspace (cookie) when the user belongs to it, else their personal id.
+ * `write` marks a request that changes something which any member may do (comments), so a
+ * read-only key is refused it; reads, and exports sent as POST, leave it off.
  */
-export async function requireOwner(): Promise<string> {
+export async function requireOwner(opts: { write?: boolean } = {}): Promise<string> {
   const secret = await presentedApiKey();
-  if (secret) {
-    const owner = await ownerForApiKey(secret);
-    if (!owner) throw new UnauthorizedError("Invalid API key");
-    return owner;
-  }
+  if (secret) return keyOwner(secret, !!opts.write);
   const user = await currentUser();
   return (await activeWorkspace(user))?.id ?? user.id;
 }
 
 /**
  * Owner of the current request for an action that creates, changes, or deletes content. Like
- * `requireOwner`, except that a workspace viewer gets 403: viewers watch and comment. A key is
- * trusted as is; viewers cannot mint one and a member made a viewer loses theirs.
+ * `requireOwner`, except that a workspace viewer gets 403: viewers watch and comment. A key with
+ * full access is trusted as is (viewers cannot mint one and a member made a viewer loses theirs);
+ * a read-only key gets 403.
+ * `read` marks a read kept from viewers (a video's leads, a directed video's scenes): a
+ * read-only key may make it, as it may any other read.
  */
-export async function requireEditor(): Promise<string> {
-  if (await presentedApiKey()) return requireOwner();
+export async function requireEditor(opts: { read?: boolean } = {}): Promise<string> {
+  const secret = await presentedApiKey();
+  if (secret) return keyOwner(secret, !opts.read);
   // The same resolution as requireOwner, so an edit always lands on the owner a read would see.
   const user = await currentUser();
   const ws = await activeWorkspace(user);
@@ -98,8 +108,9 @@ export async function requireEditor(): Promise<string> {
  * and a session. A script with an API key can ask for a review but never decide one.
  */
 export async function requireReviewer(): Promise<{ owner: string; user: User; canDecide: boolean }> {
-  if (await presentedApiKey()) {
-    const owner = await requireOwner();
+  const secret = await presentedApiKey();
+  if (secret) {
+    const owner = await keyOwner(secret, true);
     return { owner, user: { id: owner }, canDecide: false };
   }
   const user = await currentUser();

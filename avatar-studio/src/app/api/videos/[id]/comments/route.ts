@@ -34,7 +34,7 @@ export async function GET(req: Request, ctx: Ctx) {
 
 export async function POST(req: Request, ctx: Ctx) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireOwner({ write: true });
     const input = commentSchema.parse(await readJson(req));
     const comment = await addComment((await ctx.params).id, input, owner, await userOrOwner(owner));
     // Mentioned teammates, and for a reply the others in its thread, are emailed after the response, so a

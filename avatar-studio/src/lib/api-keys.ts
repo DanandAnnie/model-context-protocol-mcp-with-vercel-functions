@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { UnauthorizedError } from "./errors";
 import { newId, nowIso } from "./ids";
 import { getStore } from "./store";
-import type { ApiKey } from "./types";
+import type { ApiKey, ApiKeyAccess } from "./types";
 
 import { API_KEY_PREFIX } from "./auth";
 export { API_KEY_PREFIX };
@@ -24,15 +24,29 @@ export function publicKey(key: ApiKey): Omit<ApiKey, "hash"> {
   return rest;
 }
 
-/** The keys as Settings lists them, newest first, each saying whether it has expired by the server's clock. */
-export async function listApiKeys(ownerId: string, now = Date.now()): Promise<Array<Omit<ApiKey, "hash"> & { expired: boolean }>> {
+/** The message a read-only key gets when it asks to create, change, or delete something (403). */
+export const READ_ONLY_KEY_MESSAGE = "This API key is read-only: it can list and fetch, not create, change, or delete. Use a key with full access, made in Settings";
+
+/** What a key may do; a key made before access was chosen has full access. */
+export function apiKeyAccess(key: Pick<ApiKey, "access">): ApiKeyAccess {
+  return key.access === "read" ? "read" : "full";
+}
+
+/** The keys as Settings lists them, newest first, each saying whether it has expired by the server's clock and what it may do. */
+export async function listApiKeys(ownerId: string, now = Date.now()): Promise<Array<Omit<ApiKey, "hash"> & { expired: boolean; access: ApiKeyAccess }>> {
   const keys = await getStore().list<ApiKey>("apikey", ownerId);
   keys.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return keys.map((k) => ({ ...publicKey(k), expired: apiKeyExpired(k, now) }));
+  return keys.map((k) => ({ ...publicKey(k), expired: apiKeyExpired(k, now), access: apiKeyAccess(k) }));
 }
 
 /** Creates a key and returns the one-time secret alongside its public record. */
-export async function createApiKey(name: string, ownerId: string, createdBy: string = ownerId, expiresInDays?: KeyLifetime): Promise<{ key: Omit<ApiKey, "hash">; secret: string }> {
+export async function createApiKey(
+  name: string,
+  ownerId: string,
+  createdBy: string = ownerId,
+  expiresInDays?: KeyLifetime,
+  access: ApiKeyAccess = "full",
+): Promise<{ key: Omit<ApiKey, "hash">; secret: string }> {
   const existing = await getStore().list<ApiKey>("apikey", ownerId);
   if (existing.length >= MAX_API_KEYS) throw new Error(`At most ${MAX_API_KEYS} API keys per account; revoke one first`);
   const secret = `${API_KEY_PREFIX}${randomBytes(24).toString("base64url")}`;
@@ -45,6 +59,7 @@ export async function createApiKey(name: string, ownerId: string, createdBy: str
     createdBy,
     createdAt: nowIso(),
     ...(expiresInDays ? { expiresAt: new Date(Date.now() + expiresInDays * 86_400_000).toISOString() } : {}),
+    access,
   };
   await getStore().put("apikey", key);
   return { key: publicKey(key), secret };
@@ -62,12 +77,17 @@ export function apiKeyExpired(key: Pick<ApiKey, "expiresAt">, now = Date.now()):
   return !!key.expiresAt && Date.parse(key.expiresAt) <= now;
 }
 
-/**
- * Owner id for a presented secret, or null when it is unknown or revoked; recording its last use. An expired key throws
- * an UnauthorizedError with its own message (401) instead, so a script's owner knows to make a new one rather than look
- * for a typo, and its last use is left as it was.
- */
+/** Owner id for a presented secret, or null when it is unknown or revoked; as `apiKeyForSecret`, which also says what the key may do. */
 export async function ownerForApiKey(secret: string): Promise<string | null> {
+  return (await apiKeyForSecret(secret))?.ownerId ?? null;
+}
+
+/**
+ * The key record for a presented secret, or null when it is unknown or revoked; recording its last use. An expired key
+ * throws an UnauthorizedError with its own message (401) instead, so a script's owner knows to make a new one rather than
+ * look for a typo, and its last use is left as it was.
+ */
+export async function apiKeyForSecret(secret: string): Promise<ApiKey | null> {
   if (!secret.startsWith(API_KEY_PREFIX)) return null;
   const key = await getStore().findBy<ApiKey>("apikey", "hash", hashApiKey(secret));
   if (!key) return null;
@@ -76,7 +96,7 @@ export async function ownerForApiKey(secret: string): Promise<string | null> {
   if (!key.lastUsedAt || Date.now() - Date.parse(key.lastUsedAt) > LAST_USED_WRITE_INTERVAL_MS) {
     getStore().put("apikey", { ...key, lastUsedAt: nowIso() }).catch(() => {});
   }
-  return key.ownerId;
+  return key;
 }
 
 /**

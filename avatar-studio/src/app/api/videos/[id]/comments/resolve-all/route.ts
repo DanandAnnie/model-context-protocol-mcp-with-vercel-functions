@@ -12,7 +12,7 @@ export const maxDuration = 60;
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
-    const owner = await requireOwner();
+    const owner = await requireOwner({ write: true });
     const { id } = await ctx.params;
     const { ids } = resolveAllSchema.parse(await readJson(req));
     return json(await resolveAllComments(id, ids, owner, await userOrOwner(owner)));

@@ -13,7 +13,7 @@ const WINDOW_MS = 60 * 60 * 1000;
 /** Where a portrait stands; a finished one comes back as a data URL to save as a photo avatar. */
 export async function GET(_req: Request, ctx: { params: Promise<{ jobId: string }> }) {
   try {
-    const owner = await requireEditor();
+    const owner = await requireEditor({ read: true });
     const limit = rateLimit(`portraitstatus:${owner}`, PER_OWNER, WINDOW_MS);
     if (!limit.allowed) return json({ error: "Too many checks for now; try again later" }, { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } });
     const { jobId } = await ctx.params;

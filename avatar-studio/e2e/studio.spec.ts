@@ -6648,6 +6648,8 @@ test("library multi-select moves and deletes videos in bulk", async ({ page }) =
 });
 
 test("webhook settings reject private hosts and show the signing secret", async ({ page }) => {
+  // A render, then two deliveries to an unroutable address that each wait out the 10-second timeout.
+  test.slow();
   await page.goto("/settings");
   const url = page.getByLabel("Webhook URL");
   await url.fill("http://localhost:9/hook");
@@ -6664,7 +6666,28 @@ test("webhook settings reject private hosts and show the signing secret", async 
   await expect
     .poll(async () => (await (await page.request.get("/api/notifications")).json()).webhook?.lastDelivery?.event, { timeout: 30_000, intervals: [1000] })
     .toBe("video.completed");
-  expect((await (await page.request.get("/api/notifications")).json()).webhook.lastDelivery.ok).toBe(false);
+  const shown = (await (await page.request.get("/api/notifications")).json()).webhook as { lastDelivery: { ok: boolean; id: string }; deliveries: Array<Record<string, unknown>> };
+  expect(shown.lastDelivery.ok).toBe(false);
+  // The log lists the attempt without the body sent, which stays on the server for redelivery.
+  expect(shown.deliveries[0]).toMatchObject({ id: shown.lastDelivery.id, event: "video.completed", ok: false, resendable: true });
+  expect(shown.deliveries[0]).not.toHaveProperty("body");
+  expect((await page.request.post("/api/notifications/deliveries/whd_nosuch/redeliver")).status()).toBe(404);
+
+  // Recent deliveries in Settings, each with Redeliver: sent again, it is logged as sent again. (Renders from other tests
+  // can finish meanwhile and add their own deliveries, so the rows are found by id rather than counted.)
+  await page.reload();
+  const original = page.locator(`[data-delivery="${shown.lastDelivery.id}"]`);
+  await expect(original).toContainText(/^Failed: .* · video\.completed · /);
+  const redeliver = original.getByRole("button", { name: /^Redeliver video\.completed from / });
+  await redeliver.click();
+  await expect(page.getByTestId("webhook-note")).toHaveText(/^video\.completed sent again: failed: /, { timeout: 20_000 });
+  const repeat = ((await (await page.request.get("/api/notifications")).json()).webhook.deliveries as Array<{ id: string; redeliveryOf?: string }>).find((d) => d.redeliveryOf === shown.lastDelivery.id);
+  expect(repeat).toBeTruthy();
+  await expect(page.locator(`[data-delivery="${repeat!.id}"]`)).toContainText("sent again");
+  // Focus stays on the button pressed.
+  await expect(redeliver).toBeFocused();
+  const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
+  expect(axe.violations.map((x) => x.id)).toEqual([]);
 
   await page.reload();
   page.once("dialog", (d) => d.accept());

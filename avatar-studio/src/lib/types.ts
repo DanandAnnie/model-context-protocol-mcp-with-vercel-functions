@@ -1345,7 +1345,26 @@ export interface NotifySettings {
   secret: string;
   createdAt: string;
   updatedAt: string;
-  lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string };
+  lastDelivery?: { at: string; event: NotifyEvent; ok: boolean; status?: number; error?: string; id?: string };
+  /** Changed by every save and every recorded delivery, so a record is written only over the settings it read. */
+  rev?: string;
+  /** The most recent deliveries to this URL, newest first (at most WEBHOOK_LOG_SIZE); cleared when the URL changes. */
+  deliveries?: WebhookDelivery[];
+}
+
+/** One attempt to deliver a webhook event, as the Settings page's delivery log lists it. */
+export interface WebhookDelivery {
+  /** Sent as `X-Studio-Delivery`, so a receiver can tell a redelivery's new attempt from the original. */
+  id: string;
+  at: string;
+  event: NotifyEvent;
+  ok: boolean;
+  status?: number;
+  error?: string;
+  /** The JSON body sent, kept so the delivery can be sent again; never returned by the API (see `resendable`). */
+  body?: string;
+  /** For a delivery sent again from the log, the id of the one it repeats (also sent as `X-Studio-Redelivery-Of`). */
+  redeliveryOf?: string;
 }
 
 /** Per-owner preferences that are not provider settings. */

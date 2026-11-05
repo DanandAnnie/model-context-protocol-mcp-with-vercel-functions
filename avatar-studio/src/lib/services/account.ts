@@ -9,7 +9,8 @@ import { madeLooksOf, rememberMadeLooks } from "./avatars";
 import { hideInviteAddresses } from "../activity-text";
 import type { ActivityEvent } from "../types";
 import { dropTwinVoice } from "./twins";
-import type { InstantVoice, MusicJob, TwinJob, VoiceChange } from "../types";
+import type { InstantVoice, MusicJob, TwinJob, VoiceChange, WebhookDelivery } from "../types";
+import { publicDelivery } from "../notifications";
 import { dropMusicRender } from "./music";
 import { dropInstantVoice, wordsRowId } from "./voice-changer";
 
@@ -35,7 +36,12 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER, { inviteAdd
     out[kind] = items.map((item) => {
       const copy = { ...item };
       if (kind === "apikey") delete copy.hash;
-      if (kind === "notify") delete copy.secret;
+      if (kind === "notify") {
+        delete copy.secret;
+        delete copy.rev;
+        // The bodies the webhook sent (lead emails among them) stay on the server, as in the API.
+        if (Array.isArray(copy.deliveries)) copy.deliveries = (copy.deliveries as WebhookDelivery[]).map(publicDelivery);
+      }
       if (kind === "clip" || kind === "backdrop") delete copy.providerAssetIds;
       if (kind === "translation") delete copy.proofreadToken;
       // A drawn portrait's picture is in the photo avatar made from it; the job keeps only what it was.

@@ -2,18 +2,23 @@
 // One endpoint per owner, signed with HMAC-SHA256 so the receiver can verify the sender.
 import { createHmac, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { nowIso } from "./ids";
+import { NotFoundError, ValidationError } from "./errors";
+import { newId, nowIso } from "./ids";
 import { LOCAL_OWNER } from "./owner-id";
 import { safeFetch, type FetchLike } from "./safe-fetch";
 import { assertPublicHttpUrl } from "./safe-url";
 import { getStore } from "./store";
-import type { NotifyEvent, NotifySettings, Prefs, Video } from "./types";
+import type { NotifyEvent, NotifySettings, Prefs, Video, WebhookDelivery } from "./types";
 import { getEmailProvider } from "./providers/email";
 import { config } from "./config";
 
 export const notifySchema = z.object({ url: z.string().trim().min(1).max(2000) });
 export const notifyId = (ownerId: string) => `notify_${ownerId}`;
 const DELIVERY_TIMEOUT_MS = 10_000;
+/** How many recent deliveries the log keeps. */
+export const WEBHOOK_LOG_SIZE = 20;
+/** A body larger than this is not kept, so that delivery cannot be sent again (the log stays small). */
+const MAX_KEPT_BODY = 16_000;
 
 export async function getNotifySettings(ownerId: string = LOCAL_OWNER): Promise<NotifySettings | null> {
   const s = await getStore().get<NotifySettings>("notify", notifyId(ownerId));
@@ -32,7 +37,10 @@ export async function saveNotifySettings(input: z.infer<typeof notifySchema>, ow
     secret: existing?.secret ?? `whsec_${randomBytes(24).toString("base64url")}`,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
+    rev: newId("rev"),
     lastDelivery: existing?.url === url ? existing?.lastDelivery : undefined,
+    // The log is of deliveries to this URL; a new one starts it afresh.
+    deliveries: existing?.url === url ? existing?.deliveries : undefined,
   };
   return getStore().put("notify", next);
 }
@@ -53,8 +61,20 @@ export function setNotificationFetch(impl: FetchLike | null) {
 
 /** Delivers one event and records the outcome on the settings. Never throws. */
 export async function dispatchNotification(settings: NotifySettings, event: NotifyEvent, data: unknown): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
+  // `id` names the event, inside the signed body, so it stays the same when the delivery is sent again: a receiver can
+  // use it to ignore a repeat. (`X-Studio-Delivery` names each attempt.)
+  return deliver(settings, event, JSON.stringify({ id: newId("whe"), event, timestamp: nowIso(), data }));
+}
+
+/**
+ * Sends a body to the settings' URL, signed afresh, and records the attempt as the last delivery and at the head of the
+ * log. The record is written only over the settings as they are now (a conditional write on `rev`, tried again when
+ * something else wrote first), so concurrent deliveries keep each other's entries, and not at all when the webhook was
+ * removed, saved anew, or pointed elsewhere meanwhile. Never throws.
+ */
+async function deliver(settings: NotifySettings, event: NotifyEvent, body: string, redeliveryOf?: string): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
   const timestamp = String(Math.floor(Date.now() / 1000));
-  const body = JSON.stringify({ event, timestamp: nowIso(), data });
+  const id = newId("whd");
   let result: NonNullable<NotifySettings["lastDelivery"]>;
   try {
     // Re-checked at send time and pinned to the vetted address: DNS can change between saving the URL and using it.
@@ -66,17 +86,52 @@ export async function dispatchNotification(settings: NotifySettings, event: Noti
         "X-Studio-Event": event,
         "X-Studio-Timestamp": timestamp,
         "X-Studio-Signature": `sha256=${signPayload(settings.secret, timestamp, body)}`,
+        "X-Studio-Delivery": id,
+        ...(redeliveryOf ? { "X-Studio-Redelivery-Of": redeliveryOf } : {}),
       },
       body,
       redirect: "error",
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     }, "Webhook URL", fetchOverride, { discardBody: true });
-    result = { at: nowIso(), event, ok: res.ok, status: res.status, error: res.ok ? undefined : `Endpoint returned ${res.status}` };
+    result = { id, at: nowIso(), event, ok: res.ok, status: res.status, error: res.ok ? undefined : `Endpoint returned ${res.status}` };
   } catch (err) {
-    result = { at: nowIso(), event, ok: false, error: err instanceof Error ? err.message : "Delivery failed" };
+    result = { id, at: nowIso(), event, ok: false, error: err instanceof Error ? err.message : "Delivery failed" };
   }
-  await getStore().put("notify", { ...settings, lastDelivery: result }).catch(() => {});
+  const entry: WebhookDelivery = { ...result, id, ...(body.length <= MAX_KEPT_BODY ? { body } : {}), ...(redeliveryOf ? { redeliveryOf } : {}) };
+  try {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const latest = await getNotifySettings(settings.ownerId);
+      // Removed, or removed and made again, or pointed elsewhere: the attempt belongs to a webhook no longer there.
+      if (!latest || latest.url !== settings.url || latest.createdAt !== settings.createdAt) break;
+      const next: NotifySettings = { ...latest, rev: newId("rev"), lastDelivery: result, deliveries: [entry, ...(latest.deliveries ?? [])].slice(0, WEBHOOK_LOG_SIZE) };
+      // Settings saved before `rev` existed are written once as before, and carry one from then on.
+      if (!latest.rev) {
+        await getStore().put("notify", next);
+        break;
+      }
+      if (await getStore().putIf("notify", next, "rev", latest.rev)) break;
+    }
+  } catch {
+    // Recording is best effort; the delivery itself has happened.
+  }
   return result;
+}
+
+/** A delivery as the API shows it: the body it sent stays on the server; `resendable` says whether it was kept. */
+export function publicDelivery({ body, ...rest }: WebhookDelivery): Omit<WebhookDelivery, "body"> & { resendable: boolean } {
+  return { ...rest, resendable: body !== undefined };
+}
+
+/**
+ * Sends a logged delivery's body again, signed with a fresh timestamp, under a new delivery id with
+ * `X-Studio-Redelivery-Of` naming the original; the attempt is logged like any other.
+ */
+export async function redeliverNotification(deliveryId: string, ownerId: string = LOCAL_OWNER): Promise<NonNullable<NotifySettings["lastDelivery"]>> {
+  const settings = await getNotifySettings(ownerId);
+  const original = settings?.deliveries?.find((d) => d.id === deliveryId);
+  if (!settings || !original) throw new NotFoundError("That delivery is no longer in the log");
+  if (original.body === undefined) throw new ValidationError("That delivery was too large to keep, so it cannot be sent again");
+  return deliver(settings, original.event, original.body, original.redeliveryOf ?? original.id);
 }
 
 /** Called after a video's status is persisted; fires once when it reaches a final state. */

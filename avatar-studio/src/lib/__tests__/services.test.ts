@@ -2481,6 +2481,108 @@ describe("outbound webhooks", () => {
       setNotificationFetch(null);
     }
   });
+
+  it("logs the last deliveries, redelivers one signed afresh, and starts the log over for a new URL", async () => {
+    const { WEBHOOK_LOG_SIZE, publicDelivery, redeliverNotification, deleteNotifySettings } = await import("../notifications");
+    const calls: Array<{ headers: Record<string, string>; body: string }> = [];
+    let status = 500;
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("", { status });
+    });
+    try {
+      const settings = await saveNotifySettings({ url: HOOK }, "log1");
+      const first = await dispatchNotification(settings, "lead.captured", { email: "ana@example.com" });
+      assert.equal(first.ok, false);
+      assert.ok(first.id?.startsWith("whd_"));
+      assert.equal(calls[0].headers["X-Studio-Delivery"], first.id);
+      assert.equal(calls[0].headers["X-Studio-Redelivery-Of"], undefined);
+      // A second delivery written from the same stale settings keeps the first's entry: the log is read again before writing.
+      await dispatchNotification(settings, "test", {});
+      let log = (await getNotifySettings("log1"))!.deliveries!;
+      assert.deepEqual(log.map((d) => d.event), ["test", "lead.captured"], "newest first");
+      assert.equal(log[1].body, calls[0].body, "the body sent is kept for redelivery");
+      assert.deepEqual(publicDelivery(log[1]), { id: first.id, at: log[1].at, event: "lead.captured", ok: false, status: 500, error: "Endpoint returned 500", resendable: true });
+
+      // Sent again: the same body, a fresh timestamp and signature, a new id, and the original named.
+      status = 200;
+      await new Promise((r) => setTimeout(r, 1100));
+      const again = await redeliverNotification(first.id!, "log1");
+      assert.equal(again.ok, true);
+      const resent = calls.at(-1)!;
+      assert.equal(resent.body, calls[0].body);
+      assert.notEqual(resent.headers["X-Studio-Timestamp"], calls[0].headers["X-Studio-Timestamp"]);
+      assert.equal(resent.headers["X-Studio-Signature"], `sha256=${signPayload(settings.secret, resent.headers["X-Studio-Timestamp"], resent.body)}`);
+      assert.equal(resent.headers["X-Studio-Redelivery-Of"], first.id);
+      assert.notEqual(resent.headers["X-Studio-Delivery"], first.id);
+      // The event's id is inside the signed body, so it is the same on the repeat: the receiver can ignore it.
+      assert.match(JSON.parse(calls[0].body).id, /^whe_/);
+      assert.equal(JSON.parse(resent.body).id, JSON.parse(calls[0].body).id);
+      log = (await getNotifySettings("log1"))!.deliveries!;
+      assert.equal(log[0].redeliveryOf, first.id);
+      assert.equal((await getNotifySettings("log1"))!.lastDelivery?.ok, true);
+      // A redelivery of a redelivery still names the original.
+      await redeliverNotification(log[0].id, "log1");
+      assert.equal(calls.at(-1)!.headers["X-Studio-Redelivery-Of"], first.id);
+
+      // Unknown, another owner's, and too large to keep.
+      await assert.rejects(redeliverNotification("whd_nosuch", "log1"), /no longer in the log/);
+      await assert.rejects(redeliverNotification(first.id!, "someone_else"), /no longer in the log/);
+      const big = await dispatchNotification((await getNotifySettings("log1"))!, "test", { pad: "x".repeat(20_000) });
+      assert.equal(publicDelivery((await getNotifySettings("log1"))!.deliveries![0]).resendable, false);
+      await assert.rejects(redeliverNotification(big.id!, "log1"), /too large/);
+
+      // Only the last WEBHOOK_LOG_SIZE are kept.
+      for (let i = 0; i < WEBHOOK_LOG_SIZE + 3; i++) await dispatchNotification((await getNotifySettings("log1"))!, "test", { i });
+      assert.equal((await getNotifySettings("log1"))!.deliveries!.length, WEBHOOK_LOG_SIZE);
+
+      // The same URL saved again keeps the log; a new URL starts it over.
+      assert.equal((await saveNotifySettings({ url: HOOK }, "log1")).deliveries?.length, WEBHOOK_LOG_SIZE);
+      const moved = await saveNotifySettings({ url: `${HOOK}/v2` }, "log1");
+      assert.equal(moved.deliveries, undefined);
+      // A delivery that finishes after the URL changed, or after the webhook was removed, is not written back.
+      await dispatchNotification(settings, "test", {});
+      assert.equal((await getNotifySettings("log1"))!.deliveries, undefined);
+      await deleteNotifySettings("log1");
+      await dispatchNotification(moved, "test", {});
+      assert.equal(await getNotifySettings("log1"), null, "a removed webhook is not brought back");
+      // Removed and made again at the same URL: an attempt for the old one is not logged on the new one.
+      await new Promise((r) => setTimeout(r, 5));
+      const remade = await saveNotifySettings({ url: `${HOOK}/v2` }, "log1");
+      await dispatchNotification(moved, "test", {});
+      assert.equal((await getNotifySettings("log1"))!.deliveries, undefined);
+      // A write that lands between the read and the record makes the record read again rather than overwrite it.
+      const store = globalThis.__avatarStudioStore!;
+      const putIf = store.putIf.bind(store);
+      let raced = false;
+      store.putIf = (async (kind, item, field, expected) => {
+        if (!raced && kind === "notify") {
+          raced = true;
+          await saveNotifySettings({ url: `${HOOK}/v2` }, "log1");
+        }
+        return putIf(kind, item, field, expected);
+      }) as typeof store.putIf;
+      try {
+        await dispatchNotification(remade, "test", { raced: true });
+      } finally {
+        store.putIf = putIf;
+      }
+      assert.ok(raced);
+      assert.equal((await getNotifySettings("log1"))!.deliveries?.length, 1, "recorded once, over the settings as they then were");
+
+      // The account export lists the log as the API does: no bodies sent (lead emails among them), no secret.
+      const { exportOwnerData } = await import("../services");
+      await dispatchNotification((await getNotifySettings("log1"))!, "lead.captured", { email: "kept@example.com" });
+      const exported = (await exportOwnerData("log1")) as unknown as { notify: Array<Record<string, unknown>> };
+      const row = exported.notify[0];
+      assert.equal(row.secret, undefined);
+      assert.ok(Array.isArray(row.deliveries) && (row.deliveries as unknown[]).length === 2);
+      assert.ok(!JSON.stringify(row).includes("kept@example.com"));
+      assert.equal((row.deliveries as Array<{ resendable: boolean }>)[0].resendable, true);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
 });
 
 describe("insights", () => {

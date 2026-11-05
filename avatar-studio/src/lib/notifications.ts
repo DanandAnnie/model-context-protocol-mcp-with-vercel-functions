@@ -339,16 +339,22 @@ export async function notifyVideoTransition(prev: Video, next: Video): Promise<v
 /** What Settings can send to try the receiver: a plain ping, or a sample of one of the real events. */
 export const TEST_EVENTS = ["test", ...WEBHOOK_EVENTS] as const;
 export type TestEvent = (typeof TEST_EVENTS)[number];
+/** Where a lead came from: a share page's email gate, or a visitor talking to a shared presenter. */
+export const LEAD_SOURCES = ["share", "presenter"] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
 
 /**
  * Made-up data shaped like each event's real `data`, so a receiver's handling can be tried before one happens: every id
  * starts `sample_`, addresses are on example.com, and links point at example.com. As in a real event, a field with no
- * value is left out (a video in no folder has no `folder`), and a lead is the share-page kind (`source: "share"`); a
- * presenter's lead carries `agentId`, `agentName`, `conversationId`, and `lastMessage` in place of the video's fields.
+ * value is left out (a video in no folder has no `folder`). A lead is the share-page kind (`source: "share"`) unless
+ * `source` asks for a presenter's, which carries `agentId`, `agentName`, `conversationId`, and `lastMessage` in place of the
+ * video's fields.
  */
-export function sampleEventData(event: WebhookEvent, now = nowIso()): Record<string, unknown> {
+export function sampleEventData(event: WebhookEvent, now = nowIso(), source: LeadSource = "share"): Record<string, unknown> {
   if (event === "lead.captured") {
-    return { source: "share", videoId: "sample_video", videoTitle: "Sample video", email: "viewer@example.com", name: "Sample Viewer", capturedAt: now };
+    return source === "presenter"
+      ? { source: "presenter", agentId: "sample_presenter", agentName: "Sample presenter", conversationId: "sample_conversation", email: "visitor@example.com", name: "Sample Visitor", lastMessage: "Can someone call me about pricing?", capturedAt: now }
+      : { source: "share", videoId: "sample_video", videoTitle: "Sample video", email: "viewer@example.com", name: "Sample Viewer", capturedAt: now };
   }
   const base = { id: "sample_video", title: "Sample video", createdAt: now, updatedAt: now };
   return event === "video.completed"
@@ -360,9 +366,9 @@ export function sampleEventData(event: WebhookEvent, now = nowIso()): Record<str
  * Sends a test to the saved endpoint whatever events are chosen: a `test` ping, or a sample of a real event (its own name
  * in `X-Studio-Event` and the body, sample data, `test: true` in the body, and `X-Studio-Test: true`). Null with no webhook.
  */
-export async function sendTestNotification(ownerId: string = LOCAL_OWNER, event: TestEvent = "test") {
+export async function sendTestNotification(ownerId: string = LOCAL_OWNER, event: TestEvent = "test", source: LeadSource = "share") {
   const settings = await getNotifySettings(ownerId);
   if (!settings) return null;
   if (event === "test") return deliver(settings, "test", JSON.stringify({ id: newId("whe"), event: "test", timestamp: nowIso(), data: { message: "Avatar Studio webhook test" } }));
-  return deliver(settings, event, JSON.stringify({ id: newId("whe"), event, timestamp: nowIso(), test: true, data: sampleEventData(event) }), undefined, true);
+  return deliver(settings, event, JSON.stringify({ id: newId("whe"), event, timestamp: nowIso(), test: true, data: sampleEventData(event, nowIso(), source) }), undefined, true);
 }

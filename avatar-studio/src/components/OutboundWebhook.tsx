@@ -19,9 +19,15 @@ const TEST_CHOICES = [
   { value: "test", label: "Test ping" },
   { value: "video.completed", label: "Sample: render completes" },
   { value: "video.failed", label: "Sample: render fails" },
-  { value: "lead.captured", label: "Sample: visitor leaves an email" },
+  { value: "lead.captured", label: "Sample: visitor leaves an email (share page)" },
+  { value: "lead.captured:presenter", label: "Sample: visitor leaves an email (presenter)" },
 ] as const;
 type TestChoice = (typeof TEST_CHOICES)[number]["value"];
+
+/** The request for a choice: its event, and for the presenter lead the source that picks that shape. */
+function testRequest(choice: TestChoice): { event: string; source?: "presenter" } {
+  return choice === "lead.captured:presenter" ? { event: "lead.captured", source: "presenter" } : { event: choice };
+}
 
 /** A logged delivery as the API lists it: the body sent stays on the server, `resendable` says whether it was kept. */
 type LoggedDelivery = Omit<WebhookDelivery, "body"> & { resendable: boolean };
@@ -79,8 +85,8 @@ export function OutboundWebhook() {
     setErr(null);
     setNote(null);
     try {
-      const { delivery } = await api<{ delivery: NonNullable<NotifySettings["lastDelivery"]> }>("/api/notifications/test", { method: "POST", body: JSON.stringify({ event: testEvent }) });
-      const what = testEvent === "test" ? "Test" : `Sample ${testEvent}`;
+      const { delivery } = await api<{ delivery: NonNullable<NotifySettings["lastDelivery"]> }>("/api/notifications/test", { method: "POST", body: JSON.stringify(testRequest(testEvent)) });
+      const what = testEvent === "test" ? "Test" : `Sample ${testRequest(testEvent).event}${testEvent === "lead.captured:presenter" ? " (presenter)" : ""}`;
       setNote(delivery.ok ? `${what} delivered (HTTP ${delivery.status}).` : `${what} failed: ${delivery.error ?? "no response"}.`);
       await refetch();
     } catch (e) {

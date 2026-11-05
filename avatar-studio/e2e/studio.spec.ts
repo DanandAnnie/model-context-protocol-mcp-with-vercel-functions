@@ -5751,6 +5751,11 @@ test("the Batch page lists recent batches, each leading to its videos and its li
   await expect(page).toHaveURL(new RegExp(`/videos\\?batch=${batchId}$`));
   await expect(page.getByText(`Recent ${tag} – Ana`)).toBeVisible();
   await page.goto("/batch");
+  // Checked once the page has settled: Generate is enabled only once the debounced preview answers, and a button
+  // fading from disabled to enabled reads as low contrast mid-fade.
+  await expect(row).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => document.getAnimations().every((a) => !(a instanceof CSSTransition)));
   const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
   expect(axe.violations.map((x) => x.id)).toEqual([]);
 });
@@ -6817,7 +6822,7 @@ test("the webhook is paused and resumed from Settings, keeping its URL and secre
 });
 
 test("Settings sends a marked sample of a webhook event, logged as a sample", async ({ page }) => {
-  // One delivery to an unroutable address, which waits out the 10-second timeout.
+  // Two deliveries to an unroutable address, each waiting out the 10-second timeout.
   expect((await page.request.put("/api/notifications", { data: { url: "https://203.0.113.5/hooks/samples", events: ["video.failed"] } })).status()).toBe(200);
   try {
     expect((await page.request.post("/api/notifications/test", { data: { event: "video.deleted" } })).status()).toBe(400);
@@ -6838,6 +6843,17 @@ test("Settings sends a marked sample of a webhook event, logged as a sample", as
     await expect(page.locator(`[data-delivery="${sample.id}"]`)).toContainText(" · sample");
     await expect(page.getByRole("button", { name: /^Redeliver sample video\.completed from / })).toHaveCount(1);
     await expect(page.getByText(/video\.completed \(sample\) · /)).toBeVisible();
+    // A presenter's lead has its own sample; a source only goes with a lead.
+    expect((await page.request.post("/api/notifications/test", { data: { event: "video.failed", source: "presenter" } })).status()).toBe(400);
+    // Left out, the event is the plain ping, which takes no source either.
+    expect((await page.request.post("/api/notifications/test", { data: { source: "presenter" } })).status()).toBe(400);
+    await choice.selectOption("lead.captured:presenter");
+    const sent = page.waitForRequest((r) => r.url().endsWith("/api/notifications/test") && r.method() === "POST");
+    await page.getByRole("button", { name: "Send test" }).click();
+    expect((await sent).postDataJSON()).toEqual({ event: "lead.captured", source: "presenter" });
+    await expect(page.getByTestId("webhook-note")).toHaveText(/^Sample lead\.captured \(presenter\) failed: /, { timeout: 20_000 });
+    const afterPresenter = (await (await page.request.get("/api/notifications")).json()).webhook.deliveries as Array<{ event: string; test?: boolean }>;
+    expect(afterPresenter.some((d) => d.test && d.event === "lead.captured")).toBe(true);
     const axe = await new AxeBuilder({ page }).include("main").withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
     expect(axe.violations.map((x) => x.id)).toEqual([]);
   } finally {
@@ -13201,6 +13217,9 @@ test("home names the open comments that mention you, opening the library filtere
     await page.reload();
     await expect(line).toHaveText("1 open comment mentions you, on 1 video.Show videos that mention you");
     await page.unroute("**/api/videos");
+    // Let the reload's link prefetches settle: a click while one for the same page is cancelled can leave the router
+    // fetching the page without ever moving to it.
+    await page.waitForLoadState("networkidle");
     await line.getByRole("link", { name: "Show videos that mention you" }).click();
     await expect(page).toHaveURL(/\/videos\?comments=mentions$/);
     // The library asks for the filter, which here matches nothing, and says so; Open comments is the other choice, not both.

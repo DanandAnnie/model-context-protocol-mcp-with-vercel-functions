@@ -2813,6 +2813,18 @@ describe("outbound webhooks", () => {
         assert.ok(realData[event], `a real ${event} was sent`);
         assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData(event)))), shape(realData[event]), `the ${event} sample is shaped like the real one`);
       }
+      // A presenter's lead has its own shape, and its own sample.
+      const agent = await createAgent(agentSchema.parse({ name: "Sample check", avatarId: "stock_1", voiceId: "stock_voice_1", isPublic: true, collectEmail: true }), "smp1");
+      const visit = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+      const beforeLead = calls.length;
+      await captureLead(agent.id, { conversationId: visit.conversationId, email: "visitor@example.com", name: "Vi" });
+      await new Promise((r) => setTimeout(r, 20));
+      const presenterLead = JSON.parse(calls.slice(beforeLead).find((c) => JSON.parse(c.body).event === "lead.captured")!.body).data;
+      assert.equal(presenterLead.source, "presenter");
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("lead.captured", undefined, "presenter")))), shape(presenterLead), "the presenter lead sample is shaped like the real one");
+      const sentPresenter = (await sendTestNotification("smp1", "lead.captured", "presenter"))!;
+      assert.equal(sentPresenter.ok, true);
+      assert.equal(JSON.parse(calls.at(-1)!.body).data.source, "presenter");
       calls.splice(before);
 
       // Settings saved before revision ids existed still get the delivery logged (written over their updatedAt).

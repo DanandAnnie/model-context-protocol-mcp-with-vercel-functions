@@ -1571,3 +1571,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The refusal message says its date is in UTC.
     - A code comment that described the key check wrongly was corrected.
     - A test now covers an expired key.
+- Choose which webhook events are sent (`ed14cf8`). A webhook used to receive every event, so an endpoint that only cared about leads still had to receive and ignore every finished render, and the reverse. The webhook card in Settings now has a "Send when" choice under the URL: a render completes (`video.completed`), a render fails (`video.failed`), and a visitor leaves an email (`lead.captured`). All three are ticked by default, as before. The webhook can't be saved with none ticked; the card says so, and screen readers hear the reason on the Save button. A note says when the ticks differ from what's saved.
+  - **Behaviour:** an event that isn't chosen is neither sent nor logged. "Send test" sends a test whatever is chosen, and a logged delivery can still be redelivered.
+  - **API:** `PUT /api/notifications` takes `events` (at least one of the three; repeats are dropped; an empty list, `test`, or another name is a `400`). Left out, the choice made before is kept, so a script that only changes the URL doesn't reset it. The webhook's `events` lists the choice and is absent when every event is sent.
+  - An independent review found nothing blocking. From its optional findings:
+    - A list with repeats is no longer refused once it reaches four entries.
+    - The card's intro now says only the chosen events are sent.
+    - The "choose at least one" note is now tied to the Save button for screen readers.
+    - The chosen events are worked out once when saving.

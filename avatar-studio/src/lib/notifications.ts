@@ -363,6 +363,30 @@ export async function notifyTranslationTransition(prev: Translation, next: Trans
 }
 
 /**
+ * Sends translation.proofread_ready once a dub asked to be proofread first has its translated lines ready to correct,
+ * from the write that stored them, with how many lines there are and the page to correct them on. Nothing more is sent
+ * until the dub is approved and made (translation.completed) or fails (translation.failed).
+ */
+export async function notifyProofreadReady(prev: Translation, next: Translation): Promise<void> {
+  if (prev.proofreadStage === "ready" || next.proofreadStage !== "ready" || next.status !== "processing") return;
+  const settings = await getNotifySettings(next.ownerId ?? LOCAL_OWNER).catch(() => null);
+  if (!settings) return;
+  const { id, title, status, targetLanguage, sourceVideoUrl, proofreadStage, createdAt, updatedAt } = next;
+  await dispatchNotification(settings, "translation.proofread_ready", {
+    id,
+    title,
+    status,
+    targetLanguage,
+    sourceVideoUrl,
+    proofreadStage,
+    lineCount: next.proofreadCues?.length ?? 0,
+    proofreadUrl: `${config.appUrl.replace(/\/$/, "")}/translate`,
+    createdAt,
+    updatedAt,
+  });
+}
+
+/**
  * Sends twin.completed once a digital twin is trained, consented to, and kept as a photo avatar, or twin.failed when
  * training or its picture fails, or the renderer refuses, never confirms, or loses the twin, from the write that moved
  * it there. The renderer's ids,
@@ -402,6 +426,9 @@ export function sampleEventData(event: WebhookEvent, now = nowIso(), source: Lea
     return event === "translation.completed"
       ? { ...dub, status: "completed", videoUrl: "https://example.com/sample-es.mp4", captionUrls: { srt: "https://example.com/sample-es.srt", vtt: "https://example.com/sample-es.vtt" } }
       : { ...dub, status: "failed", error: "Sample failure: the dub could not be made" };
+  }
+  if (event === "translation.proofread_ready") {
+    return { id: "sample_translation", title: "Sample video (Spanish)", status: "processing", targetLanguage: "Spanish", sourceVideoUrl: "https://example.com/source.mp4", proofreadStage: "ready", lineCount: 12, proofreadUrl: "https://example.com/translate", createdAt: now, updatedAt: now };
   }
   if (event === "twin.completed" || event === "twin.failed") {
     const twin = { id: "sample_twin", name: "Sample twin", createdAt: now, updatedAt: now };

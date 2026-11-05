@@ -11,7 +11,7 @@ import { TRANSLATION_GONE } from "../providers/types";
 import { getStore } from "../store";
 import { MAX_TRANSLATION_SPEAKERS, TRANSLATION_QUALITIES, type CaptionCue, type Translation } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
-import { notifyTranslationTransition } from "../notifications";
+import { notifyProofreadReady, notifyTranslationTransition } from "../notifications";
 import { afterResponse, owned, stripUndefined } from "./shared";
 import { MAX_CAPTION_CUE_CHARS, MAX_CAPTION_CUES } from "./videos";
 import { getBrandKit } from "./brand";
@@ -191,11 +191,15 @@ const lastChecked = new Map<string, number>();
 const running = (t: Translation) => t.status === "processing" || t.status === "queued";
 
 /**
- * Sends the owner's webhook, after the response, for a dub a write just moved to completed or failed. Called only once
- * the conditional write landed, so of two pollers or a poll and a callback, only the one that moved the dub sends it.
+ * Sends the owner's webhook, after the response, for a dub a write just moved to completed or failed, or whose lines to
+ * proofread it just stored. Called only once the conditional write landed, so of two pollers or a poll and a callback,
+ * only the one that moved the dub sends it. Writes the account makes itself (corrections, a retry reopening the lines, a
+ * refused dub start) do not come through here.
  */
 async function announce(prev: Translation, next: Translation): Promise<void> {
   if (next.status !== prev.status) await afterResponse(() => notifyTranslationTransition(prev, next));
+  // Lines to proofread are told of once, by the write that stored them.
+  else if (next.proofreadStage === "ready" && prev.proofreadStage !== "ready") await afterResponse(() => notifyProofreadReady(prev, next));
 }
 function linksExpire(t: Translation): boolean {
   try {

@@ -32,6 +32,69 @@ describe("SRT parsing", () => {
 });
 
 describe("proofread dubs", () => {
+  it("sends translation.proofread_ready once when the lines are ready, and nothing for corrections", async () => {
+    const { notifySchema, saveNotifySettings, setNotificationFetch, sampleEventData, sendTestNotification } = await import("../notifications");
+    const calls: Array<{ event: string; body: Record<string, unknown> }> = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ event: (init?.headers as Record<string, string>)["X-Studio-Event"], body: JSON.parse(String(init?.body)) });
+      return new Response("", { status: 200 });
+    });
+    try {
+      await saveNotifySettings(notifySchema.parse({ url: "https://203.0.113.5/hooks/proofread" }), "u-hook");
+      const [job] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", proofread: true }), "u-hook");
+      assert.equal(calls.length, 0, "nothing while the lines are being translated");
+      const ready = await getTranslation(job.id, "u-hook");
+      assert.equal(ready.proofreadStage, "ready");
+      await getTranslation(job.id, "u-hook");
+      await listTranslations("u-hook");
+      assert.deepEqual(calls.map((c) => c.event), ["translation.proofread_ready"], "sent once");
+      const data = calls[0].body.data as Record<string, unknown>;
+      assert.deepEqual([data.id, data.status, data.proofreadStage, data.targetLanguage, data.lineCount], [job.id, "processing", "ready", "Spanish", 3]);
+      assert.equal(data.proofreadUrl, `${config.appUrl.replace(/\/$/, "")}/translate`);
+      for (const hidden of ["proofreadCues", "proofreadToken", "providerProofreadId", "providerJobId"]) assert.equal(hidden in data, false, `${hidden} is not sent`);
+      const shape = (d: Record<string, unknown>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v]).sort());
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("translation.proofread_ready")))), shape(data), "the sample is shaped like the real event");
+      // Corrections are the account's own doing: nothing is sent for them.
+      await saveProofreadLines(job.id, proofreadLinesSchema.parse({ lines: ["Uno.", "Dos.", "Tres."] }), "u-hook");
+      assert.equal(calls.length, 1);
+      // A dub start the provider refuses opens the lines again: the account asked, so nothing is sent.
+      const { MockTranslateProvider } = await import("../providers/translate/mock");
+      const proto = MockTranslateProvider.prototype as unknown as { dubProofread: (...a: unknown[]) => Promise<unknown> };
+      const realDub = proto.dubProofread;
+      proto.dubProofread = async () => {
+        throw new Error("refused");
+      };
+      try {
+        const refused = await dubProofread(job.id, undefined, "u-hook");
+        assert.equal(refused.proofreadStage, "ready");
+      } finally {
+        proto.dubProofread = realDub;
+      }
+      assert.equal(calls.length, 1, "a refused start sends nothing");
+      // Approved, dubbed, failed, and tried again: the lines open again, and that is not sent either.
+      const dubbed = await dubProofread(job.id, undefined, "u-hook");
+      await getStore().put("translation", { ...(await stored(dubbed.id)), status: "failed", error: "It broke" });
+      const { retryTranslation } = await import("../services/translations");
+      const reopened = await retryTranslation(job.id, "u-hook");
+      assert.equal(reopened.proofreadStage, "ready");
+      await getTranslation(job.id, "u-hook");
+      assert.equal(calls.filter((c) => c.event === "translation.proofread_ready").length, 1, "a retry reopening the lines sends nothing");
+
+      // The sample is marked as a test.
+      assert.equal((await sendTestNotification("u-hook", "translation.proofread_ready"))!.ok, true);
+      assert.equal(calls.at(-1)!.event, "translation.proofread_ready");
+      assert.equal(calls.at(-1)!.body.test, true);
+      // A webhook chosen without it is not sent it.
+      await saveNotifySettings(notifySchema.parse({ url: "https://203.0.113.5/hooks/proofread", events: ["translation.completed"] }), "u-hook");
+      const [quiet] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "French", proofread: true }), "u-hook");
+      const before = calls.length;
+      assert.equal((await getTranslation(quiet.id, "u-hook")).proofreadStage, "ready");
+      assert.equal(calls.length, before, "not chosen: not sent");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
   it("translates the lines first, takes corrections, and dubs them from a secret SRT link", async () => {
     const [job] = await createTranslations(translationBatchSchema.parse({ ...base, targetLanguage: "Spanish", proofread: true }), "u-pr");
     assert.deepEqual([job.status, job.proofreadStage, job.proofread, job.providerJobId], ["processing", "preparing", true, undefined]);

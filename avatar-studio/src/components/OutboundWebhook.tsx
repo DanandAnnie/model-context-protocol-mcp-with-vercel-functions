@@ -13,6 +13,7 @@ const EVENT_LABELS: Record<WebhookEvent, string> = {
   "video.failed": "A render fails",
   "translation.completed": "A dub is ready",
   "translation.failed": "A dub fails",
+  "translation.proofread_ready": "A dub's lines are ready to proofread",
   "twin.completed": "A digital twin is ready",
   "twin.failed": "A digital twin fails",
   "lead.captured": "A visitor leaves an email",
@@ -25,6 +26,7 @@ const TEST_CHOICES = [
   { value: "video.failed", label: "Sample: render fails" },
   { value: "translation.completed", label: "Sample: dub is ready" },
   { value: "translation.failed", label: "Sample: dub fails" },
+  { value: "translation.proofread_ready", label: "Sample: dub's lines ready to proofread" },
   { value: "twin.completed", label: "Sample: digital twin is ready" },
   { value: "twin.failed", label: "Sample: digital twin fails" },
   { value: "lead.captured", label: "Sample: visitor leaves an email (share page)" },
@@ -200,7 +202,7 @@ export function OutboundWebhook() {
         <Webhook className="h-4 w-4 text-slate-400" /> Webhook notifications
       </h3>
       <p className="mt-1 text-xs text-slate-500">
-        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), when a dub is ready or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.failed</code>), when a digital twin is ready to use or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">twin.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">twin.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret (after a rotation, accept <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature-Previous</code> too while you move over). Private and local hosts are rejected.
+        A signed <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">POST</code> is sent to your endpoint, for the events chosen below, when a render completes or fails (events <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">video.failed</code>), when a dub is ready or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.failed</code>), when a dub asked to be proofread has its lines ready (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">translation.proofread_ready</code>), when a digital twin is ready to use or fails (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">twin.completed</code>, <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">twin.failed</code>), and when a visitor leaves an email with a shared presenter or at a share page's email gate (<code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">lead.captured</code>, whose <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">source</code> is <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">presenter</code> or <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">share</code>). Verify <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature</code> as HMAC-SHA256 of <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">{"<timestamp>.<body>"}</code> with your secret (after a rotation, accept <code className="rounded bg-slate-100 px-1 py-0.5 text-slate-700">X-Studio-Signature-Previous</code> too while you move over). Private and local hosts are rejected.
       </p>
       <ErrorBanner message={error ?? err} />
       {/* Always rendered, so a screen reader announces each outcome as it is written. */}

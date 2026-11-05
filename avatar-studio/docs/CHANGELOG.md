@@ -1619,3 +1619,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The new-key banner follows its key by id, not by name, so two keys with the same name can't be confused.
     - The card's help text mentions renaming.
     - Unit tests cover a rename racing a revoke and a last-use stamp racing a rename.
+- Pause and resume the webhook (`48cd156`). The only way to stop deliveries, say while an endpoint was being moved or was down, was to remove the webhook, which lost its signing secret and delivery log and meant re-entering the URL and events. Settings now has Pause beside Send test, Resume while paused, and a Status line: "Sending", or "Paused since …: no events are sent or logged. Send test still works."
+  - **Behaviour:** while paused, no event is sent or logged, and none are queued for later. The URL, secret, chosen events, and log are kept. A test or a redelivery asked for by hand still goes, so the endpoint can be checked before resuming. Saving the webhook, even with a new URL, leaves it paused. Pausing a paused webhook keeps when it was first paused.
+  - **API:** `PATCH /api/notifications` with `{ "paused": true | false }` (editors only; `404` with no webhook, `400` for anything but a boolean). While paused, the webhook carries `pausedAt`.
+  - An independent review found nothing blocking. From its optional findings:
+    - The pause is now checked on the webhook as it is at sending time, not on the copy the caller read. A lead captured just before a pause, whose dispatch runs after the response, is no longer sent or logged after the pause.
+    - Viewers' Status line no longer tells them Send test still works, since they can't send one.
+    - The Pause/Resume button no longer shows its icon beside the spinner while working.
+    - The unit test also covers a stale copy of the settings and a rotation keeping the pause.

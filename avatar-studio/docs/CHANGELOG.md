@@ -1995,3 +1995,23 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Checkboxes counted as text fields.
     - The arrows on a focused player were left to each browser.
   - **Tests.** Unit tests cover the key rules: fields, modifiers, composing, focused buttons and the player, the switch, held keys, layouts, AZERTY digits, and seeks within the clip. They also cover the captions toggle (the track last shown, chapters left alone). The e2e test presses K and Space, a held K, J, L, both arrows (on the page and on the player), a digit, M, C, and F, Ctrl+L, and Space on a button. It also types into a field, turns the switch off, checks it is kept across a reload, and runs the shortcuts in an embed.
+- Playback speed on the share page (`2316c36`). A viewer can now watch a share page's video faster or slower.
+  - **The menu.** A Speed menu sits beside the call-to-action, Download, and "Copy link at" buttons. It offers half speed to double: 0.5×, 0.75×, Normal, 1.25×, 1.5×, 1.75×, and 2×.
+    - It follows the player whichever way the speed changes: the menu, the keys, or the player's own menu. A rate it does not offer is shown as it is, in order.
+    - This browser keeps the last speed chosen and plays the next share page at it. Normal, or a rate the menu does not offer, keeps nothing.
+  - **The keys.** `<` and `>` go a step slower or faster, on the page and in an embed's frame. The new speed is announced. Like the letter and number shortcuts, they follow the single-key switch, which is now labelled "Letter, number, and < > shortcuts".
+    - They work by the character however a layout types it: Shift+, and Shift+. on a US keyboard, a key of their own on many European ones, or AltGr on others such as Czech.
+    - On layouts whose Shift+, and Shift+. type no Latin character (Russian Б and Ю), they are read by those keys' places.
+  - **Looping embeds.** A looping embed played faster still counts as watched to the end, since the closing window the player watches for grows with the speed.
+  - **Review.** An independent review found nothing blocking. It raised four minor points and several nits, all fixed:
+    - AltGr and Cyrillic layouts could not use `<` and `>`.
+    - The switch's label did not say it covers them.
+    - A looping embed at double speed could miss its watched-to-the-end mark.
+    - The e2e test could act before the page was ready.
+    - The menu now shows a choice at once and lists the speeds in order.
+  - **Tests.** Unit tests cover:
+    - the keys: Shift, a key of their own, AltGr, Cyrillic places, held keys, and the switch;
+    - the steps through the speeds, staying at the ends and from a rate between two;
+    - the labels, and which kept values are honoured.
+
+    The e2e test chooses a speed, checks it is kept across a reload, and steps with `>` and `<` and their announcements. It also checks that a rate the menu does not offer is shown and not kept, that the switch turns `<` and `>` off, that Normal keeps nothing, and that an embed answers `>` without the menu.

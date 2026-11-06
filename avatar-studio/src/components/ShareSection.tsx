@@ -2,20 +2,37 @@
 import { useId, useState, type RefObject } from "react";
 import { Copy } from "lucide-react";
 import { inputClass } from "@/components/ui";
+import { sectionEmbedSnippet } from "@/lib/oembed";
 import { MIN_SECTION_SEC, clockTime, parseTimeInput, shareSectionLink } from "@/lib/share-time";
+import type { AspectRatio } from "@/lib/types";
 
 /**
  * "Share a section": a share link that plays only the part between two times (`?t=` and `?end=`), then pauses with a way
  * to keep watching, for sending the one minute that matters without making a new video. Each time can be typed (`1:05`,
  * `65`, `1m5s`) or taken from the page's player where it stands.
  */
-export function ShareSection({ url, durationSec, player, locked }: { url: string; durationSec?: number; player: RefObject<HTMLVideoElement | null>; locked?: boolean }) {
+export function ShareSection({
+  url,
+  durationSec,
+  player,
+  locked,
+  aspect = "16:9",
+  title,
+}: {
+  url: string;
+  durationSec?: number;
+  player: RefObject<HTMLVideoElement | null>;
+  locked?: boolean;
+  aspect?: AspectRatio;
+  /** The video's title, which the embed's frame is named after. */
+  title: string;
+}) {
   const id = useId();
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
-  // The link the last copy was of, so the note does not outlive a change to the times.
-  const [copied, setCopied] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  // What the last copy was of (the link or the embed code, as text), so the note does not outlive a change to the times.
+  const [copied, setCopied] = useState<{ what: "link" | "embed"; text: string } | null>(null);
+  const [failed, setFailed] = useState<"link" | "embed" | null>(null);
   const length = durationSec && durationSec > 0 ? durationSec : undefined;
   const from = start.trim() ? parseTimeInput(start) : 0;
   const to = end.trim() ? parseTimeInput(end) : undefined;
@@ -41,14 +58,17 @@ export function ShareSection({ url, durationSec, player, locked }: { url: string
     return el && Number.isFinite(el.currentTime) ? clockTime(el.currentTime) : null;
   }
 
-  async function copy() {
-    if (!link) return;
-    setFailed(false);
+  const embed = link && from !== undefined && until !== undefined ? sectionEmbedSnippet(url, aspect, `${title} (${clockTime(from)} to ${clockTime(until)})`, from, until) : null;
+
+  async function copy(what: "link" | "embed") {
+    const text = what === "link" ? link : embed;
+    if (!text) return;
+    setFailed(null);
     try {
-      await navigator.clipboard.writeText(link);
-      setCopied(link);
+      await navigator.clipboard.writeText(text);
+      setCopied({ what, text });
     } catch {
-      setFailed(true);
+      setFailed(what);
     }
   }
 
@@ -75,7 +95,12 @@ export function ShareSection({ url, durationSec, player, locked }: { url: string
             aria-label={label}
             aria-describedby={describedBy}
             aria-invalid={invalid || undefined}
-            onChange={(e) => set(e.target.value)}
+            onChange={(e) => {
+              set(e.target.value);
+              // A note about a copy (made, or refused) speaks for the times it was made with, so a change clears it.
+              setCopied(null);
+              setFailed(null);
+            }}
           />
           <button
             type="button"
@@ -83,7 +108,10 @@ export function ShareSection({ url, durationSec, player, locked }: { url: string
             aria-label={`Use the player's time for the section ${which}`}
             onClick={() => {
               const t = playerTime();
-              if (t !== null) set(t);
+              if (t === null) return;
+              set(t);
+              setCopied(null);
+              setFailed(null);
             }}
           >
             Player time
@@ -114,14 +142,33 @@ export function ShareSection({ url, durationSec, player, locked }: { url: string
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
-            onClick={() => void copy()}
+            onClick={() => void copy("link")}
           >
             <Copy className="h-3.5 w-3.5" aria-hidden /> Copy link
           </button>
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"
+            title="Copy an iframe snippet that plays this section on your site"
+            onClick={() => void copy("embed")}
+          >
+            <Copy className="h-3.5 w-3.5" aria-hidden /> Copy embed code
+          </button>
         </div>
       )}
+      {failed === "embed" && embed && (
+        <textarea readOnly className={`${inputClass} mt-2 h-20 w-full text-xs`} value={embed} aria-label="Section embed code" onFocus={(e) => e.currentTarget.select()} />
+      )}
       <p role="status" className="mt-1 text-xs text-slate-500">
-        {failed ? "Copy the section link from the field." : copied && copied === link ? "Section link copied." : ""}
+        {failed === "link" && link
+          ? "Copy the section link from the field."
+          : failed === "embed" && embed
+            ? "Copy the section's embed code from the box."
+            : copied && copied.text === (copied.what === "link" ? link : embed)
+              ? copied.what === "link"
+                ? "Section link copied."
+                : "Section embed code copied: paste it into your site's HTML."
+              : ""}
       </p>
     </div>
   );

@@ -21,6 +21,18 @@ export function embedSize(aspect: AspectRatio, maxWidth?: number, maxHeight?: nu
   return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
 }
 
+/**
+ * The iframe that places a section of a video on a website: the embed player (`?embed=1`) starting at `start` and
+ * pausing at `end` (as a section link does), sized as the video's other embeds, with its address and title escaped.
+ * `shareUrl` is the video's share page (`…/share/:id`).
+ */
+export function sectionEmbedSnippet(shareUrl: string, aspect: AspectRatio, title: string, start: number, end: number): string {
+  const { width, height } = embedSize(aspect);
+  const t = (sec: number) => String(Number(sec.toFixed(3)));
+  const query = ["embed=1", start > 0 ? `t=${t(start)}` : "", `end=${t(end)}`].filter(Boolean).join("&");
+  return `<iframe src="${escapeHtml(`${shareUrl}?${query}`)}" width="${width}" height="${height}" style="border:0;max-width:100%" allow="fullscreen; picture-in-picture" allowfullscreen title="${escapeHtml(title)}"></iframe>`;
+}
+
 /** A consumer's `maxwidth` or `maxheight`: a whole number of pixels from 1, or no limit for anything else. */
 export function sizeLimit(raw: string | null): number | undefined {
   if (!raw || !/^\d{1,5}$/.test(raw.trim())) return undefined;

@@ -1390,7 +1390,7 @@ export default function VideoDetailPage() {
                   {video.deletedAt || !shareLive || shareExpired(video) ? (
                     <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : shareLive ? "Link expired: set a later expiry first." : "Turn the share link on first."}</p>
                   ) : !shareOrigin ? null : (
-                    <ShareSection url={`${shareOrigin}/share/${video.id}`} durationSec={video.durationSec} player={player} locked={!!video.shareLocked} />
+                    <ShareSection url={`${shareOrigin}/share/${video.id}`} durationSec={video.durationSec} player={player} locked={!!video.shareLocked} aspect={video.aspect} title={video.title} />
                   )}
                 </Card>
               )}

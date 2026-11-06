@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { embedSize, oembedFor, shareLinkTarget, sizeLimit } from "../oembed";
+import { embedSize, oembedFor, sectionEmbedSnippet, shareLinkTarget, sizeLimit } from "../oembed";
 
 const BASE = "https://studio.example.com";
 
@@ -105,5 +105,20 @@ describe("oembedFor", () => {
     const bare = oembedFor({ ...video, thumbnailUrl: undefined }, { base: BASE, siteName: "Studio" });
     assert.equal(bare.thumbnail_url, undefined);
     assert.equal(bare.thumbnail_height, undefined);
+  });
+});
+
+describe("sectionEmbedSnippet", () => {
+  it("frames the embed player for the section, sized as the video's embeds, its address and title escaped", () => {
+    const html = sectionEmbedSnippet(`${BASE}/share/vid_1`, "9:16", 'Tour "Maple" & more (1:05 to 1:30)', 65, 90);
+    assert.equal(
+      html,
+      `<iframe src="${BASE}/share/vid_1?embed=1&amp;t=65&amp;end=90" width="360" height="640" style="border:0;max-width:100%" allow="fullscreen; picture-in-picture" allowfullscreen title="Tour &quot;Maple&quot; &amp; more (1:05 to 1:30)"></iframe>`,
+    );
+    // A section from the start leaves out t; times keep at most three decimals.
+    assert.match(sectionEmbedSnippet(`${BASE}/share/vid_1`, "16:9", "x", 0, 12.34567), /\?embed=1&amp;end=12\.346" width="640" height="360"/);
+    // What the embed asks for, the share page reads back as the same section.
+    const src = /src="([^"]+)"/.exec(html)![1].replace(/&amp;/g, "&");
+    assert.deepEqual(shareLinkTarget(src, [BASE]), { id: "vid_1", start: 65, end: 90 });
   });
 });

@@ -10497,6 +10497,19 @@ test("a share link plays only a section: made on the video page, it pauses at it
   await card.getByRole("button", { name: "Copy link" }).click();
   await expect(card.getByRole("status")).toHaveText("Section link copied.");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await link.inputValue());
+  // The section goes on a website too: an iframe of the embed player for the same section, named after it.
+  await card.getByRole("button", { name: "Copy embed code" }).click();
+  await expect(card.getByRole("status")).toHaveText("Section embed code copied: paste it into your site's HTML.");
+  const snippet = await page.evaluate(() => navigator.clipboard.readText());
+  expect(snippet).toMatch(new RegExp(`^<iframe src="[^"]+/share/${v.id}\\?embed=1&amp;t=1&amp;end=3" width="\\d+" height="\\d+" [^>]*title="Section [^"]+ \\(0:01 to 0:03\\)"></iframe>$`));
+  // Changing a time clears the copied note, so it never speaks for a section that was not copied, even once the
+  // times are put back.
+  await start.fill("0:00");
+  await expect(link).toHaveValue(new RegExp(`/share/${v.id}\\?end=3$`));
+  await expect(card.getByRole("status")).toHaveText("");
+  await start.fill("0:01");
+  await expect(link).toHaveValue(new RegExp(`/share/${v.id}\\?t=1&end=3$`));
+  await expect(card.getByRole("status")).toHaveText("");
   // On the share page the link starts at its start and pauses at its end, saying so, with the ways on.
   const url = new URL(await link.inputValue());
   await page.goto(`${url.pathname}${url.search}`);

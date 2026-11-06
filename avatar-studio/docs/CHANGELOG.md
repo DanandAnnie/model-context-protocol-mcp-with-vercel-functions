@@ -1838,3 +1838,32 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The demo upload no longer runs into the platform's 4.5 MB request limit.
   - Unit tests cover the tokens, the HeyGen calls, and the refusals. An e2e test covers the panel, Stop upload included.
   - Not yet checked against the live API: whether HeyGen's storage accepts a cross-site upload from a browser. A public link still works where it does not.
+- Fix a line in a finished video (`d2d394d`). On a finished video's page, the Fix a line card lists each spoken scene's words. Changing some of them has HeyGen re-render only those scenes, in the same video: its link, settings, views, and comments stay (HeyGen's video edit, `POST /v3/videos/{id}`, after `GET /v3/videos/{id}/scenes` for its edit version and line ids).
+  - **What is sent.** Pauses and the brand kit's pronunciations are sent as when the video was made. A fix counts as a render.
+  - **Reservation.** The fix is reserved on the video under its lock, from the record as stored then:
+    - Its words become the new ones, and the old render, corrected captions, and subtitle tracks are set aside, as is an approval.
+    - Only the request that reserved it sends it and counts it.
+    - An owner edit made meanwhile never puts the old words or render back.
+  - **Completion.** HeyGen keeps the video's id, so only a completion HeyGen dates after the fix was sent is the fix's. A webhook for a video with a fix in flight is checked with HeyGen first.
+  - **Failure.** A render that fails leaves the video as it was, says why, and gives the render back.
+  - **Lost answer.** A lost answer keeps the fix reserved, and sending it again replays the same key and body, one request at a time. A fix never confirmed is given up on after thirty minutes.
+  - **Refusals.** The demo renderer renders it again too. Refused:
+    - words changed meanwhile (`409`, and the card reads the video again);
+    - a scene playing a recording;
+    - only pauses;
+    - too many words;
+    - directed videos, templates, cinematic shots, and transparent videos.
+  - **Two reviews.** An independent review found blocking issues, all fixed before this commit:
+    - Writes outside the video's lock, and double sends and counts.
+    - The old render's completion ending the fix early.
+    - Stale captions and subtitles.
+    - HeyGen's retry contract after a lost answer.
+    - A failed fix leaving the video failed.
+
+    A second review found more:
+    - Concurrent resends: now sent one at a time.
+    - Owner edits putting the old render back: render fields are now taken from the stored record.
+    - A second failed fix not refunded: refund markers are now per fix.
+    - Key reuse after a failed fix: each fix now has its own key.
+    - The library carrying set-aside data.
+  - **Tests.** Unit tests cover the demo and HeyGen paths, the races, stale and fresh completions, failure, and lost answers. An e2e test covers the card.

@@ -1749,3 +1749,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - An independent review found nothing blocking. From its optional findings:
     - The API reference gives the 5:4 sizes in the quality, email preview, and oEmbed entries, and says the music mix refuses a 5:4 video too.
     - The end-to-end test checks that the Music page leaves a 5:4 video out, and the unit test checks the PDF cut-offs, US Letter landscape staying 16:9 among them.
+- HeyGen brand kit for directed videos (`c8f67fe`). HeyGen's v3 API imports a brand kit from a public website (`POST /v3/brand-kits`): the site's colours, fonts, and logos. Its Video Agent then applies the kit (`brand_kit_id`) to everything it builds.
+  - **Import:** the Brand page has a HeyGen brand kit card. Enter the company's website and HeyGen reads it. The card checks back every three seconds and shows the colours, fonts, and logo it read, with Import again and Remove. The kit is used from the moment it is made, and the Brand page's own kit is left alone.
+  - **Directed videos:** every video HeyGen's Video Agent directs for the account is dressed in the kit. The Video Agent page says so and links to the Brand page, and the video page names the kit. It works with a curated style too: the style sets the layout, the kit makes it the brand's.
+  - **One account's own:** every account shares the studio's one HeyGen workspace, so the kit's id is read from the account's own record each time a video starts, a retry included. It is never taken from a request. A kit made by another renderer (after a move from the demo renderer to HeyGen) is not used.
+  - **Cleanup:** HeyGen breaks a session whose kit is deleted. So a replaced or removed kit is deleted at HeyGen only ten minutes later, and only once none of the account's videos names it. Deleting the account deletes every kit it had at HeyGen; if HeyGen will not delete one, the account is kept, as for instant voices.
+  - An independent review found no way for one account's kit to reach another. Fixed from its findings:
+    - A kit replaced while a directed video was starting could be deleted at HeyGen before that video was stored. It is now kept for ten minutes after it stops being used.
+    - Kits record the renderer that made them, so a demo kit is never sent to HeyGen and a HeyGen kit is deleted at HeyGen.
+    - Account deletion no longer drops a kit's id when HeyGen fails to delete it.
+    - The import's idempotency key is stable for a call made again after a timeout, so no second kit is left behind at HeyGen.
+    - A kit HeyGen never finishes reading is taken as stopped early after fifteen minutes, so the card stops checking.
+    - After Remove, the card discards a check still in flight, so the removed kit cannot reappear.

@@ -1941,3 +1941,19 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Copying both links of one chapter left two check marks. One mark now moves to the latest copy.
     - The older chapter-link e2e step read the clipboard before the copy was announced. It now waits for the announcement first.
   - **Tests.** Unit tests cover the chapter link: the same start as the chapter's own link, the end at the next chapter's start exactly, a first chapter with no `t`, and a chapter too short to stop, and that the button's test always agrees with the link. The chapters e2e test copies a middle and a first chapter's link-only and checks both, that the last chapter has none (a spacer keeps its place), and that only one check mark shows at a time.
+- QA pass 35: section links, section embeds, and chapter-only links in a browser (`15780b7`). The three latest features were walked in a real browser against the demo build. The pass covered desktop, phone, and embed sizes (640×360, 400×225, 320×180), by keyboard and through the accessibility tree:
+  - the share page and the embed stopping at a section's end, with Watch it again and Keep watching;
+  - the Share a section card's fields, notes, and copies;
+  - the chapter list's link and chapter-only buttons.
+
+  The stop was announced, the icons lined up in one column, the pages did not scroll sideways, and no console or HTTP errors appeared. Found and fixed:
+  - **Focus fell to the page after the section's buttons.** Watch it again and Keep watching hide the note they sit in, which left the keyboard on the page body. The focus now moves to the player, without scrolling the page, once the note has gone; a focus elsewhere is left where it is.
+  - **Long videos' minutes were not a time.** "75:30" or "90:00" was refused as "not a time" in the section fields, and as a `t` or `end` in a link, because a two-part clock allowed minutes up to 59 only. A two-part clock now takes any number of minutes, as a long video's description writes them. A three-part clock and the one-day cap are unchanged.
+  - **The section link was three letters wide on a phone.** The read-only link field shrank to make room for the two copy buttons. It now keeps a readable width, and the buttons wrap under it. The field was just as narrow on a desktop, where it now has room too.
+  - **Left as is.** A 16:9 video in an embed only 180 pixels wide clips the end note. No real embed of that shape is that narrow; a portrait video in a portrait frame fits.
+  - **Review.** An independent review of these fixes found nothing blocking and four minor points, all fixed:
+    - A Watch it again whose playback failed moved the focus away from a note still showing. The focus now moves only when the note goes, from any control.
+    - A hard minimum width on the link field could widen the page's right column on a narrow desktop and scroll a 280-pixel phone sideways. The field now asks for its width without forcing it.
+    - The e2e check for sideways scroll measured the page, which never scrolls; it now measures the scrolling main area.
+    - The API reference now names `?end=` and the long clock forms.
+  - **Tests.** Unit tests cover long minutes in a clock (to just under a day) and the malformed clocks still refused. The section e2e test checks the focus after each button, that a long-minutes end is read as a time, and the link's width at 375 pixels.

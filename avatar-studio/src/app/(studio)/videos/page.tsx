@@ -1480,7 +1480,7 @@ function VideosInner() {
           </select>
           <select aria-label="Filter by shape" value={shape} onChange={(e) => setShape(e.target.value as VideoQuery["shape"])} className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
             <option value="all">Any shape</option>
-            <option value="landscape">Landscape 16:9</option>
+            <option value="landscape">Landscape 16:9 or 5:4</option>
             <option value="portrait">Portrait 9:16 or 4:5</option>
             <option value="square">Square 1:1</option>
           </select>

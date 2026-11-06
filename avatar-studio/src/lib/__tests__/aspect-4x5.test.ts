@@ -23,16 +23,15 @@ const ask = (aspect: string) => ({ title: "Feed post", script: "Hello there.", a
 
 describe("4:5 videos", () => {
   it("are a shape every request that names one takes, beside 16:9, 9:16, and 1:1; other ratios are refused", () => {
-    assert.deepEqual([...ASPECT_RATIOS], ["16:9", "9:16", "1:1", "4:5"]);
+    assert.deepEqual([...ASPECT_RATIOS], ["16:9", "9:16", "1:1", "4:5", "5:4"]);
     assert.equal(ASPECT_NAMES["4:5"], "portrait feed");
     assert.equal(videoRequestSchema.parse(ask("4:5")).aspect, "4:5");
-    assert.equal(videoRequestSchema.safeParse(ask("5:4")).success, false);
     assert.equal(videoRequestSchema.safeParse(ask("4:3")).success, false);
     assert.equal(templateInputSchema.shape.aspect.parse("4:5"), "4:5");
     assert.equal(brandKitSchema.shape.defaultAspect.parse("4:5"), "4:5");
     assert.equal(batchRequestSchema.shape.aspect.parse("4:5"), "4:5");
     assert.deepEqual(resizeSchema.parse({ aspects: ["4:5", "9:16", "4:5"] }).aspects, ["4:5", "9:16"]);
-    assert.deepEqual(resizeSchema.parse({ aspects: ["16:9", "9:16", "1:1", "4:5"] }).aspects, ["16:9", "9:16", "1:1", "4:5"], "every shape may be asked for; the video's own is left out when sizes are made");
+    assert.deepEqual(resizeSchema.parse({ aspects: ["16:9", "9:16", "1:1", "4:5", "5:4"] }).aspects, ["16:9", "9:16", "1:1", "4:5", "5:4"], "every shape may be asked for; the video's own is left out when sizes are made");
     assert.deepEqual(resizeSchema.parse({ aspects: ["9:16", "9:16", "1:1", "4:5"] }).aspects, ["9:16", "1:1", "4:5"]);
   });
 

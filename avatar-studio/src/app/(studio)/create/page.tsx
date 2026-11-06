@@ -1671,7 +1671,7 @@ function CreateInner() {
     return () => window.removeEventListener("keydown", onKey);
   }, [canGenerate]);
 
-  const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : aspect === "4:5" ? "aspect-[4/5]" : "aspect-video";
+  const stageAspect = aspect === "9:16" ? "aspect-[9/16]" : aspect === "1:1" ? "aspect-square" : aspect === "4:5" ? "aspect-[4/5]" : aspect === "5:4" ? "aspect-[5/4]" : "aspect-video";
   // A transparent stage is drawn as a light checkerboard, whatever background the scene keeps.
   // A scene's clip that is gone or not ready (once the list has loaded) is said under the picker, before Generate.
   const clipMissing = !!footageData && !!footageIdOf(background) && !readyFootage.some((f) => f.id === footageIdOf(background));
@@ -2809,7 +2809,7 @@ function CreateInner() {
               <div className="space-y-5">
                 <div role="group" aria-label="Aspect ratio">
                   <div className="mb-2 text-sm font-medium text-slate-700">Aspect ratio</div>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {ASPECT_RATIOS.map((a) => (
                       <button
                         key={a}

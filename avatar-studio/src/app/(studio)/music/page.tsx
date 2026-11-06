@@ -78,8 +78,8 @@ export default function MusicPage() {
     }, 10_000);
     return () => clearInterval(timer);
   }, [libraryRendering, refetchLibrary]);
-  // A 4:5 video is left out: HeyGen mixes music in 16:9, 9:16, or 1:1 only.
-  const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt && !v.transparent && v.aspect !== "4:5");
+  // A feed post (4:5 or 5:4) is left out: HeyGen mixes music in 16:9, 9:16, or 1:1 only.
+  const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt && !v.transparent && v.aspect !== "4:5" && v.aspect !== "5:4");
   const [videoId, setVideoId] = useState("");
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<string | null>(null);

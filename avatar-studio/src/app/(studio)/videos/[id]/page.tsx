@@ -1033,7 +1033,7 @@ export default function VideoDetailPage() {
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[2fr_1fr]">
             <Card className="overflow-hidden">
               <div className="flex items-center justify-center bg-slate-950 p-0">
-               <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : video.aspect === "4:5" ? "aspect-[4/5] w-full max-w-[480px]" : "aspect-video w-full"}`}>
+               <div className={`relative flex items-center justify-center ${video.aspect === "9:16" ? "aspect-[9/16] h-[70vh]" : video.aspect === "1:1" ? "aspect-square w-full max-w-[560px]" : video.aspect === "4:5" ? "aspect-[4/5] w-full max-w-[480px]" : video.aspect === "5:4" ? "aspect-[5/4] w-full max-w-[720px]" : "aspect-video w-full"}`}>
                 {video.status === "completed" && video.videoUrl ? (
                   <video
                     ref={player}

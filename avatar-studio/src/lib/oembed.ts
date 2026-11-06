@@ -8,6 +8,7 @@ const EMBED_SIZES: Record<AspectRatio, { width: number; height: number }> = {
   "9:16": { width: 360, height: 640 },
   "1:1": { width: 480, height: 480 },
   "4:5": { width: 384, height: 480 },
+  "5:4": { width: 600, height: 480 },
 };
 
 /**

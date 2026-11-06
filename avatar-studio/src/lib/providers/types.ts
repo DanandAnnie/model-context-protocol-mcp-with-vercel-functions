@@ -436,8 +436,8 @@ export interface LipsyncInput {
 export interface MusicMixInput {
   videoUrl: string;
   durationSec: number;
-  /** The video's frame; never 4:5, which the mix cannot be rendered in. */
-  aspect: Exclude<AspectRatio, "4:5">;
+  /** The video's frame; never a feed post (4:5 or 5:4), which the mix cannot be rendered in. */
+  aspect: Exclude<AspectRatio, "4:5" | "5:4">;
   musicUrl: string;
   musicDurationSec: number;
   /** The music's gain under the video's sound, 0 to 1. */

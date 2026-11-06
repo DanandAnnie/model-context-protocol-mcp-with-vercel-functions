@@ -91,16 +91,18 @@ export const SLIDE_FRAMES = {
   "9:16": { width: 1080, height: 1920 },
   "1:1": { width: 1080, height: 1080 },
   "4:5": { width: 1080, height: 1350 },
+  "5:4": { width: 1350, height: 1080 },
 } as const;
 export type SlideAspect = keyof typeof SLIDE_FRAMES;
 
 /**
- * The format for a page of this shape: wide pages (16:9 and 4:3 alike) landscape, near-square ones square, slightly tall
- * ones (a 4:5 carousel post, a portrait Letter or A4 page) the 4:5 feed post, and taller ones 9:16 portrait.
+ * The format for a page of this shape: wide pages (16:9 and 4:3 alike) landscape, slightly wide ones (a 5:4 feed post)
+ * the 5:4 feed post, near-square ones square, slightly tall ones (a 4:5 carousel post, a portrait Letter or A4 page)
+ * the 4:5 feed post, and taller ones 9:16 portrait.
  */
 export function slideAspect(width: number, height: number): SlideAspect {
   const ratio = width / height;
-  return ratio > 1.2 ? "16:9" : ratio >= 0.9 ? "1:1" : ratio >= 0.68 ? "4:5" : "9:16";
+  return ratio > 1.29 ? "16:9" : ratio > 1.12 ? "5:4" : ratio >= 0.9 ? "1:1" : ratio >= 0.68 ? "4:5" : "9:16";
 }
 
 /** What one background image may weigh on the server. */

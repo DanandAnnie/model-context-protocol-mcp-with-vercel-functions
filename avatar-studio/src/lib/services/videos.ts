@@ -1878,7 +1878,7 @@ export const resizeSchema = z.object({
 });
 
 /** The shapes a title of another size ends with, so a size made from a size is titled from the original. */
-const SIZE_SUFFIX = / \((?:16:9|9:16|1:1|4:5)\)$/;
+const SIZE_SUFFIX = / \((?:16:9|9:16|1:1|4:5|5:4)\)$/;
 
 /** A video's family: the original and every size made from it, trashed ones included, the original first. */
 async function sizeFamily(video: Video, ownerId: string): Promise<Video[]> {

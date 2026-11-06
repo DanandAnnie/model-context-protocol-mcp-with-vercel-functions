@@ -110,9 +110,9 @@ export async function listMusicJobs(ownerId: string = LOCAL_OWNER): Promise<Musi
   return (await checks.follow(jobs)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-/** The frame a mix is rendered in: the video's own, which is never 4:5 here (refused when the video is resolved). */
-function mixFrame(aspect: Video["aspect"]): Exclude<Video["aspect"], "4:5"> {
-  if (aspect === "4:5") throw new ValidationError("Music can be added to 16:9, 9:16, and 1:1 videos");
+/** The frame a mix is rendered in: the video's own, which is never a feed post here (refused when the video is resolved). */
+function mixFrame(aspect: Video["aspect"]): Exclude<Video["aspect"], "4:5" | "5:4"> {
+  if (aspect === "4:5" || aspect === "5:4") throw new ValidationError("Music can be added to 16:9, 9:16, and 1:1 videos");
   return aspect;
 }
 
@@ -122,8 +122,9 @@ async function resolveVideo(videoId: string, ownerId: string): Promise<Video> {
   if (video.deletedAt) throw new ValidationError("Restore the video from the trash to add music to it");
   if (video.status !== "completed" || !video.videoUrl) throw new ValidationError("Only a finished video can be given music; wait for this one to render");
   if (video.transparent) throw new ValidationError("A video with a transparent background has no frame to keep under music; add music to the video it is composited into");
-  // HeyGen's HyperFrames renders the mix in 16:9, 9:16, or 1:1 only, so a 4:5 feed post would come back in another frame.
+  // HeyGen's HyperFrames renders the mix in 16:9, 9:16, or 1:1 only, so a feed post would come back in another frame.
   if (video.aspect === "4:5") throw new ValidationError("Music can be added to 16:9, 9:16, and 1:1 videos; make a 1:1 or 9:16 size of this 4:5 video and add music to that");
+  if (video.aspect === "5:4") throw new ValidationError("Music can be added to 16:9, 9:16, and 1:1 videos; make a 16:9 or 1:1 size of this 5:4 video and add music to that");
   if (!(video.durationSec && video.durationSec > 0)) throw new ValidationError("This video's length is not known yet; open it once it has played, or try again in a moment");
   if (video.durationSec > MAX_MUSIC_VIDEO_SEC) throw new ValidationError(`Music can be added to videos of up to ${MAX_MUSIC_VIDEO_SEC / 60} minutes`);
   return video;

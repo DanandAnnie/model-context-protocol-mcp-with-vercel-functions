@@ -1971,3 +1971,27 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
 
     Its nits were taken too: the site's own address instead of the one in the browser, a time slot wide enough for 10:00, and a status line that takes no room until it speaks.
   - **Tests.** Unit tests cover the moment's second (a hair short of a second, the last half second, a clip whose length is not known yet), checked against the player's own start rule, and the link. The e2e test copies at the start, at a moment, in the clip's last half second, from a section link, and with the clipboard refused, and checks that an embed has no button.
+- Keyboard shortcuts on the share page (`d33fc20`). A viewer can now drive the share player from the keyboard, with the keys video sites have taught them, on the share page and inside an embed's frame.
+  - **The keys.**
+    - K or Space plays and pauses.
+    - J and L go back and forward ten seconds; the arrows go five.
+    - M mutes, C turns captions on and off, and F goes full screen.
+    - A digit jumps to that tenth of the video.
+
+    Seeks stay within the clip. Muting and captions are announced, since neither shows on the picture.
+  - **Where they hold back.**
+    - Keys typed into a field or while composing text, and keys with Ctrl, Cmd, or Alt, are left alone.
+    - Space on a button presses the button, and Space on the player is the player's own.
+    - A held key does not flip a toggle back and forth, though it keeps seeking.
+  - **The list.** A "Keyboard shortcuts" list sits under the page's player, not in embeds. It carries a switch that turns the letter and number shortcuts off for speech input; Space and the arrows keep working. It is the same switch the studio keeps, so either place turns them off for this browser, and it holds for the page where the browser cannot store it.
+  - **Captions.** C brings back the track last shown, a translation included. On a video whose captions are drawn into the picture, it lays only a translation over them, or says the captions are part of the picture.
+  - **Layouts and browsers.** On a layout whose keys type no Latin letter (Cyrillic, Greek), a shortcut is read by the key's place. AZERTY's digit row works unshifted. F uses WebKit's own full screen where the standard one is missing (older Safari, iPhone and iPad).
+  - **Review.** An independent review found one blocking issue and several minor ones, all fixed:
+    - The letter and digit shortcuts could not be turned off (WCAG 2.1.4). They now follow the studio's switch, shown in the list.
+    - A held key repeated toggles.
+    - Non-Latin layouts and AZERTY's digits did nothing.
+    - F had no WebKit fallback.
+    - C laid the script's track over captions drawn into the picture.
+    - Checkboxes counted as text fields.
+    - The arrows on a focused player were left to each browser.
+  - **Tests.** Unit tests cover the key rules: fields, modifiers, composing, focused buttons and the player, the switch, held keys, layouts, AZERTY digits, and seeks within the clip. They also cover the captions toggle (the track last shown, chapters left alone). The e2e test presses K and Space, a held K, J, L, both arrows (on the page and on the player), a digit, M, C, and F, Ctrl+L, and Space on a button. It also types into a field, turns the switch off, checks it is kept across a reload, and runs the shortcuts in an embed.

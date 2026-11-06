@@ -453,6 +453,13 @@ export interface LipsyncInput {
   mode: "speed" | "precision";
   title: string;
   key: string;
+  /** Only this part of the footage, in seconds; take out its music, clean up the speech, keep its length, or keep its format. */
+  startSec?: number;
+  endSec?: number;
+  removeMusic?: true;
+  enhanceSpeech?: true;
+  keepLength?: true;
+  keepFormat?: true;
 }
 
 export interface MusicMixInput {

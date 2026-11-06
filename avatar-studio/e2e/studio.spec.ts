@@ -2133,6 +2133,55 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await expect(page.getByTestId("cleanup")).toHaveCount(listed.length - 1);
 });
 
+test("a lip sync takes part of the video and HeyGen's options, said on its card, with a part past the video's end refused", async ({ page }) => {
+  const title = `Lip sync options ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto("/lipsync");
+  await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
+  await page.getByLabel("A link").nth(1).check();
+  await page.getByLabel("Audio URL").fill("https://93.184.216.34/retake.mp3");
+  const start = page.getByRole("button", { name: "Lip-sync video" });
+  await expect(start).toBeEnabled();
+  // Only part of the video: a moment that does not read keeps the button off, and says how to write one.
+  await page.getByLabel(/^Only part of the video/).check();
+  const hint = page.locator("#lipsync-part-hint");
+  await expect(hint).toHaveText("Write where the part starts, where it ends, or both.");
+  await expect(start).toBeDisabled();
+  await page.getByRole("textbox", { name: "From", exact: true }).fill("five");
+  await expect(hint).toHaveText("Write each moment as seconds (12.5) or minutes and seconds (1:05).");
+  // Past the chosen library video's end is said before anything is sent.
+  await page.getByRole("textbox", { name: "From", exact: true }).fill("10:00");
+  await expect(hint).toHaveText(/^The video is \d+:\d\d long; start the part before \d+:\d\d\.$/);
+  await expect(start).toBeDisabled();
+  await page.getByRole("textbox", { name: "From", exact: true }).fill("300:00");
+  await expect(hint).toHaveText("Keep the part within the first 4 hours of the video.");
+  await page.getByRole("textbox", { name: "From", exact: true }).fill("0:01");
+  await page.getByRole("textbox", { name: "To", exact: true }).fill("0:01.5");
+  await expect(hint).toHaveText("End the part at least a second after it starts.");
+  await page.getByRole("textbox", { name: "To", exact: true }).fill("4.5");
+  await expect(hint).toHaveText(/^Seconds \(12\.5\) or minutes and seconds/);
+  await expect(start).toBeEnabled();
+  await page.getByLabel(/^Take out the background music/).check();
+  await page.getByLabel(/^Keep the video's length/).check();
+  await expect(page.getByText("The video keeps its length, whatever the new audio's.")).toBeVisible();
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/lipsyncs") && r.method() === "POST");
+  await start.click();
+  expect((await sent).postDataJSON()).toEqual({ videoId: v.id, audioUrl: "https://93.184.216.34/retake.mp3", mode: "speed", startSec: 1, endSec: 4.5, removeMusic: true, keepLength: true });
+  const item = page.getByTestId("lipsync").first();
+  await expect(item.getByTestId("lipsync-meta")).toContainText("Fast · 0:01 to 0:04.5 · music taken out · length kept");
+  const job = ((await (await page.request.get("/api/lipsyncs")).json()).lipsyncs as Array<Record<string, unknown>>)[0];
+  expect([job.startSec, job.endSec, job.removeMusic, job.keepLength, job.enhanceSpeech]).toEqual([1, 4.5, true, true, undefined]);
+  // Past a library video's end, the API says how long the video is.
+  const length = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.durationSec as number;
+  const late = await page.request.post("/api/lipsyncs", { data: { videoId: v.id, audioUrl: "https://93.184.216.34/retake.mp3", endSec: Math.ceil(length) + 5 } });
+  expect(late.status()).toBe(400);
+  expect((await late.json()).error).toMatch(/^The video is .+ long; end the part by then/);
+  page.once("dialog", (d) => d.accept());
+  await item.getByRole("button", { name: /^Delete / }).click();
+  await expect(page.getByTestId("lipsync").filter({ hasText: title })).toHaveCount(0);
+});
+
 test("a video is lip-synced to an uploaded clip or a linked track, at the chosen quality, and deleted", async ({ page }) => {
   const v = await createVideoViaApi(page, `Lip sync source ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

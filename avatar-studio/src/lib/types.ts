@@ -389,6 +389,10 @@ export interface MadeVoice {
 /** How closely a lip sync redraws the mouth: fast, or slower and truer to the face (HeyGen avatar inference). */
 export const LIPSYNC_MODES = ["speed", "precision"] as const;
 export type LipsyncMode = (typeof LIPSYNC_MODES)[number];
+/** The longest footage a part of may be chosen in, in seconds (HeyGen's lip sync takes up to a few hours). */
+export const MAX_LIPSYNC_SEC = 4 * 60 * 60;
+/** The shortest part of the footage synced on its own. */
+export const MIN_LIPSYNC_PART_SEC = 1;
 
 /** A video given a new audio track, its speaker's mouth redrawn to match (HeyGen lip sync). */
 export interface LipsyncJob {
@@ -407,6 +411,17 @@ export interface LipsyncJob {
   voiceChangeId?: string;
   audioName?: string;
   mode: LipsyncMode;
+  /** Only this part of the footage is synced, in seconds from its start (HeyGen `start_time`/`end_time`); the whole when absent. */
+  startSec?: number;
+  endSec?: number;
+  /** The footage's background music is taken out (`disable_music_track`). */
+  removeMusic?: true;
+  /** The new speech is cleaned up (`enable_speech_enhancement`). */
+  enhanceSpeech?: true;
+  /** The video keeps its own length rather than stretching to the new audio's (`enable_dynamic_duration: false`). */
+  keepLength?: true;
+  /** The footage's resolution and bitrate are kept (`keep_the_same_format`). */
+  keepFormat?: true;
   /** Renderer syncing it, and its job id there, never shown to the account. */
   provider: string;
   providerJobId: string;

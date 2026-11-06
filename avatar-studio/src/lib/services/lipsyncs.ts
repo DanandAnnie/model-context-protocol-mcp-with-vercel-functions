@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { LIPSYNC_MODES, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
+import { LIPSYNC_MODES, MAX_LIPSYNC_SEC, MIN_LIPSYNC_PART_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
 import type { LipsyncInput } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
@@ -23,6 +23,22 @@ export const MAX_LIPSYNCS = 50;
 /** "" or only spaces, as a field left out. */
 const emptyAsAbsent = (v: unknown) => (typeof v === "string" && !v.trim() ? undefined : v);
 
+/** A moment of the footage in seconds, to a tenth; `null` or blank is none. */
+const moment = (which: "start" | "end") =>
+  z.preprocess(
+    (v) => (v === null || (typeof v === "string" && !v.trim()) ? undefined : v),
+    z
+      .number({ error: `The part's ${which} is a number of seconds` })
+      .min(0, `The part's ${which} is a number of seconds from the start of the video`)
+      .max(MAX_LIPSYNC_SEC, `The part's ${which} is within the first ${MAX_LIPSYNC_SEC / 3600} hours of the video`)
+      .transform((s) => Math.round(s * 10) / 10)
+      .optional(),
+  );
+
+/** An option asked for is stored as true; false or absent is HeyGen's default and stored as absent. */
+const optIn = (name: string) =>
+  z.preprocess((v) => (v === null ? undefined : v), z.boolean({ error: `${name} is true or false` }).optional()).transform((v) => (v ? (true as const) : undefined));
+
 export const lipsyncRequestSchema = z
   .object({
     title: z.string().trim().max(120).optional(),
@@ -38,7 +54,17 @@ export const lipsyncRequestSchema = z
     audioUrl: z.preprocess(emptyAsAbsent, z.string().trim().max(2000, "The link is too long").optional()),
     voiceChangeId: z.preprocess(emptyAsAbsent, z.string().trim().regex(/^vc_[A-Za-z0-9_-]{1,64}$/, "Choose one of your recordings in another voice").optional()),
     mode: z.enum(LIPSYNC_MODES).default("speed"),
+    /** Only this part of the footage is synced (the rest kept as it is); from its start, or to its end, when one is left out. */
+    startSec: moment("start"),
+    endSec: moment("end"),
+    removeMusic: optIn("removeMusic"),
+    enhanceSpeech: optIn("enhanceSpeech"),
+    keepLength: optIn("keepLength"),
+    keepFormat: optIn("keepFormat"),
   })
+  // From the start is the same as no start; a part needs some length to sync.
+  .transform((v) => ({ ...v, startSec: v.startSec === 0 ? undefined : v.startSec }))
+  .refine((v) => v.endSec === undefined || v.endSec - (v.startSec ?? 0) >= MIN_LIPSYNC_PART_SEC, { message: `The end of the part must be at least ${MIN_LIPSYNC_PART_SEC} second after its start`, path: ["endSec"] })
   .refine((v) => !!v.videoId !== !!v.sourceUrl, { message: "Choose one of your videos or paste a link to a video", path: ["sourceUrl"] })
   .refine((v) => [v.clipId, v.audioUrl, v.voiceChangeId].filter(Boolean).length === 1, { message: "Choose one of your audio clips or recordings in another voice, or paste a link to the new audio", path: ["audioUrl"] });
 
@@ -158,10 +184,15 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     // The same key with other footage, audio, or mode is a mistake to say, not a start to repeat.
     const sameVideo = input.videoId ? existing.videoId === input.videoId : existing.sourceUrl === input.sourceUrl;
     const sameAudio = input.voiceChangeId ? existing.voiceChangeId === input.voiceChangeId : input.clipId ? existing.clipId === input.clipId : !!input.audioUrl && existing.audioUrl === input.audioUrl;
-    if (!sameVideo || !sameAudio || existing.mode !== input.mode) throw new ConflictError("This Idempotency-Key was already used for another lip sync; send a new key");
+    const sameOptions = (["startSec", "endSec", "removeMusic", "enhanceSpeech", "keepLength", "keepFormat"] as const).every((k) => existing[k] === input[k]);
+    if (!sameVideo || !sameAudio || existing.mode !== input.mode || !sameOptions) throw new ConflictError("This Idempotency-Key was already used for another lip sync; send a new key");
     return existing;
   }
   const source = await resolveLipsyncSources(input, ownerId);
+  // A library video's length is known: a part past its end is said before anything is sent.
+  const length = source.video?.durationSec;
+  if (length && input.startSec !== undefined && input.startSec >= length - MIN_LIPSYNC_PART_SEC) throw new ValidationError(`The video is ${lengthSaid(length)} long; start the part before ${lengthSaid(Math.floor(Math.max(0, length - MIN_LIPSYNC_PART_SEC)))}`);
+  if (length && input.endSec !== undefined && input.endSec > length + 0.5) throw new ValidationError(`The video is ${lengthSaid(length)} long; end the part by then, or leave the end out to sync to the end`);
   opts.admit?.();
   const provider = getAvatarProvider();
   let audio: LipsyncInput["audio"];
@@ -176,7 +207,8 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     audio = { type: "url", url: source.voiceChange?.audioUrl ?? source.audioUrl! };
   }
   const videoUrl = source.video ? await freshVideoUrl(source.video) : source.url!;
-  const { jobId } = await provider.startLipsync!({ videoUrl, audio, mode: input.mode, title: source.title, key: id });
+  const options = stripUndefined({ startSec: input.startSec, endSec: input.endSec, removeMusic: input.removeMusic, enhanceSpeech: input.enhanceSpeech, keepLength: input.keepLength, keepFormat: input.keepFormat });
+  const { jobId } = await provider.startLipsync!({ videoUrl, audio, mode: input.mode, title: source.title, key: id, ...options });
   const now = nowIso();
   const job: LipsyncJob = stripUndefined({
     id,
@@ -189,6 +221,7 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     voiceChangeId: source.voiceChange?.id,
     audioName: source.voiceChange?.title,
     mode: input.mode,
+    ...options,
     provider: provider.name,
     providerJobId: jobId,
     status: "processing" as const,
@@ -235,4 +268,10 @@ async function refreshLipsync(job: LipsyncJob): Promise<LipsyncJob> {
     console.error(`lip sync check failed for ${job.id}:`, err);
     return job;
   }
+}
+
+/** A length as said to the account: "42 seconds", "3:05". */
+function lengthSaid(sec: number): string {
+  const s = Math.round(sec);
+  return s < 60 ? `${s} second${s === 1 ? "" : "s"}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }

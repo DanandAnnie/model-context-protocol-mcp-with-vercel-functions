@@ -9,7 +9,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody as clipFrom } from "@/lib/clip-upload";
-import { VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
+import { MAX_LIPSYNC_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
 
 /** A recording or text spoken in one of the account's instant voices (text in one of HeyGen's too), as the voice changer lists it. */
 type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec" | "updatedAt" | "checkedAt">;
@@ -20,6 +20,34 @@ const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? 
 /** Lip-synced videos' links are renewed by the server once this old; a page left open asks again when it is looked at. */
 const RELINK_MS = 30 * 60 * 1000;
 const MODE_LABEL: Record<LipsyncMode, string> = { speed: "Fast", precision: "Precise" };
+
+/** A moment typed as seconds ("12.5") or minutes and seconds ("1:05"), in seconds; blank is none, anything else NaN. */
+function momentOf(text: string): number | undefined {
+  const t = text.trim();
+  if (!t) return undefined;
+  const m = /^(?:(\d+):)?(\d+(?:\.\d+)?)$/.exec(t);
+  if (!m || (m[1] !== undefined && Number(m[2]) >= 60)) return NaN;
+  // To a tenth, as the server keeps it, so the checks below see the moment it will.
+  return Math.round(((m[1] ? Number(m[1]) * 60 : 0) + Number(m[2])) * 10) / 10;
+}
+
+/** A moment as shown on a card: "0:12", "1:05.5". */
+function momentSaid(sec: number): string {
+  const whole = Math.floor(sec);
+  const tenth = Math.round((sec - whole) * 10);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}${tenth ? `.${tenth}` : ""}`;
+}
+
+/** What else a lip sync was asked to do, for its card: its part of the video, and the options turned on. */
+function optionsSaid(l: Pick<Lipsync, "startSec" | "endSec" | "removeMusic" | "enhanceSpeech" | "keepLength" | "keepFormat">): string[] {
+  const out: string[] = [];
+  if (l.startSec !== undefined || l.endSec !== undefined) out.push(`${momentSaid(l.startSec ?? 0)} to ${l.endSec !== undefined ? momentSaid(l.endSec) : "the end"}`);
+  if (l.removeMusic) out.push("music taken out");
+  if (l.enhanceSpeech) out.push("speech cleaned up");
+  if (l.keepLength) out.push("length kept");
+  if (l.keepFormat) out.push("format kept");
+  return out;
+}
 /**
  * "Lip sync": a video given a new audio track, the speaker's mouth redrawn to match (HeyGen lip sync). For a line
  * re-recorded after the shoot, a voice-over replaced, or a dub of one's own. The footage is a video of the library or a
@@ -84,6 +112,14 @@ export default function LipsyncPage() {
   const [clipId, setClipId] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [mode, setMode] = useState<LipsyncMode>("speed");
+  // HeyGen's options: only part of the video, its music taken out, the speech cleaned up, its length or format kept.
+  const [partOnly, setPartOnly] = useState(false);
+  const [partFrom, setPartFrom] = useState("");
+  const [partTo, setPartTo] = useState("");
+  const [removeMusic, setRemoveMusic] = useState(false);
+  const [enhanceSpeech, setEnhanceSpeech] = useState(false);
+  const [keepLength, setKeepLength] = useState(false);
+  const [keepFormat, setKeepFormat] = useState(false);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -159,6 +195,31 @@ export default function LipsyncPage() {
     }
   }
 
+  // The part of the video, as typed: a moment that does not read is said under the fields and keeps the button off.
+  const fromSec = momentOf(partFrom);
+  const toSec = momentOf(partTo);
+  const partProblem = !partOnly
+    ? null
+    : Number.isNaN(fromSec) || Number.isNaN(toSec)
+      ? "Write each moment as seconds (12.5) or minutes and seconds (1:05)."
+      : fromSec === undefined && toSec === undefined
+        ? "Write where the part starts, where it ends, or both."
+        : (fromSec ?? 0) > MAX_LIPSYNC_SEC || (toSec ?? 0) > MAX_LIPSYNC_SEC
+          ? "Keep the part within the first 4 hours of the video."
+          : toSec !== undefined && toSec - (fromSec ?? 0) < 1
+            ? "End the part at least a second after it starts."
+            : partPastEnd(fromSec, toSec);
+
+  /** For a library video whose length is known, a part that starts or ends past it (the server's own rule). */
+  function partPastEnd(start: number | undefined, end: number | undefined): string | null {
+    const length = from === "library" ? videos.find((v) => v.id === videoId)?.durationSec : undefined;
+    if (typeof length !== "number" || !(length > 0)) return null;
+    const said = (sec: number) => momentSaid(Math.round(sec));
+    if (start !== undefined && start >= length - 1) return `The video is ${said(length)} long; start the part before ${said(Math.floor(Math.max(0, length - 1)))}.`;
+    if (end !== undefined && end > length + 0.5) return `The video is ${said(length)} long; end the part by then, or leave the end blank.`;
+    return null;
+  }
+
   async function submit() {
     setBusy(true);
     setErr(null);
@@ -168,6 +229,12 @@ export default function LipsyncPage() {
         ...(from === "link" ? { sourceUrl: sourceUrl.trim() } : { videoId }),
         ...(audioFrom === "link" ? { audioUrl: audioUrl.trim() } : audioFrom === "voice" ? { voiceChangeId } : { clipId }),
         mode,
+        ...(partOnly && fromSec !== undefined ? { startSec: fromSec } : {}),
+        ...(partOnly && toSec !== undefined ? { endSec: toSec } : {}),
+        ...(removeMusic ? { removeMusic: true } : {}),
+        ...(enhanceSpeech ? { enhanceSpeech: true } : {}),
+        ...(keepLength ? { keepLength: true } : {}),
+        ...(keepFormat ? { keepFormat: true } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       };
       const { lipsync } = await api<{ lipsync: Lipsync }>("/api/lipsyncs", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
@@ -391,13 +458,54 @@ export default function LipsyncPage() {
                   </label>
                 </div>
               </fieldset>
+              <fieldset className="space-y-2">
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Options</legend>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="mt-0.5 accent-brand-600" checked={partOnly} disabled={canEdit === false} onChange={(e) => (setPartOnly(e.target.checked), changed())} />
+                  <span>
+                    Only part of the video
+                    <span className="block text-xs text-slate-500">Sync the new audio to one stretch of it; the rest plays as it was.</span>
+                  </span>
+                </label>
+                {partOnly && (
+                  <div className="ml-6 space-y-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="From">
+                        <input className={inputClass} value={partFrom} inputMode="decimal" placeholder="0:00" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartFrom(e.target.value), changed())} />
+                      </Field>
+                      <Field label="To">
+                        <input className={inputClass} value={partTo} inputMode="decimal" placeholder="the end" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartTo(e.target.value), changed())} />
+                      </Field>
+                    </div>
+                    <p id="lipsync-part-hint" role="status" className={`text-xs ${partProblem ? "text-amber-700" : "text-slate-500"}`}>
+                      {partProblem ?? "Seconds (12.5) or minutes and seconds (1:05); leave one blank for the start or the end."}
+                    </p>
+                  </div>
+                )}
+                {(
+                  [
+                    ["Take out the background music", "The footage's music is left out under the new audio.", removeMusic, setRemoveMusic],
+                    ["Clean up the speech", "HeyGen enhances the new speech in the result.", enhanceSpeech, setEnhanceSpeech],
+                    ["Keep the video's length", "The video stays as long as it is, rather than stretching to the new audio.", keepLength, setKeepLength],
+                    ["Keep the video's resolution and bitrate", "The result matches the footage's format.", keepFormat, setKeepFormat],
+                  ] as const
+                ).map(([label, hint, on, set]) => (
+                  <label key={label} className="flex items-start gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={on} disabled={canEdit === false} onChange={(e) => (set(e.target.checked), changed())} />
+                    <span>
+                      {label}
+                      <span className="block text-xs text-slate-500">{hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
               <Field label="Title (optional)">
                 <input className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => setTitle(e.target.value)} placeholder={from === "library" ? "The video's title, marked lip-synced" : "Lip-synced video"} />
               </Field>
-              <Button onClick={submit} loading={busy} disabled={!videoReady || !audioReady || uploading || !canStart} className="w-full">
+              <Button onClick={submit} loading={busy} disabled={!videoReady || !audioReady || uploading || !canStart || partProblem !== null} className="w-full">
                 <AudioLines className="h-4 w-4" /> Lip-sync video
               </Button>
-              <p className="text-xs text-slate-500">The lip-synced video is not added to the library; download it once it is ready. When the new audio is longer or shorter, the video is stretched to fit it.</p>
+              <p className="text-xs text-slate-500">The lip-synced video is not added to the library; download it once it is ready. {keepLength ? "The video keeps its length, whatever the new audio's." : "When the new audio is longer or shorter, the video is stretched to fit it."}</p>
             </div>
           )}
         </Card>
@@ -417,7 +525,8 @@ export default function LipsyncPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium text-slate-900">{l.title}</div>
                       <div className="mt-0.5 break-words text-xs text-slate-500" data-testid="lipsync-meta">
-                        {l.videoId ? "A library video" : "A linked video"} · {l.voiceChangeId ? `“${l.audioName ?? "a recording"}” in your voice` : l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]} · {formatDate(l.createdAt)}
+                        {l.videoId ? "A library video" : "A linked video"} · {l.voiceChangeId ? `“${l.audioName ?? "a recording"}” in your voice` : l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]}
+                        {optionsSaid(l).map((o) => ` · ${o}`).join("")} · {formatDate(l.createdAt)}
                         {l.status === "completed" && typeof l.durationSec === "number" ? ` · ${formatSeconds(Math.max(1, Math.round(l.durationSec)))}` : ""}
                       </div>
                       {l.error && <div className="mt-1 text-xs text-rose-600">{l.error}</div>}

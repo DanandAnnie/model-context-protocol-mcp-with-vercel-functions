@@ -701,13 +701,20 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   /** A video given a new audio track, the speaker's mouth redrawn to match (v3 lip sync). */
-  async startLipsync({ videoUrl, audio, mode, title, key }: LipsyncInput) {
+  async startLipsync({ videoUrl, audio, mode, title, key, startSec, endSec, removeMusic, enhanceSpeech, keepLength, keepFormat }: LipsyncInput) {
     try {
       const body = {
         video: { type: "url", url: videoUrl },
         audio: audio.type === "url" ? { type: "url", url: audio.url } : { type: "asset_id", asset_id: audio.assetId },
         mode,
         title,
+        // Only what was asked for is sent; HeyGen's defaults (the whole video, its music, length fitted to the audio) stand otherwise.
+        ...(startSec !== undefined ? { start_time: startSec } : {}),
+        ...(endSec !== undefined ? { end_time: endSec } : {}),
+        ...(removeMusic ? { disable_music_track: true } : {}),
+        ...(enhanceSpeech ? { enable_speech_enhancement: true } : {}),
+        ...(keepLength ? { enable_dynamic_duration: false } : {}),
+        ...(keepFormat ? { keep_the_same_format: true } : {}),
       };
       return { jobId: await this.client.createLipsync(body, key) };
     } catch (err) {

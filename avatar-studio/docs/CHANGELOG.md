@@ -1822,3 +1822,19 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - Where a field's input sits in a wrapper beside an icon (the editor's background Image URL and Video URL), the input is linked to its hint directly.
   - A test checks that the audio picker is named by its label alone and described by its hint.
   - An independent review of every call site found nothing blocking. From its findings: the two wrapped inputs above are linked directly, and a stale note on the component was rewritten.
+- Digital twins from an uploaded video file (`9665634`). Twin footage no longer has to be at a public link: the New digital twin panel also takes an MP4, MOV, or WebM file of up to 200 MB from this computer.
+  - The file goes from the browser straight to HeyGen's storage through HeyGen's direct upload (`POST /v3/assets/direct-uploads`, a presigned link with the size signed in), never through the studio, whose functions take at most 4.5 MB. The panel shows the upload's progress, with Stop upload, and sends a file only once even when the start after it fails.
+  - `POST /api/twins/uploads` begins the upload and returns a token the studio signs for the account and the renderer. `POST /api/twins` takes `{ upload: token }` in place of `footageUrl`: it finishes the upload at HeyGen (`POST /v3/assets/:id/complete`) and trains from `file: { type: "asset_id" }`. Another account's token, a changed or expired one, or a file HeyGen has not received is a `400`, and nothing is kept or counted.
+  - The twin shows the file's name and size (`footageFile`). HeyGen's asset id is kept out of the twin, its webhooks, and the export; the token carries it, readable but signed. A lost start is asked for again from the same asset.
+  - In demo mode the upload link is one the page does not send the file to, so a file of any size up to the limit goes through.
+  - An independent review found no security problem, and several fixes followed:
+    - Each upload, and each new file, goes under a new key; HeyGen's answer to a reused key is told apart from one still running.
+    - The rest of the form is held while the file is sent, so the twin started is what was on screen.
+    - When the server asks for the file again, the panel sends it again.
+    - Finishing an upload has its own hourly limit.
+    - A retried start still finds its twin after the token's day.
+    - Stop upload returns the keyboard to the button, and an upload stops when the panel goes.
+    - "Footage from" now comes before the field it switches.
+    - The demo upload no longer runs into the platform's 4.5 MB request limit.
+  - Unit tests cover the tokens, the HeyGen calls, and the refusals. An e2e test covers the panel, Stop upload included.
+  - Not yet checked against the live API: whether HeyGen's storage accepts a cross-site upload from a browser. A public link still works where it does not.

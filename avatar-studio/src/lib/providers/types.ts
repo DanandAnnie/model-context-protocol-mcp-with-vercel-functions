@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentStyle, AudioClip, Avatar, Backdrop, DirectedScene, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio, SpokenWord } from "../types";
+import type { AgentMessage, AgentStyle, AudioClip, Avatar, Backdrop, DirectedScene, CaptionCue, HighlightClip, HighlightFrame, HighlightLength, StudioTemplate, StudioTemplateDetail, Translation, TranslationRequest, Video, VideoRequest, Voice, MusicTrack, AspectRatio, SpokenWord, LipsyncFrameRate } from "../types";
 
 export interface TtsProvider {
   readonly name: string;
@@ -180,6 +180,8 @@ export interface AvatarProvider {
    * retried start return the same job. Absent when the provider cannot lip-sync videos.
    */
   startLipsync?(input: LipsyncInput): Promise<{ jobId: string }>;
+  /** A finished lip sync's captions, timed to its video; null when the renderer has none for it. */
+  lipsyncCaptions?(jobId: string): Promise<Array<{ startMs: number; endMs: number; text: string }> | null>;
   /** Where a lip sync stands, with the video once it is ready (its link signed for a limited time). */
   lipsyncStatus?(jobId: string): Promise<LipsyncStatus>;
   /** Background-music tracks matching a description, best first, each with a short-lived link to hear it. */
@@ -460,6 +462,7 @@ export interface LipsyncInput {
   enhanceSpeech?: true;
   keepLength?: true;
   keepFormat?: true;
+  frameRate?: LipsyncFrameRate;
 }
 
 export interface MusicMixInput {

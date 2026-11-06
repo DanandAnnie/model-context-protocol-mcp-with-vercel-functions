@@ -258,6 +258,16 @@ export class MockAvatarProvider implements AvatarProvider {
     return { status: "completed", videoUrl: demoAssetUrl(SAMPLE_VIDEO), durationSec: 12 };
   }
 
+  /** Demo lip sync captions: three lines over the sample video's 12 seconds, once it is finished. */
+  async lipsyncCaptions(jobId: string): Promise<Array<{ startMs: number; endMs: number; text: string }> | null> {
+    if ((await this.lipsyncStatus(jobId)).status !== "completed") return null;
+    return [
+      { startMs: 0, endMs: 3800, text: "This is the demo lip sync." },
+      { startMs: 3800, endMs: 8200, text: "Its captions are timed to the new audio," },
+      { startMs: 8200, endMs: 12000, text: "as HeyGen's would be." },
+    ];
+  }
+
   /**
    * Demo background music: three short tracks of the studio's own, ranked by how many of the description's words their
    * description shares (all three when none match). Nothing is searched.

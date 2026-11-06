@@ -2133,7 +2133,7 @@ test("a recording can be cleaned of filler words, from a link or the library, an
   await expect(page.getByTestId("cleanup")).toHaveCount(listed.length - 1);
 });
 
-test("a lip sync takes part of the video and HeyGen's options, said on its card, with a part past the video's end refused", async ({ page }) => {
+test("a lip sync takes part of the video and HeyGen's options, said on its card, with its captions saved and a part past the video's end refused", async ({ page }) => {
   const title = `Lip sync options ${Date.now().toString(36)}`;
   const v = await createVideoViaApi(page, title);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
@@ -2165,13 +2165,28 @@ test("a lip sync takes part of the video and HeyGen's options, said on its card,
   await page.getByLabel(/^Take out the background music/).check();
   await page.getByLabel(/^Keep the video's length/).check();
   await expect(page.getByText("The video keeps its length, whatever the new audio's.")).toBeVisible();
+  await page.getByRole("combobox", { name: "Frame rate" }).selectOption("constant");
   const sent = page.waitForRequest((r) => r.url().endsWith("/api/lipsyncs") && r.method() === "POST");
   await start.click();
-  expect((await sent).postDataJSON()).toEqual({ videoId: v.id, audioUrl: "https://93.184.216.34/retake.mp3", mode: "speed", startSec: 1, endSec: 4.5, removeMusic: true, keepLength: true });
+  expect((await sent).postDataJSON()).toEqual({ videoId: v.id, audioUrl: "https://93.184.216.34/retake.mp3", mode: "speed", startSec: 1, endSec: 4.5, removeMusic: true, keepLength: true, frameRate: "constant" });
   const item = page.getByTestId("lipsync").first();
-  await expect(item.getByTestId("lipsync-meta")).toContainText("Fast · 0:01 to 0:04.5 · music taken out · length kept");
+  await expect(item.getByTestId("lipsync-meta")).toContainText("Fast · 0:01 to 0:04.5 · music taken out · length kept · constant frame rate");
   const job = ((await (await page.request.get("/api/lipsyncs")).json()).lipsyncs as Array<Record<string, unknown>>)[0];
-  expect([job.startSec, job.endSec, job.removeMusic, job.keepLength, job.enhanceSpeech]).toEqual([1, 4.5, true, true, undefined]);
+  expect([job.startSec, job.endSec, job.removeMusic, job.keepLength, job.enhanceSpeech, job.frameRate]).toEqual([1, 4.5, true, true, undefined, "constant"]);
+  // Captions come once it is finished, as SRT from its card or WebVTT, read from the renderer.
+  const early = await page.request.get(`/api/lipsyncs/${job.id}/captions`);
+  if (early.status() !== 200) expect((await early.json()).error).toBe("The captions are ready once the lip sync is finished");
+  await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\.webm$/, { timeout: 20_000 });
+  const saved = page.waitForEvent("download");
+  await item.getByRole("button", { name: /^Download captions for .+ as SRT$/ }).click();
+  const download = await saved;
+  expect(download.suggestedFilename()).toMatch(/_lip-synced\.srt$/);
+  const fs = await import("node:fs/promises");
+  expect(await fs.readFile((await download.path())!, "utf8")).toMatch(/^1\n00:00:00,000 --> 00:00:03,800\nThis is the demo lip sync\./);
+  const vtt = await page.request.get(`/api/lipsyncs/${job.id}/captions?format=vtt`);
+  expect(vtt.headers()["content-type"]).toContain("text/vtt");
+  expect(await vtt.text()).toMatch(/^WEBVTT\n/);
+  expect((await page.request.get("/api/lipsyncs/ls_missing123/captions")).status()).toBe(404);
   // Past a library video's end, the API says how long the video is.
   const length = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.durationSec as number;
   const late = await page.request.post("/api/lipsyncs", { data: { videoId: v.id, audioUrl: "https://93.184.216.34/retake.mp3", endSec: Math.ceil(length) + 5 } });

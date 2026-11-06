@@ -394,6 +394,13 @@ export const MAX_LIPSYNC_SEC = 4 * 60 * 60;
 /** The shortest part of the footage synced on its own. */
 export const MIN_LIPSYNC_PART_SEC = 1;
 
+/**
+ * How a lip sync's frames are timed (HeyGen `fps_mode`): a constant rate (`cfr`, what editing software expects), a
+ * variable one (`vfr`), or the footage's own timing passed through (`passthrough`). HeyGen chooses when absent.
+ */
+export const LIPSYNC_FRAME_RATES = ["constant", "variable", "source"] as const;
+export type LipsyncFrameRate = (typeof LIPSYNC_FRAME_RATES)[number];
+
 /** A video given a new audio track, its speaker's mouth redrawn to match (HeyGen lip sync). */
 export interface LipsyncJob {
   id: string;
@@ -422,6 +429,8 @@ export interface LipsyncJob {
   keepLength?: true;
   /** The footage's resolution and bitrate are kept (`keep_the_same_format`). */
   keepFormat?: true;
+  /** How the result's frames are timed (`fps_mode`); HeyGen's choice when absent. */
+  frameRate?: LipsyncFrameRate;
   /** Renderer syncing it, and its job id there, never shown to the account. */
   provider: string;
   providerJobId: string;

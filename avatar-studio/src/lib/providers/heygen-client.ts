@@ -420,6 +420,8 @@ export class HeyGenClient {
       status: "pending" | "running" | "completed" | "failed" | string;
       duration?: number | null;
       video_url?: string | null;
+      /** A signed link to the SRT captions HeyGen always makes, once completed. */
+      caption_url?: string | null;
       failure_message?: string | null;
     }>(`${V3}/lipsyncs/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
   }

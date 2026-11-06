@@ -1,7 +1,7 @@
-import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, movesAsPhoto, rendersOnAvatarIII, rendersOnAvatarV, MAX_AGENT_KIT_COLORS, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, movesAsPhoto, rendersOnAvatarIII, rendersOnAvatarV, MAX_AGENT_KIT_COLORS, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type LipsyncFrameRate, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
-import { heygenBurnsCaptions, isUnspaced } from "../../captions";
+import { heygenBurnsCaptions, isUnspaced, parseSrt } from "../../captions";
 import { baseLanguageCode, isSpecialLanguageCode, voiceTakesAccent } from "../../language";
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
@@ -69,6 +69,12 @@ const LOOK_PACK_TEMPLATES: Record<LookPackKey, { female: string; male: string }>
 /** How often, and how long, a new photo avatar is waited for before its first render: about ten seconds. */
 const PHOTO_CHECKS = 4;
 const PHOTO_CHECK_MS = 3000;
+
+/** HeyGen's `fps_mode` for each frame rate the studio offers. */
+const LIPSYNC_FPS_MODE: Record<LipsyncFrameRate, "cfr" | "vfr" | "passthrough"> = { constant: "cfr", variable: "vfr", source: "passthrough" };
+
+/** The most SRT text read for one lip sync's captions (about 4 hours of speech, with room). */
+const MAX_LIPSYNC_SRT_CHARS = 2_000_000;
 
 export class HeyGenAvatarProvider implements AvatarProvider {
   readonly name = "heygen";
@@ -701,7 +707,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   /** A video given a new audio track, the speaker's mouth redrawn to match (v3 lip sync). */
-  async startLipsync({ videoUrl, audio, mode, title, key, startSec, endSec, removeMusic, enhanceSpeech, keepLength, keepFormat }: LipsyncInput) {
+  async startLipsync({ videoUrl, audio, mode, title, key, startSec, endSec, removeMusic, enhanceSpeech, keepLength, keepFormat, frameRate }: LipsyncInput) {
     try {
       const body = {
         video: { type: "url", url: videoUrl },
@@ -715,6 +721,7 @@ export class HeyGenAvatarProvider implements AvatarProvider {
         ...(enhanceSpeech ? { enable_speech_enhancement: true } : {}),
         ...(keepLength ? { enable_dynamic_duration: false } : {}),
         ...(keepFormat ? { keep_the_same_format: true } : {}),
+        ...(frameRate ? { fps_mode: LIPSYNC_FPS_MODE[frameRate] } : {}),
       };
       return { jobId: await this.client.createLipsync(body, key) };
     } catch (err) {
@@ -946,6 +953,38 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     const videoUrl = httpsOnly(job.video_url);
     if (!videoUrl) return { status: "failed", error: "HeyGen finished without a lip-synced video" };
     return stripEmpty({ status: "completed" as const, videoUrl, durationSec: job.duration ?? undefined });
+  }
+
+  /**
+   * A finished lip sync's captions: the SRT HeyGen always makes (`caption_url`, a signed link read once and never kept),
+   * as cues. Null when HeyGen has none for it, or no longer has the lip sync.
+   */
+  async lipsyncCaptions(jobId: string): Promise<Array<{ startMs: number; endMs: number; text: string }> | null> {
+    let job;
+    try {
+      job = await this.client.lipsync(jobId);
+    } catch (err) {
+      if (err instanceof Error && / failed: 404 /.test(err.message)) return null;
+      // HeyGen's own message names its job id, which never leaves the server; the account is told to try again.
+      console.error(`HeyGen lip sync captions lookup failed for ${jobId}:`, err);
+      throw new UpstreamError("HeyGen did not answer about this lip sync's captions; try again");
+    }
+    const url = job.status === "completed" ? httpsOnly(job.caption_url) : undefined;
+    if (!url) return null;
+    let text: string;
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(15_000), cache: "no-store" });
+      if (!res.ok) throw new UpstreamError(`HeyGen's captions could not be read (${res.status}); try again`);
+      if (Number(res.headers.get("content-length") ?? 0) > MAX_LIPSYNC_SRT_CHARS) throw new UpstreamError("HeyGen's captions for this lip sync are too long to read here");
+      text = await res.text();
+    } catch (err) {
+      if (err instanceof UpstreamError) throw err;
+      // A timeout or a dropped connection may pass.
+      console.error(`HeyGen lip sync captions download failed for ${jobId}:`, err);
+      throw new UpstreamError("HeyGen's captions could not be read; try again");
+    }
+    if (text.length > MAX_LIPSYNC_SRT_CHARS) throw new UpstreamError("HeyGen's captions for this lip sync are too long to read here");
+    return parseSrt(text);
   }
 
   /** The account's API-ready HeyGen Studio templates (made in HeyGen Studio and marked for the API). */

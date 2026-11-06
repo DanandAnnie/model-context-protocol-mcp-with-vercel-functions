@@ -9,7 +9,7 @@ import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody as clipFrom } from "@/lib/clip-upload";
-import { MAX_LIPSYNC_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
+import { LIPSYNC_FRAME_RATES, MAX_LIPSYNC_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncFrameRate, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
 
 /** A recording or text spoken in one of the account's instant voices (text in one of HeyGen's too), as the voice changer lists it. */
 type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec" | "updatedAt" | "checkedAt">;
@@ -39,13 +39,21 @@ function momentSaid(sec: number): string {
 }
 
 /** What else a lip sync was asked to do, for its card: its part of the video, and the options turned on. */
-function optionsSaid(l: Pick<Lipsync, "startSec" | "endSec" | "removeMusic" | "enhanceSpeech" | "keepLength" | "keepFormat">): string[] {
+/** Each frame rate as offered and as said on a card. */
+const FRAME_RATE_LABEL: Record<LipsyncFrameRate, { option: string; said: string }> = {
+  constant: { option: "Constant (for editing software)", said: "constant frame rate" },
+  variable: { option: "Variable", said: "variable frame rate" },
+  source: { option: "As the footage's", said: "footage's frame rate" },
+};
+
+function optionsSaid(l: Pick<Lipsync, "startSec" | "endSec" | "removeMusic" | "enhanceSpeech" | "keepLength" | "keepFormat" | "frameRate">): string[] {
   const out: string[] = [];
   if (l.startSec !== undefined || l.endSec !== undefined) out.push(`${momentSaid(l.startSec ?? 0)} to ${l.endSec !== undefined ? momentSaid(l.endSec) : "the end"}`);
   if (l.removeMusic) out.push("music taken out");
   if (l.enhanceSpeech) out.push("speech cleaned up");
   if (l.keepLength) out.push("length kept");
   if (l.keepFormat) out.push("format kept");
+  if (l.frameRate) out.push(FRAME_RATE_LABEL[l.frameRate].said);
   return out;
 }
 /**
@@ -120,6 +128,9 @@ export default function LipsyncPage() {
   const [enhanceSpeech, setEnhanceSpeech] = useState(false);
   const [keepLength, setKeepLength] = useState(false);
   const [keepFormat, setKeepFormat] = useState(false);
+  const [frameRate, setFrameRate] = useState<LipsyncFrameRate | "">("");
+  /** The lip sync whose captions are being fetched, and in which format. */
+  const [captionsBusy, setCaptionsBusy] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -220,6 +231,31 @@ export default function LipsyncPage() {
     return null;
   }
 
+  /** Save a finished lip sync's captions, read from the renderer; a failure is said on the page rather than saved as a file. */
+  async function saveCaptions(l: Lipsync, format: "srt" | "vtt") {
+    if (captionsBusy) return;
+    setCaptionsBusy(`${l.id}:${format}`);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/lipsyncs/${encodeURIComponent(l.id)}/captions${format === "vtt" ? "?format=vtt" : ""}`).catch(() => {
+        throw new Error("Could not reach the server to get the captions");
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not get the captions");
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? `captions.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not get the captions");
+    } finally {
+      setCaptionsBusy(null);
+    }
+  }
+
   async function submit() {
     setBusy(true);
     setErr(null);
@@ -235,6 +271,7 @@ export default function LipsyncPage() {
         ...(enhanceSpeech ? { enhanceSpeech: true } : {}),
         ...(keepLength ? { keepLength: true } : {}),
         ...(keepFormat ? { keepFormat: true } : {}),
+        ...(frameRate ? { frameRate } : {}),
         ...(title.trim() ? { title: title.trim() } : {}),
       };
       const { lipsync } = await api<{ lipsync: Lipsync }>("/api/lipsyncs", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": requestKey } });
@@ -498,6 +535,16 @@ export default function LipsyncPage() {
                     </span>
                   </label>
                 ))}
+                <Field label="Frame rate" hint="Constant suits most editing software; HeyGen chooses when left as it is.">
+                  <select className={inputClass} value={frameRate} disabled={canEdit === false} onChange={(e) => (setFrameRate(e.target.value as LipsyncFrameRate | ""), changed())}>
+                    <option value="">HeyGen&apos;s choice</option>
+                    {LIPSYNC_FRAME_RATES.map((r) => (
+                      <option key={r} value={r}>
+                        {FRAME_RATE_LABEL[r].option}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
               </fieldset>
               <Field label="Title (optional)">
                 <input className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => setTitle(e.target.value)} placeholder={from === "library" ? "The video's title, marked lip-synced" : "Lip-synced video"} />
@@ -551,6 +598,21 @@ export default function LipsyncPage() {
                       <a href={l.videoUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${l.title}`}>
                         <Download className="h-3 w-3" aria-hidden /> Download
                       </a>
+                      <span className="mt-2 ml-4 inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                        Captions:
+                        {(["srt", "vtt"] as const).map((format) => (
+                          <button
+                            key={format}
+                            type="button"
+                            className="font-medium text-brand-700 hover:underline disabled:cursor-wait disabled:opacity-60"
+                            disabled={captionsBusy !== null}
+                            aria-label={`Download captions for ${l.title} as ${format === "srt" ? "SRT" : "WebVTT"}`}
+                            onClick={() => saveCaptions(l, format)}
+                          >
+                            {captionsBusy === `${l.id}:${format}` ? "Getting…" : format === "srt" ? "SRT" : "WebVTT"}
+                          </button>
+                        ))}
+                      </span>
                     </>
                   )}
                 </Card>

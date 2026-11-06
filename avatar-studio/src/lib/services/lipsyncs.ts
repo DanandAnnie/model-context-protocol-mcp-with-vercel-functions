@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName } from "../providers";
-import { LIPSYNC_MODES, MAX_LIPSYNC_SEC, MIN_LIPSYNC_PART_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
+import { LIPSYNC_FRAME_RATES, LIPSYNC_MODES, MAX_LIPSYNC_SEC, MIN_LIPSYNC_PART_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncJob, type Video, type VoiceChange } from "../types";
 import type { LipsyncInput } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, NotFoundError, ValidationError } from "../errors";
@@ -61,6 +61,8 @@ export const lipsyncRequestSchema = z
     enhanceSpeech: optIn("enhanceSpeech"),
     keepLength: optIn("keepLength"),
     keepFormat: optIn("keepFormat"),
+    /** How the result's frames are timed; HeyGen chooses when absent (or blank). */
+    frameRate: z.preprocess((v) => (v === null || (typeof v === "string" && !v.trim()) ? undefined : v), z.enum(LIPSYNC_FRAME_RATES, { error: "frameRate is constant, variable, or source" }).optional()),
   })
   // From the start is the same as no start; a part needs some length to sync.
   .transform((v) => ({ ...v, startSec: v.startSec === 0 ? undefined : v.startSec }))
@@ -184,7 +186,7 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     // The same key with other footage, audio, or mode is a mistake to say, not a start to repeat.
     const sameVideo = input.videoId ? existing.videoId === input.videoId : existing.sourceUrl === input.sourceUrl;
     const sameAudio = input.voiceChangeId ? existing.voiceChangeId === input.voiceChangeId : input.clipId ? existing.clipId === input.clipId : !!input.audioUrl && existing.audioUrl === input.audioUrl;
-    const sameOptions = (["startSec", "endSec", "removeMusic", "enhanceSpeech", "keepLength", "keepFormat"] as const).every((k) => existing[k] === input[k]);
+    const sameOptions = (["startSec", "endSec", "removeMusic", "enhanceSpeech", "keepLength", "keepFormat", "frameRate"] as const).every((k) => existing[k] === input[k]);
     if (!sameVideo || !sameAudio || existing.mode !== input.mode || !sameOptions) throw new ConflictError("This Idempotency-Key was already used for another lip sync; send a new key");
     return existing;
   }
@@ -207,7 +209,7 @@ export async function startLipsync(input: z.infer<typeof lipsyncRequestSchema>, 
     audio = { type: "url", url: source.voiceChange?.audioUrl ?? source.audioUrl! };
   }
   const videoUrl = source.video ? await freshVideoUrl(source.video) : source.url!;
-  const options = stripUndefined({ startSec: input.startSec, endSec: input.endSec, removeMusic: input.removeMusic, enhanceSpeech: input.enhanceSpeech, keepLength: input.keepLength, keepFormat: input.keepFormat });
+  const options = stripUndefined({ startSec: input.startSec, endSec: input.endSec, removeMusic: input.removeMusic, enhanceSpeech: input.enhanceSpeech, keepLength: input.keepLength, keepFormat: input.keepFormat, frameRate: input.frameRate });
   const { jobId } = await provider.startLipsync!({ videoUrl, audio, mode: input.mode, title: source.title, key: id, ...options });
   const now = nowIso();
   const job: LipsyncJob = stripUndefined({
@@ -247,6 +249,24 @@ export async function clearLipsyncs(videoId: string, ownerId: string): Promise<v
 export async function deleteLipsync(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const job = owned(await getStore().get<LipsyncJob>("lipsync", lipsyncIdSchema.parse(id)), ownerId, "Lip sync");
   await getStore().remove("lipsync", job.id);
+}
+
+/**
+ * A finished lip sync's captions, timed to the lip-synced video, as the renderer made them (read from it each time,
+ * since its link is signed for a short while): its title and cues.
+ */
+export async function lipsyncCaptions(id: string, ownerId: string = LOCAL_OWNER, opts: { admit?: () => void } = {}): Promise<{ title: string; cues: Array<{ startMs: number; endMs: number; text: string }> }> {
+  if (!lipsyncIdSchema.safeParse(id).success) throw new NotFoundError("Lip sync not found");
+  const job = owned(await getStore().get<LipsyncJob>("lipsync", id), ownerId, "Lip sync");
+  if (job.status !== "completed") throw new ValidationError(job.status === "failed" ? "This lip sync failed, so it has no captions" : "The captions are ready once the lip sync is finished");
+  const provider = getAvatarProviderByName(job.provider);
+  if (!provider.lipsyncCaptions) throw new ValidationError(`The ${provider.name} renderer makes no captions for lip syncs`);
+  // Counted only once the renderer is about to be asked.
+  opts.admit?.();
+  const cues = await provider.lipsyncCaptions(job.providerJobId);
+  if (cues === null) throw new NotFoundError("The renderer has no captions for this lip sync");
+  if (!cues.length) throw new ValidationError("This lip sync has no spoken words to caption");
+  return { title: job.title, cues };
 }
 
 /** Asks the renderer where a lip sync stands and stores the answer. Never throws: a failed check keeps what was known. */

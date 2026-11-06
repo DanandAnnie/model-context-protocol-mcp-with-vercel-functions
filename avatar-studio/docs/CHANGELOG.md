@@ -1761,3 +1761,20 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The import's idempotency key is stable for a call made again after a timeout, so no second kit is left behind at HeyGen.
     - A kit HeyGen never finishes reading is taken as stopped early after fifteen minutes, so the card stops checking.
     - After Remove, the card discards a check still in flight, so the removed kit cannot reappear.
+- HeyGen Voice audio tags in text spoken in a voice (`620affa`). HeyGen Voice performs audio tags in the text it speaks: an English word or phrase in square brackets, such as `[excited]`, `[whispers]`, `[laughs]`, or `[like a news anchor]`, that sets the feeling, the delivery, a sound, or a role. Public and instant voices on all three models perform them; professional voices do not.
+  - **Writing tags:** the Voice changer's Speak text form has an Audio tag picker, with HeyGen's common tags first in each category (emotion, delivery, sounds, scenario) and all of its roughly 200 after. The chosen tag goes at the cursor, after any words selected. A tag that would not fit the 2,000 characters is refused rather than cutting the text.
+  - **Claude's draft:** Add tags with Claude adds tags following HeyGen's own guidance: its common tags, one at a spot, moods changing a step at a time. The draft is taken only if every word, number, and mark is unchanged, the text's own tags stay where they were, and no tag lands inside other brackets. The text is locked while Claude works, and Undo is offered while the text is still the draft. It is offered only with Claude, or in the all-demo studio.
+  - **What HeyGen will not do, said up front:**
+    - The form points out bracketed text that is not a tag (HeyGen usually leaves it unspoken) and tags side by side.
+    - A professional voice with tags is refused, on the page and by the API.
+    - HeyGen drops the expressiveness boost when a tag other than [pause] is present, so the slider turns off and says why, no boost is sent, and the API refuses one.
+  - **Words kept without tags:** a text's title and the transcript of a clip kept from it leave the tags out, closing only the gap each tag left, so a video's voice will not read them out. A tag HeyGen times as a word is left out of the captions.
+  - **Fixed while testing:** the editor's Saved clips menu grew to fit a long clip name and pushed the page sideways on a phone. It now stays within the panel.
+  - An independent review found nothing blocking. Fixed from its findings:
+    - A draft no longer lands over edits made while Claude worked, and Undo no longer restores an old text over later edits.
+    - Inserting a tag near the limit no longer cuts the end of the text, and a selection is kept.
+    - Text without tags keeps its exact spacing in titles and transcripts.
+    - A draft that replaces the text's own tags, or puts one inside other brackets, is refused.
+    - The demo writer is no longer offered as Claude in a studio that speaks with HeyGen.
+    - Tags timed as words by HeyGen are left out of captions.
+    - Drafts have an instance-wide hourly cap beside the per-account one.

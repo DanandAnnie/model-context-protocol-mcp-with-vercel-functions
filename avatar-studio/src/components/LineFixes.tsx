@@ -1,5 +1,5 @@
 "use client";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { PenLine } from "lucide-react";
 import { Button, Card, ErrorBanner, inputClass } from "@/components/ui";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -26,6 +26,28 @@ export function LineFixes({ video, onFixed, onRefresh }: { video: Video; onFixed
   const [err, setErr] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [note, setNote] = useState("");
+  // The page updates on its own when a fix is rendered (or does not take); a screen reader is told which, as it is told
+  // that the fix was sent.
+  const wasRendering = useRef(rendering);
+  /** When the fix being rendered was made: it is the one that finished only if the video still carries it after. */
+  const renderingAt = useRef(rendering ? video.lineFix?.at : undefined);
+  useEffect(() => {
+    if (rendering && !wasRendering.current) {
+      renderingAt.current = video.lineFix?.at;
+      // A fix started elsewhere (another tab) clears the last announcement, so the next one is heard even if it repeats.
+      setNote((said) => (said.startsWith("Re-rendering") ? said : ""));
+    } else if (!rendering && wasRendering.current) {
+      const fix = video.lineFix;
+      setNote(
+        fix?.error
+          ? `The fix did not take: ${fix.error}. The video is as it was before it.`
+          : fix && fix.at === renderingAt.current
+            ? "The fixed video is ready, at the same link."
+            : "The fix was not made; the video is as it was before it.",
+      );
+    }
+    wasRendering.current = rendering;
+  }, [rendering, video.lineFix]);
   const lines = spokenLines(video);
   const names = video.scenes?.map((s) => s.name) ?? [];
   const changed = read ? Object.entries(words).filter(([n, w]) => w.trim() !== read[Number(n)]?.trim()) : [];
@@ -41,7 +63,9 @@ export function LineFixes({ video, onFixed, onRefresh }: { video: Video; onFixed
     focusAfterRender(() => document.getElementById(`${id}-scene-${spoken[0]?.scene}`));
   }
 
+  /** Closes the words; changed ones are asked about first, so Escape or Cancel does not lose them by accident. */
   function close() {
+    if (changed.length && !window.confirm(`Discard the changed words of ${changed.length === 1 ? "1 scene" : `${changed.length} scenes`}?`)) return;
     setRead(null);
     setErr(null);
     focusAfterRender(() => openButton.current);
@@ -112,7 +136,7 @@ export function LineFixes({ video, onFixed, onRefresh }: { video: Video; onFixed
             e.preventDefault();
             void send();
           }}
-          onKeyDown={(e) => e.key === "Escape" && !sending && !e.nativeEvent.isComposing && close()}
+          onKeyDown={(e) => e.key === "Escape" && !sending && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229 && close()}
         >
           <ol className="space-y-3">
             {lines

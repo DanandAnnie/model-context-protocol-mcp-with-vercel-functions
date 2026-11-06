@@ -506,13 +506,13 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                       </a>
                     </>
                   ) : (
-                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => askConsent(t)} loading={asking === t.id}>
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => askConsent(t)} loading={asking === t.id} disabled={consentSend?.twin === t.id}>
                       {t.consent === "rejected" || t.consentLinkExpired ? "Get a new consent link" : "Get the consent link"}
                     </Button>
                   )}
                   {data?.consentUploads && consentSend?.twin !== t.id && (
                     <label
-                      className={`inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 focus-within:ring-2 focus-within:ring-brand-500 hover:bg-slate-50 ${consentSend ? "pointer-events-none opacity-60" : ""}`}
+                      className={`inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 focus-within:ring-2 focus-within:ring-brand-500 hover:bg-slate-50 ${consentSend || asking === t.id ? "pointer-events-none opacity-60" : ""}`}
                     >
                       <Upload className="h-3.5 w-3.5" aria-hidden /> {t.consent === "rejected" && t.consentVideo ? "Upload another consent video" : "Upload a consent video"}
                       <input
@@ -520,8 +520,9 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                         data-consent-file
                         accept="video/mp4,video/quicktime,video/webm,.mp4,.m4v,.mov,.webm"
                         className="sr-only"
-                        disabled={!!consentSend}
+                        disabled={!!consentSend || asking === t.id}
                         aria-label={`Upload a recorded consent video for ${t.name}`}
+                        aria-describedby={`consent-hint-${t.id}`}
                         onChange={(e) => {
                           const f = e.currentTarget.files?.[0];
                           e.currentTarget.value = "";
@@ -552,7 +553,7 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                 </div>
               )}
               {t.status === "processing" && canEdit === true && data?.consentUploads && !(t.consentVideo && t.consent === "pending") && t.consent !== "accepted" && (
-                <p className="mt-1 text-xs text-slate-500">Or upload a video of the person reading HeyGen&apos;s consent statement to camera, in place of the link (MP4, MOV, or WebM, up to 200 MB).</p>
+                <p id={`consent-hint-${t.id}`} className="mt-1 text-xs text-slate-500">Or upload a video of the person reading HeyGen&apos;s consent statement to camera, in place of the link (MP4, MOV, or WebM, up to 200 MB).</p>
               )}
             </Card>
           ))}

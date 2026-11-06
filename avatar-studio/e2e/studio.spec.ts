@@ -3555,6 +3555,7 @@ test("a recorded consent video is uploaded for a digital twin in place of the co
   await expect(twin.getByTestId("twin-step")).toContainText("waiting for the person's consent");
   await expect(twin.getByRole("textbox", { name: `Consent link for ${name}` })).toBeVisible();
   const input = twin.getByLabel(`Upload a recorded consent video for ${name}`);
+  await expect(input).toHaveAccessibleDescription(/reading HeyGen's consent statement to camera, in place of the link \(MP4, MOV, or WebM, up to 200 MB\)/);
   // A file that is not a video HeyGen takes is refused here, before anything is sent.
   const uploads: string[] = [];
   page.on("request", (r) => r.url().endsWith("/api/twins/uploads") && r.method() === "POST" && uploads.push(r.url()));
@@ -14239,6 +14240,16 @@ test("a spoken line of a finished video is fixed in place: only that scene re-re
   await second.fill("[pause 2s]");
   await expect(send).toHaveAccessibleDescription("Scene 2 needs words to speak, not only pauses.");
   await second.fill("Revenue grew fifteen percent this quarter.");
+  // Escape asks before changed words are dropped; declined, the words and the keyboard stay where they were.
+  let asked = "";
+  page.once("dialog", (d) => {
+    asked = d.message();
+    void d.dismiss();
+  });
+  await second.press("Escape");
+  await expect.poll(() => asked).toBe("Discard the changed words of 1 scene?");
+  await expect(second).toHaveValue("Revenue grew fifteen percent this quarter.");
+  await expect(second).toBeFocused();
   await expect(send).toHaveText("Re-render the scene");
   await expect(send).toHaveAccessibleDescription("1 scene changed.");
   const posted = page.waitForRequest((r) => r.url().endsWith(`/api/videos/${video.id}/lines`) && r.method() === "POST");
@@ -14248,8 +14259,9 @@ test("a spoken line of a finished video is fixed in place: only that scene re-re
   await expect(card.getByRole("heading", { name: "Fix a line" })).toBeFocused();
   await expect(card.getByTestId("line-fix-rendering")).toHaveText("Re-rendering scene 2 with the new words. This page updates when it is ready.");
   expect(page.url()).toContain(`/videos/${video.id}`);
-  // Ready again: the new words are the video's, and the panel offers another fix.
+  // Ready again: the new words are the video's, the panel offers another fix, and a screen reader is told.
   await expect(open).toBeVisible({ timeout: 20_000 });
+  await expect(card.getByRole("status")).toHaveText("The fixed video is ready, at the same link.");
   const stored = (await (await page.request.get(`/api/videos/${video.id}`)).json()).video as { status: string; scenes: Array<{ script: string }>; lineFix: { scenes: number[]; count: number } };
   expect(stored.status).toBe("completed");
   expect(stored.scenes.map((s) => s.script)).toEqual(["Welcome to the quarterly update.", "Revenue grew fifteen percent this quarter."]);

@@ -1,7 +1,7 @@
 /**
  * Keyboard shortcuts for a share page's player, as video sites have taught viewers: K or Space plays and pauses, J and L
  * go back and forward ten seconds, the arrows five, M mutes, C turns captions on and off, F goes fullscreen, and a digit
- * jumps to that tenth of the video. A plain module, so the rules can be tested without a browser.
+ * jumps to that tenth of the video, and < and > go slower and faster. A plain module, so the rules can be tested without a browser.
  */
 
 export type PlayerKeyAction =
@@ -10,7 +10,8 @@ export type PlayerKeyAction =
   | { kind: "seek-to"; fraction: number }
   | { kind: "mute" }
   | { kind: "captions" }
-  | { kind: "fullscreen" };
+  | { kind: "fullscreen" }
+  | { kind: "speed"; step: 1 | -1 };
 
 export interface PlayerKey {
   key: string;
@@ -20,11 +21,13 @@ export interface PlayerKey {
   metaKey?: boolean;
   altKey?: boolean;
   shiftKey?: boolean;
+  /** AltGr held: it reports Ctrl and Alt on Windows, though the character it types is the key, not a shortcut. */
+  altGraph?: boolean;
   /** Held down, so sent again: a seek may repeat, a toggle may not (it would flip back and forth). */
   repeat?: boolean;
   isComposing?: boolean;
   keyCode?: number;
-  /** Whether the single-key shortcuts (letters and digits on their own) are on: they can be turned off, for speech input. */
+  /** Whether the single-key shortcuts (letters, digits, < and > on their own) are on: they can be turned off, for speech input. */
   singleKeys?: boolean;
   /** Where the key was pressed. */
   target: {
@@ -46,7 +49,29 @@ export const PLAYER_SHORTCUTS: ReadonlyArray<{ keys: string; does: string }> = [
   { keys: "C", does: "Captions on or off" },
   { keys: "F", does: "Full screen" },
   { keys: "0–9", does: "Jump to that tenth of the video" },
+  { keys: "< / >", does: "Slower or faster" },
 ];
+
+/** The speeds a viewer can choose, slowest first, as video sites offer them. */
+export const PLAYER_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+
+/** The speed a step slower (-1) or faster (1) than `current` goes to, staying at the ends; from a speed between two, the next one that way. */
+export function stepSpeed(current: number, step: 1 | -1): number {
+  const rate = Number.isFinite(current) && current > 0 ? current : 1;
+  if (step > 0) return PLAYER_SPEEDS.find((s) => s > rate + 1e-9) ?? PLAYER_SPEEDS[PLAYER_SPEEDS.length - 1];
+  return [...PLAYER_SPEEDS].reverse().find((s) => s < rate - 1e-9) ?? PLAYER_SPEEDS[0];
+}
+
+/** A speed as the menu and the announcement say it: "1.25×", "Normal" for 1. */
+export function speedLabel(rate: number): string {
+  return Math.abs(rate - 1) < 1e-9 ? "Normal" : `${Number(rate.toFixed(2))}×`;
+}
+
+/** A speed kept from an earlier visit, if it is one of the speeds offered. */
+export function storedSpeed(raw: string | null): number | null {
+  const n = raw === null ? Number.NaN : Number(raw);
+  return PLAYER_SPEEDS.some((s) => s === n) ? n : null;
+}
 
 /** A printable character a US keyboard types, which the key itself names when the layout has one. */
 const LATIN = /^[\x20-\x7e]$/;
@@ -67,12 +92,35 @@ function digitOf(e: PlayerKey): number | null {
 }
 
 /**
+ * "<" and ">" as a step slower or faster: by the character, however the layout types it (Shift+, and Shift+. on a US
+ * keyboard, a key of its own on many European ones, AltGr on some), or, on a layout whose Shift+, and Shift+. type no
+ * Latin character (Russian Б and Ю), by those keys' places.
+ */
+function speedOf(e: PlayerKey): PlayerKeyAction | null {
+  const ch =
+    e.key === "<" || e.key === ">"
+      ? e.key
+      : e.shiftKey && e.key.length === 1 && !LATIN.test(e.key) && (e.code === "Comma" || e.code === "Period")
+        ? e.code === "Period"
+          ? ">"
+          : "<"
+        : null;
+  return ch ? { kind: "speed", step: ch === ">" ? 1 : -1 } : null;
+}
+
+/**
  * What a key pressed on the page does to the player, or nothing: keys typed into a field or while composing text, keys
  * with Ctrl, Cmd, or Alt (the browser's and the system's), Space where the focused button or the player itself answers
- * it, the letter and digit shortcuts while they are turned off, and a held key's repeats of a toggle.
+ * it, the letter, digit, and < > shortcuts while they are turned off, and a held key's repeats of a toggle.
  */
 export function playerKeyAction(e: PlayerKey): PlayerKeyAction | null {
-  if (e.ctrlKey || e.metaKey || e.altKey || e.target.editable || e.isComposing || e.keyCode === 229) return null;
+  if (e.target.editable || e.isComposing || e.keyCode === 229 || e.metaKey) return null;
+  // AltGr types < and > on some layouts (Czech AltGr+, and AltGr+.): those two only, and only while the switch is on.
+  if (e.altGraph) {
+    const speed = speedOf(e);
+    return speed && e.singleKeys !== false ? speed : null;
+  }
+  if (e.ctrlKey || e.altKey) return null;
   const toggle = (action: PlayerKeyAction) => (e.repeat ? null : action);
   switch (e.key) {
     case " ":
@@ -85,6 +133,8 @@ export function playerKeyAction(e: PlayerKey): PlayerKeyAction | null {
       return { kind: "seek-by", seconds: 5 };
   }
   if (e.singleKeys === false) return null;
+  const speed = speedOf(e);
+  if (speed) return speed;
   const digit = digitOf(e);
   if (digit !== null) return { kind: "seek-to", fraction: digit / 10 };
   switch (letterOf(e)) {

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { PLAYER_SHORTCUTS, playerKeyAction, seekTarget, toggleCaptions, type PlayerKey } from "../share-keys";
+import { PLAYER_SHORTCUTS, PLAYER_SPEEDS, playerKeyAction, seekTarget, speedLabel, stepSpeed, storedSpeed, toggleCaptions, type PlayerKey } from "../share-keys";
 
 const page = { editable: false, player: false, control: false };
 const press = (key: string, more: Partial<PlayerKey> = {}) => playerKeyAction({ key, target: page, ...more });
@@ -61,7 +61,7 @@ describe("playerKeyAction", () => {
   });
 
   it("lists the shortcuts it answers, each once", () => {
-    assert.deepEqual(PLAYER_SHORTCUTS.map((s) => s.keys), ["K or Space", "J / L", "← / →", "M", "C", "F", "0–9"]);
+    assert.deepEqual(PLAYER_SHORTCUTS.map((s) => s.keys), ["K or Space", "J / L", "← / →", "M", "C", "F", "0–9", "< / >"]);
   });
 });
 
@@ -94,5 +94,42 @@ describe("toggleCaptions", () => {
     assert.equal(toggleCaptions(tracks, { kind: "subtitles", mode: "hidden" }).now, "on");
     assert.equal(en.mode, "showing", "a track no longer there falls back to the first");
     assert.deepEqual(toggleCaptions([chapters]), { now: "none" });
+  });
+});
+
+describe("playback speed", () => {
+  it("< and > step slower and faster, by the character, under the single-key switch", () => {
+    assert.deepEqual(press(">", { shiftKey: true, code: "Period" }), { kind: "speed", step: 1 });
+    assert.deepEqual(press("<", { shiftKey: true, code: "Comma" }), { kind: "speed", step: -1 });
+    assert.deepEqual(press("<", { code: "IntlBackslash" }), { kind: "speed", step: -1 }, "a European keyboard's own < key");
+    assert.equal(press(">", { singleKeys: false }), null);
+    assert.equal(press(">", { target: { editable: true, player: false, control: false } }), null);
+    assert.deepEqual(press(">", { repeat: true }), { kind: "speed", step: 1 }, "a held key keeps stepping");
+    assert.deepEqual(press("<", { ctrlKey: true, altKey: true, altGraph: true, code: "Comma" }), { kind: "speed", step: -1 }, "Czech AltGr+,");
+    assert.equal(press("<", { ctrlKey: true, altKey: true, altGraph: true, singleKeys: false }), null);
+    assert.equal(press("л", { ctrlKey: true, altKey: true, altGraph: true, code: "KeyK" }), null, "AltGr answers only < and >");
+    assert.equal(press("<", { ctrlKey: true }), null, "Ctrl without AltGr is the browser's");
+    assert.deepEqual(press("Б", { shiftKey: true, code: "Comma" }), { kind: "speed", step: -1 }, "Russian Shift+, types Б");
+    assert.deepEqual(press("Ю", { shiftKey: true, code: "Period" }), { kind: "speed", step: 1 });
+    assert.equal(press("б", { code: "Comma" }), null, "unshifted, it is no shortcut");
+    assert.equal(press(";", { shiftKey: true, code: "Comma" }), null, "a Latin character there is that character");
+  });
+
+  it("steps through the speeds offered, staying at the ends", () => {
+    assert.equal(stepSpeed(1, 1), 1.25);
+    assert.equal(stepSpeed(1, -1), 0.75);
+    assert.equal(stepSpeed(2, 1), 2);
+    assert.equal(stepSpeed(0.5, -1), 0.5);
+    assert.equal(stepSpeed(1.1, 1), 1.25, "from between two, the next one that way");
+    assert.equal(stepSpeed(1.1, -1), 1);
+    assert.equal(stepSpeed(Number.NaN, 1), 1.25);
+    assert.equal(stepSpeed(3, -1), 2);
+  });
+
+  it("names a speed, and keeps only a speed it offers", () => {
+    assert.deepEqual(PLAYER_SPEEDS.map(speedLabel), ["0.5×", "0.75×", "Normal", "1.25×", "1.5×", "1.75×", "2×"]);
+    assert.equal(storedSpeed("1.5"), 1.5);
+    assert.equal(storedSpeed("1"), 1);
+    for (const bad of [null, "", "abc", "16", "0", "-1", "1.3"]) assert.equal(storedSpeed(bad), null, String(bad));
   });
 });

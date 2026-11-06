@@ -10661,7 +10661,7 @@ test("a share page's player answers the video-site keyboard shortcuts, listed un
   const list = page.getByTestId("share-shortcuts");
   await list.getByText("Keyboard shortcuts").click();
   await expect(list.getByText("Back or forward 10 seconds")).toBeVisible();
-  const singleKeys = list.getByRole("checkbox", { name: /Letter and number shortcuts/ });
+  const singleKeys = list.getByRole("checkbox", { name: /Letter, number, and < > shortcuts/ });
   await expect(singleKeys).toBeChecked();
   await singleKeys.uncheck();
   await page.locator("body").press("l");
@@ -10672,8 +10672,8 @@ test("a share page's player answers the video-site keyboard shortcuts, listed un
   // Kept for this browser, as the studio's own switch is.
   await page.reload();
   await page.getByTestId("share-shortcuts").getByText("Keyboard shortcuts").click();
-  await expect(page.getByTestId("share-shortcuts").getByRole("checkbox", { name: /Letter and number shortcuts/ })).not.toBeChecked();
-  await page.getByTestId("share-shortcuts").getByRole("checkbox", { name: /Letter and number shortcuts/ }).check();
+  await expect(page.getByTestId("share-shortcuts").getByRole("checkbox", { name: /Letter, number, and < > shortcuts/ })).not.toBeChecked();
+  await page.getByTestId("share-shortcuts").getByRole("checkbox", { name: /Letter, number, and < > shortcuts/ }).check();
   // An embed answers them too, without the list.
   await page.goto(`/share/${v.id}?embed=1`);
   await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
@@ -10681,6 +10681,61 @@ test("a share page's player answers the video-site keyboard shortcuts, listed un
   await page.locator("body").press("l");
   await expect.poll(at).toBeCloseTo(Math.min(11, duration), 1);
   await expect(page.getByTestId("share-shortcuts")).toHaveCount(0);
+});
+
+test("a share page plays faster or slower, from a Speed menu or < and >, and the browser keeps the speed", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Speed ${Date.now().toString(36)}`);
+  await expect.poll(async () => ((await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");
+  await page.goto(`/share/${v.id}`);
+  const player = page.getByTestId("share-player");
+  const rate = () => player.evaluate((el: HTMLVideoElement) => el.playbackRate);
+  const speed = page.getByRole("combobox", { name: "Speed" });
+  // Acted on once the page's script has taken over (before, a choice could be lost to the page loading).
+  await expect(speed).toHaveAttribute("data-ready", "true");
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect(speed).toHaveValue("1");
+  await expect(speed.locator("option:checked")).toHaveText("Normal");
+  await speed.selectOption("1.5");
+  await expect.poll(rate).toBe(1.5);
+  // Kept for the next visit.
+  await page.reload();
+  await expect(speed).toHaveAttribute("data-ready", "true");
+  await expect.poll(rate).toBe(1.5);
+  await expect(speed).toHaveValue("1.5");
+  // > and < step through the speeds, announced, and the menu follows.
+  const status = page.getByTestId("share-keys-status");
+  await page.locator("body").press(">");
+  await expect.poll(rate).toBe(1.75);
+  await expect(status).toHaveText("Speed: 1.75×.");
+  await expect(speed).toHaveValue("1.75");
+  await page.keyboard.press("<");
+  await page.keyboard.press("<");
+  await expect.poll(rate).toBe(1.25);
+  await expect(status).toHaveText("Speed: 1.25×.");
+  // A rate set some other way (the player's own menu) is shown as it is.
+  await player.evaluate((el: HTMLVideoElement) => (el.playbackRate = 0.25));
+  await expect(speed).toHaveValue("0.25");
+  await expect(speed.locator("option:checked")).toHaveText("0.25×");
+  await expect(speed.locator("option").first()).toHaveText("0.25×", { useInnerText: true });
+  expect(await page.evaluate(() => localStorage.getItem("avatar-studio:share-speed"))).toBeNull();
+  // With the single-key shortcuts off, < and > are left alone too.
+  await page.evaluate(() => localStorage.setItem("avatar-studio:single-key-shortcuts", "off"));
+  await page.locator("body").press(">");
+  await page.waitForTimeout(200);
+  expect(await rate()).toBe(0.25);
+  await page.evaluate(() => localStorage.removeItem("avatar-studio:single-key-shortcuts"));
+  // Back to normal, which nothing needs to keep.
+  await speed.selectOption("1");
+  await expect.poll(rate).toBe(1);
+  expect(await page.evaluate(() => localStorage.getItem("avatar-studio:share-speed"))).toBeNull();
+  await page.reload();
+  await expect.poll(rate).toBe(1);
+  // An embed answers > too, without the menu.
+  await page.goto(`/share/${v.id}?embed=1`);
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect(page.getByRole("combobox", { name: "Speed" })).toHaveCount(0);
+  await page.locator("body").press(">");
+  await expect.poll(rate).toBe(1.25);
 });
 
 test("a share page copies a link at the moment the viewer is watching", async ({ page }) => {

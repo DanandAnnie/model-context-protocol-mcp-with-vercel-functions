@@ -1,20 +1,22 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { PLAYER_SHORTCUTS, playerKeyAction, seekTarget, toggleCaptions } from "@/lib/share-keys";
+import { PLAYER_SHORTCUTS, playerKeyAction, seekTarget, speedLabel, stepSpeed, toggleCaptions } from "@/lib/share-keys";
 import { SINGLE_KEY_SHORTCUTS_KEY, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { SHARE_TRACK_PREFIX } from "@/lib/share-player";
 
 type WebkitVideo = HTMLVideoElement & { webkitDisplayingFullscreen?: boolean; webkitEnterFullscreen?: () => void; webkitExitFullscreen?: () => void };
 
 /**
- * The share player's keyboard shortcuts (K, J, L, the arrows, M, C, F, and the digits), answered anywhere on the page or
- * in an embed's frame, and, on the page, a list of them under the player with a switch for the letter and digit ones
+ * The share player's keyboard shortcuts (K, J, L, the arrows, M, C, F, the digits, and < and >), answered anywhere on the page or
+ * in an embed's frame, and, on the page, a list of them under the player with a switch for the letter, digit, and < > ones
  * (the same one the studio keeps, for speech input). Muting and captions are announced, since neither shows on a
  * player whose controls are hidden.
  */
 export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerId: string; list?: boolean; burnedIn?: boolean }) {
   const [said, setSaid] = useState("");
   const [singleKeys, setSingleKeys] = useState(true);
+  // Set once the keys are answered, for anything waiting on the page to be ready (a test, say).
+  const [ready, setReady] = useState(false);
   // The captions track last shown (by C or the player's own menu), so C brings back that one (a translation), not the first.
   const lastCaptions = useRef<TextTrack | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,6 +56,7 @@ export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerI
         metaKey: e.metaKey,
         altKey: e.altKey,
         shiftKey: e.shiftKey,
+        altGraph: e.getModifierState?.("AltGraph") ?? false,
         repeat: e.repeat,
         isComposing: e.isComposing,
         keyCode: e.keyCode,
@@ -95,6 +98,13 @@ export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerI
           );
           return;
         }
+        case "speed": {
+          const next = stepSpeed(el.playbackRate, action.step);
+          el.defaultPlaybackRate = next;
+          el.playbackRate = next;
+          say(`Speed: ${speedLabel(next)}.`);
+          return;
+        }
         case "fullscreen":
           if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
           else if (el.webkitDisplayingFullscreen) el.webkitExitFullscreen?.();
@@ -105,6 +115,7 @@ export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerI
       }
     };
     document.addEventListener("keydown", onKey);
+    setReady(true);
     return () => {
       document.removeEventListener("keydown", onKey);
       if (timer.current) clearTimeout(timer.current);
@@ -113,7 +124,7 @@ export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerI
 
   return (
     <>
-      <p role="status" className="sr-only" data-testid="share-keys-status">
+      <p role="status" className="sr-only" data-testid="share-keys-status" data-ready={ready || undefined}>
         {said}
       </p>
       {list && (
@@ -146,7 +157,7 @@ export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerI
               }}
             />
             <span>
-              Letter and number shortcuts
+              Letter, number, and &lt; &gt; shortcuts
               <span className="block text-xs text-slate-500">Turn them off if you use speech input or they get in your way; Space and the arrows still work. This browser remembers.</span>
             </span>
           </label>

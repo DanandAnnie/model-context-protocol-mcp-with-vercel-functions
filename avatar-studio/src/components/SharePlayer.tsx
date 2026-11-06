@@ -153,8 +153,9 @@ export function SharePlayer({
         // Only playback reaches a point: a link's start time, or a seek while paused, moves the playhead without it.
         if (el.paused || !Number.isFinite(el.duration) || el.duration <= 0) return;
         const pct = (el.currentTime / el.duration) * 100;
-        // A looping video never ends, so the last half second counts as the end.
-        const reached = loop && el.duration - el.currentTime < 0.5 ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+        // A looping video never ends, so the last half second counts as the end (more of it when played faster, so a
+        // time update still lands in it).
+        const reached = loop && el.duration - el.currentTime < 0.5 * Math.max(1, el.playbackRate) ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
         if (reached) report(reached);
       }}
       onLoadedMetadata={(e) => startAt(e.currentTarget)}

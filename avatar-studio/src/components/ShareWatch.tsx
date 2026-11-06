@@ -9,6 +9,7 @@ import { ShareTranscript } from "./ShareTranscript";
 import { ShareChapters } from "./ShareChapters";
 import { ShareKeys } from "./ShareKeys";
 import { ShareMoment } from "./ShareMoment";
+import { ShareSpeed } from "./ShareSpeed";
 import { ViewBeacon } from "./ViewBeacon";
 
 /** A share page's player, button, download link, description, and transcript, from what the server let this viewer see. */
@@ -80,6 +81,7 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
               Download video
             </a>
           )}
+          {moment && <ShareSpeed playerId={SHARE_PLAYER_ID} />}
           {moment && <ShareMoment playerId={SHARE_PLAYER_ID} shareUrl={body.shareUrl} />}
         </p>
       )}

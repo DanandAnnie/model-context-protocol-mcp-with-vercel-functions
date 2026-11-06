@@ -1741,3 +1741,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A unit test's title now matches what it checks.
 - Docs: brand pronunciations and captions HeyGen burns in (`c6df179`). The API reference said the captions of a video with brand kit pronunciations always keep the real spelling. Captions HeyGen burns into the video are made from the script it is sent, which has the spoken spelling ("Nye-er" for "Nair"). The reference now says so, and that a video with a caption style is captioned from the stored script by the share page's subtitle track instead.
   - HeyGen's brand glossary was tried for these renders, which keeps the spelling in its captions, and left out: the workspace has one glossary shared by every account of the studio, and HeyGen only adds to it, so one account's pronunciations, or ones it has since removed, would reach every other account's videos.
+- 5:4 landscape feed videos (`d71fc4a`). HeyGen's v3 video API renders `aspect_ratio: "5:4"`, the wide feed-post frame. With 4:5 already offered, 5:4 was the one shape HeyGen renders that the studio did not.
+  - **Where to choose it:** 5:4 is a fifth shape everywhere a video's shape is chosen: the editor's Aspect ratio picker, the Batch page, a saved template, the brand kit's default, and Make other sizes. It renders at 1350×1080 (900×720 at 720p, 2700×2160 in 4K).
+  - **Playback:** the editor stage, the video page, the share page, and the embed player play it in its own frame. oEmbed and the Embed snippet size it 5:4, and the library's Landscape shape filter includes it.
+  - **Imports:** a PDF deck of slightly wide pages (a 5:4 feed post) becomes a 5:4 video. 4:3 and 16:9 decks stay 16:9, the usual video frame.
+  - **Not offered for music:** HeyGen's HyperFrames renders a music mix in 16:9, 9:16, or 1:1 only. A 5:4 video is left off the Music page, and the API refuses it with what to do: make a 16:9 or 1:1 size first.
+  - An independent review found nothing blocking. From its optional findings:
+    - The API reference gives the 5:4 sizes in the quality, email preview, and oEmbed entries, and says the music mix refuses a 5:4 video too.
+    - The end-to-end test checks that the Music page leaves a 5:4 video out, and the unit test checks the PDF cut-offs, US Letter landscape staying 16:9 among them.

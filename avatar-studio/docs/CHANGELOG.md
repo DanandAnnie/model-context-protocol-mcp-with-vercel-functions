@@ -1920,3 +1920,13 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The card checked an end past the video's length before trimming it to the length. It now checks the section as it will play.
     - Each time field now has its own message beside it and is marked invalid when wrong, rather than sharing one live message.
   - **Tests.** Unit tests cover the end time, the section link, and the clock times (the share page reads back what the card writes), and oEmbed's section embed. An e2e test makes a section link on the video page, plays it to its end on the share page, uses both buttons, and checks the oEmbed iframe and an end that is no end.
+- Embed a section (`2294f58`). The video page's Share a section card copies the section as embed code as well as a link, so the one minute that matters can be placed on a website.
+  - **The snippet.** Copy embed code copies an iframe of the embed player (`/share/:id?embed=1&t=…&end=…`). It plays the section and pauses at its end as a section link does.
+    - It is sized as the video's other embeds for its shape, with fullscreen and picture-in-picture allowed.
+    - It is named after the video and the section ("Tour (1:05 to 1:30)"), its address and name HTML-escaped.
+  - **The status line.** It says which was copied, the link or the embed code. It clears when a time changes, so it never speaks for a section that was not copied. Where the browser refuses the clipboard, the code is shown in a box to copy from.
+  - **Review.** An independent review found no blocking issues and three minor ones, all fixed:
+    - A copy note came back when the times were put back to the copied ones. Any change to a time now clears it.
+    - A refused copy pointed at a field or box no longer shown. That note now shows only while the field or box does.
+    - The e2e check could pass with no link at all. It now keeps the section valid while the times change.
+  - **Tests.** A unit test covers the snippet (size by shape, escaping, a section from the start, three decimals at most) and checks that the share page reads its address back as the same section. The e2e test copies the embed code and checks it, and that the note clears when a time changes.

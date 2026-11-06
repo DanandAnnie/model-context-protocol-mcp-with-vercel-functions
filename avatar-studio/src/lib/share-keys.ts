@@ -35,7 +35,7 @@ export interface PlayerKey {
     editable: boolean;
     /** The player itself, whose own controls answer Space. */
     player: boolean;
-    /** A button or link, which Space and Enter press. */
+    /** A button, link, checkbox, or other control, which Space and Enter press or tick. */
     control: boolean;
   };
 }
@@ -110,7 +110,7 @@ function speedOf(e: PlayerKey): PlayerKeyAction | null {
 
 /**
  * What a key pressed on the page does to the player, or nothing: keys typed into a field or while composing text, keys
- * with Ctrl, Cmd, or Alt (the browser's and the system's), Space where the focused button or the player itself answers
+ * with Ctrl, Cmd, or Alt (the browser's and the system's), Space where the focused control (a button, link, checkbox, or the like) or the player itself answers
  * it, the letter, digit, and < > shortcuts while they are turned off, and a held key's repeats of a toggle.
  */
 export function playerKeyAction(e: PlayerKey): PlayerKeyAction | null {

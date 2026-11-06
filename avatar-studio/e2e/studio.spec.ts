@@ -10663,6 +10663,13 @@ test("a share page's player answers the video-site keyboard shortcuts, listed un
   await expect(list.getByText("Back or forward 10 seconds")).toBeVisible();
   const singleKeys = list.getByRole("checkbox", { name: /Letter, number, and < > shortcuts/ });
   await expect(singleKeys).toBeChecked();
+  // Space on the switch ticks it, and does not play the video.
+  await singleKeys.focus();
+  await page.keyboard.press(" ");
+  await expect(singleKeys).not.toBeChecked();
+  expect(await paused()).toBe(true);
+  await page.keyboard.press(" ");
+  await expect(singleKeys).toBeChecked();
   await singleKeys.uncheck();
   await page.locator("body").press("l");
   await page.waitForTimeout(200);

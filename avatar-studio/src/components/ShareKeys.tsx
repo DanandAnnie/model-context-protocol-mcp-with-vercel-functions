@@ -4,6 +4,9 @@ import { PLAYER_SHORTCUTS, playerKeyAction, seekTarget, speedLabel, stepSpeed, t
 import { SINGLE_KEY_SHORTCUTS_KEY, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { SHARE_TRACK_PREFIX } from "@/lib/share-player";
 
+/** The controls whose own Space (and Enter) they keep: pressed, ticked, or opened, rather than playing the video. */
+const CONTROLS = "button, a[href], summary, label, input, [role='button'], [role='checkbox'], [role='switch'], [role='radio'], [role='tab'], [role='option'], [role='menuitem']";
+
 type WebkitVideo = HTMLVideoElement & { webkitDisplayingFullscreen?: boolean; webkitEnterFullscreen?: () => void; webkitExitFullscreen?: () => void };
 
 /**
@@ -65,7 +68,9 @@ export function ShareKeys({ playerId, list = true, burnedIn = false }: { playerI
         target: {
           editable: typesText(t as (HTMLElement & { type?: string }) | null),
           player: t === el,
-          control: !!t?.closest("button, a[href], summary, [role='button']"),
+          // Every control that Space presses or ticks: a button, a link, a disclosure, a checkbox or radio. (A label takes
+          // no focus itself; it is listed in case one is ever made focusable.)
+          control: !!t?.closest(CONTROLS),
         },
       });
       if (!action) return;

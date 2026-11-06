@@ -1739,3 +1739,5 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A 4K batch from a template with an engine says the template's engine is not sent, rather than contradicting itself.
     - The video page's 4K engine row says when no scene shows the presenter.
     - A unit test's title now matches what it checks.
+- Docs: brand pronunciations and captions HeyGen burns in (`c6df179`). The API reference said the captions of a video with brand kit pronunciations always keep the real spelling. Captions HeyGen burns into the video are made from the script it is sent, which has the spoken spelling ("Nye-er" for "Nair"). The reference now says so, and that a video with a caption style is captioned from the stored script by the share page's subtitle track instead.
+  - HeyGen's brand glossary was tried for these renders, which keeps the spelling in its captions, and left out: the workspace has one glossary shared by every account of the studio, and HeyGen only adds to it, so one account's pronunciations, or ones it has since removed, would reach every other account's videos.

@@ -2015,3 +2015,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - the labels, and which kept values are honoured.
 
     The e2e test chooses a speed, checks it is kept across a reload, and steps with `>` and `<` and their announcements. It also checks that a rate the menu does not offer is shown and not kept, that the switch turns `<` and `>` off, that Normal keeps nothing, and that an embed answers `>` without the menu.
+- QA pass 36: copy link at current time, keyboard shortcuts, and playback speed in a browser (`920e7ee`). The three latest share-page features were walked in a real browser against the demo build, at desktop and phone widths (375 and 320 pixels), by keyboard and through the accessibility tree:
+  - the action row, with the call to action, Download, Speed, and "Copy link at" together;
+  - the tab order;
+  - the Speed menu by keyboard, and that the shortcuts leave it alone;
+  - the shortcuts list and its switch;
+  - the shortcuts at a section link's end.
+
+  The row wrapped cleanly with no sideways scroll at either phone width, the list read correctly, and no console or HTTP errors appeared. Found and fixed:
+  - **Space on the shortcuts switch played the video.** The checkbox that turns the letter, number, and `<` `>` shortcuts off counted as neither a text field nor a control. Space on it started the video and left the box as it was. Space now belongs to every control that presses or ticks with it: buttons, links, disclosures, checkboxes, radios, and their ARIA kin.
+  - **Review.** An independent review of the fix found nothing blocking and confirmed that only Space consults the control test. It checked every focusable thing on the page and the embed, and found that the e2e step fails without the fix. Its comment nits were taken.
+  - **Tests.** The keyboard shortcuts e2e test presses Space on the switch twice. It checks that the switch is unticked and then ticked again, and that the video stays paused.

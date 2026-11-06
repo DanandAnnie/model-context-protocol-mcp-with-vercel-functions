@@ -1787,3 +1787,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The latest start a video allows is named in whole seconds rounded down, so the moment named is one that is taken.
     - The page refuses a part past the first 4 hours itself, and the API's messages name the part's start or end instead of a field name.
     - `null` is taken as an option left out, as it already was for the part's start and end.
+- Lip sync captions and frame rate (`ce4217e`). HeyGen makes captions for every lip sync and lets a lip sync's frame timing be chosen; the Lip sync page and API now offer both.
+  - **Captions:** each finished lip sync's card has Captions: SRT and WebVTT, and `GET /api/lipsyncs/:id/captions` serves them (WebVTT with `?format=vtt`), named after the lip sync. They are HeyGen's own, timed to the lip-synced video (the SRT at `caption_url` on `GET /v3/lipsyncs/:id`). The signed link is asked for and read on every download, and nothing is stored. A lip sync still syncing, one that failed, and one HeyGen has no captions for are each said plainly. A failed download is said on the page rather than saved as a file. The demo renderer gives three lines over its sample video.
+  - **Frame rate:** a Frame rate select under Options: constant (what most editing software expects), variable, or the footage's own timing, sent to HeyGen as `fps_mode` `cfr`, `vfr`, or `passthrough`. Left as it is, HeyGen chooses. The choice is kept with the job, listed on its card, and part of what a repeated `Idempotency-Key` must match.
+  - HeyGen's `enable_caption` is left out: HeyGen now ignores it, since captions are always made.
+  - An independent review found nothing blocking. Fixed from its findings:
+    - HeyGen not answering, a timeout, or a dropped connection is now a `502` to try again, and HeyGen's own message (which names its job id) stays on the server.
+    - Caption downloads are counted only once HeyGen is about to be asked, the account's own allowance first, so refused requests never use up the allowance every account shares.
+    - The docs now say that a blank value means "left out" only for the frame rate.

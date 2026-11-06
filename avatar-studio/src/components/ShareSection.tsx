@@ -138,7 +138,7 @@ export function ShareSection({
       </p>
       {link && (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input readOnly className={`${inputClass} min-w-0 flex-1 py-1 text-xs`} value={link} aria-label="Section link" onFocus={(e) => e.currentTarget.select()} data-testid="share-section-link" />
+          <input readOnly className={`${inputClass} min-w-0 grow basis-56 py-1 text-xs`} value={link} aria-label="Section link" onFocus={(e) => e.currentTarget.select()} data-testid="share-section-link" />
           <button
             type="button"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50"

@@ -10502,6 +10502,11 @@ test("a share link plays only a section: made on the video page, it pauses at it
   await expect(end).toHaveAccessibleDescription("End the section at least a second after it starts.");
   await end.fill("2:00:00");
   await expect(end).toHaveAccessibleDescription(/^The video is \d+:\d\d long; end the section by then\.$/);
+  // Minutes past an hour, as a long video's description writes them, are a time too: here past this video's end.
+  await end.fill("x");
+  await expect(end).toHaveAccessibleDescription("Write the end as a time, like 1:30 or 90.");
+  await end.fill("75:30");
+  await expect(end).toHaveAccessibleDescription(/^The video is \d+:\d\d long; end the section by then\.$/);
   // The player's time fills a field: here the start, from where the page's player stands.
   await page.locator("video").first().evaluate((el: HTMLVideoElement) => (el.currentTime = 1));
   await card.getByRole("button", { name: "Use the player's time for the section start" }).click();
@@ -10510,6 +10515,11 @@ test("a share link plays only a section: made on the video page, it pauses at it
   await expect(end).toHaveAccessibleDescription("Plays 0:01 to 0:03.");
   const link = card.getByRole("textbox", { name: "Section link" });
   await expect(link).toHaveValue(new RegExp(`/share/${v.id}\\?t=1&end=3$`));
+  // At phone width the link keeps a readable width, the copy buttons wrapping under it, and the page does not scroll sideways.
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect((await link.boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(200);
+  expect(await page.locator("main").evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await card.getByRole("button", { name: "Copy link" }).click();
   await expect(card.getByRole("status")).toHaveText("Section link copied.");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await link.inputValue());
@@ -10541,9 +10551,12 @@ test("a share link plays only a section: made on the video page, it pauses at it
   // Watch it again goes back to the section's start; Keep watching plays on past its end.
   await over.getByRole("button", { name: "Watch it again" }).click();
   await expect(over).toHaveCount(0);
+  // The buttons go with the note, so the focus moves to the player, not to the page.
+  await expect(player).toBeFocused();
   await expect(over).toBeVisible({ timeout: 10_000 });
   await over.getByRole("button", { name: "Keep watching" }).click();
   await expect(over).toHaveCount(0);
+  await expect(player).toBeFocused();
   await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime), { timeout: 10_000 }).toBeGreaterThan(3.8);
   await player.evaluate((el: HTMLVideoElement) => el.pause());
   // The embed plays the section too, and so does the oEmbed iframe for the section link; an end that is not after the

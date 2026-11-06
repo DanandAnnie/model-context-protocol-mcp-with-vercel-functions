@@ -18,10 +18,14 @@ describe("parseStartTime", () => {
     assert.equal(parseStartTime("01:02:03"), 3723);
     assert.equal(parseStartTime(" 45 "), 45);
     assert.equal(parseStartTime("1:05.5"), 65.5, "a clock to the tenth, as the section fields write it");
+    assert.equal(parseStartTime("90:00"), 5400, "minutes past an hour, as a long video's description writes them");
+    assert.equal(parseStartTime("75:30.5"), 4530.5);
+    assert.equal(parseStartTime("60:00"), 3600);
+    assert.equal(parseStartTime("1439:59.999"), 86399.999, "just under a day");
   });
 
   it("is no start for anything else: zero, a day or more, a repeated t, or a malformed clock", () => {
-    for (const bad of [undefined, null, "", "0", "0s", "-5", "1.2345", "abc", "1:75", "1:60", "1:5", "90:00", "1m30", "1h30", "1e3", "0x10", "s", "h", "1:2:3:4", "86400", "24h", "24:00:00", ["1", "2"], 5]) {
+    for (const bad of [undefined, null, "", "0", "0s", "-5", "1.2345", "abc", "1:75", "1:60", "1:5", "1:90:00", "1440:00", ":30", "75:3", "75:30.1234", "1:2:3", "0:75:30", "1::30", "30:", "1m30", "1h30", "1e3", "0x10", "s", "h", "1:2:3:4", "86400", "24h", "24:00:00", ["1", "2"], 5]) {
       assert.equal(parseStartTime(bad), undefined, JSON.stringify(bad));
     }
   });

@@ -121,6 +121,15 @@ export function SharePlayer({
     const webkit = el as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean; webkitExitFullscreen?: () => void };
     if (webkit.webkitDisplayingFullscreen) webkit.webkitExitFullscreen?.();
   };
+  const overNote = useRef<HTMLDivElement>(null);
+  /**
+   * Takes the end-of-section note away (playback went on, from its buttons or any other control). A keyboard on one of
+   * its buttons would be left on the page as they go, so it moves to the player, without scrolling; a focus elsewhere stays.
+   */
+  const leaveSectionNote = () => {
+    if (overNote.current?.contains(document.activeElement)) videoRef.current?.focus({ preventScroll: true });
+    setSectionOver(false);
+  };
   return (
     <>
     <video
@@ -153,7 +162,7 @@ export function SharePlayer({
         last.current = null;
         lastPlayed.current = null;
       }}
-      onPlay={() => setSectionOver(false)}
+      onPlay={leaveSectionNote}
       onEnded={(e) => {
         report(100);
         // A section that runs to the video's own end loops from the section's start.
@@ -181,7 +190,7 @@ export function SharePlayer({
       </p>
     )}
     {sectionOver && (
-      <div className="absolute inset-x-0 bottom-16 z-20 mx-auto flex w-fit max-w-[90%] flex-wrap items-center justify-center gap-2 rounded-lg bg-black/80 px-3 py-2 text-sm text-white" data-testid="share-section-over">
+      <div className="absolute inset-x-0 bottom-16 z-20 mx-auto flex w-fit max-w-[90%] flex-wrap items-center justify-center gap-2 rounded-lg bg-black/80 px-3 py-2 text-sm text-white" data-testid="share-section-over" ref={overNote}>
         <span>End of the shared section.</span>
         <button
           type="button"
@@ -200,7 +209,7 @@ export function SharePlayer({
           className="rounded-md border border-white/60 px-2.5 py-1 text-xs font-medium text-white hover:bg-white/10"
           onClick={() => {
             setStopAt(undefined);
-            setSectionOver(false);
+            leaveSectionNote();
             void videoRef.current?.play().catch(() => undefined);
           }}
         >

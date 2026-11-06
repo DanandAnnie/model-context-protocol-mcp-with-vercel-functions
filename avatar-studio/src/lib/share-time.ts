@@ -83,10 +83,11 @@ function parseTime(raw: unknown): number | undefined {
   let sec: number | undefined;
   const plain = /^(\d+(?:\.\d{1,3})?)s?$/.exec(text);
   const units = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(text);
-  const clock = /^(?:(\d+):)?([0-5]?\d):([0-5]\d(?:\.\d{1,3})?)$/.exec(text);
+  // h:mm:ss, or m:ss with any number of minutes (a long video's 75:30, as a description writes it).
+  const clock = /^(?:(\d+):([0-5]?\d)|(\d+)):([0-5]\d(?:\.\d{1,3})?)$/.exec(text);
   if (plain) sec = Number(plain[1]);
   else if (units && (units[1] || units[2] || units[3])) sec = Number(units[1] ?? 0) * 3600 + Number(units[2] ?? 0) * 60 + Number(units[3] ?? 0);
-  else if (clock) sec = Number(clock[1] ?? 0) * 3600 + Number(clock[2]) * 60 + Number(clock[3]);
+  else if (clock) sec = Number(clock[1] ?? 0) * 3600 + Number(clock[2] ?? clock[3]) * 60 + Number(clock[4]);
   return sec !== undefined && sec > 0 && sec < MAX_START_SEC ? sec : undefined;
 }
 

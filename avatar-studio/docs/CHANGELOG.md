@@ -1867,3 +1867,27 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Key reuse after a failed fix: each fix now has its own key.
     - The library carrying set-aside data.
   - **Tests.** Unit tests cover the demo and HeyGen paths, the races, stale and fresh completions, failure, and lost answers. An e2e test covers the card.
+- Recorded consent videos for digital twins (`8250a75`). A twin's consent can be a recorded video, uploaded in place of HeyGen's consent link. The video shows the person reading HeyGen's consent statement.
+  - **The flow.**
+    - The file goes straight to HeyGen's storage, as footage uploads do.
+    - It is then finished (`POST /v3/assets/{id}/complete`) and submitted for review: `POST /v3/avatars/{group}/consent` with `consent_video: { type: "asset_id" }`.
+    - HeyGen's review is followed like a link's consent. Accepted, the twin joins the avatars. Refused, the twin carries HeyGen's reason, and another video or a link can be sent.
+  - **Where it is on.** HeyGen offers the upload flow to enterprise accounts only, so it stays off unless the operator sets `TWIN_CONSENT_UPLOAD=true`. It is always on in demo mode. `GET /api/twins` reports `consentUploads`.
+  - **The page.** Each twin waiting for consent offers "Upload a consent video" beside the link. The upload shows progress and Stop upload. While HeyGen reviews it, the row shows the file sent and offers no link. Keyboard focus moves from the twin, to Stop upload, then back.
+  - **Checks.**
+    - A consent upload names its twin, and the twin is checked before HeyGen is asked, so no file is sent for nothing.
+    - The account's limit of 10 twins does not apply, since the twin is already kept.
+    - The finish at HeyGen shares the hourly finish limit with footage uploads; the submission shares the hourly consent limit with links.
+    - Refused: another account's upload or twin, a twin under review, one already consented to, one that failed, or the same video sent again.
+    - A JSON body without `upload` still asks for a link.
+  - **Review.** An independent review found these issues, all fixed before this commit:
+    - A link asked for after a refused video was hidden behind the old video. The link now replaces the video.
+    - A check moving the twin on during the submit lost a video HeyGen already had. It is now merged onto the latest record.
+    - Finishes at HeyGen were not limited.
+    - The whole file was sent before the twin was checked.
+    - Keyboard focus was dropped while uploading.
+    - `{}` no longer asked for a link.
+    - A refused video could be sent again.
+
+    A second review confirmed the fixes. Its three minor points were also fixed: a timing-sensitive e2e step, the re-send guard, and focus after a two-tab refusal.
+  - **Tests.** Unit tests cover the demo and HeyGen paths (the request body, the operator setting, HeyGen's refusals), the checks, the merge, and the limits. An e2e test covers upload, stop, review, and acceptance.

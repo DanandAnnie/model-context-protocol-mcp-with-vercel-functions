@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { clockTime, parseEndTime, parseStartTime, parseTimeInput, shareLinkAt, shareSectionLink } from "../share-time";
+import { chapterSectionPlays, clockTime, parseEndTime, parseStartTime, parseTimeInput, shareChapterLink, shareLinkAt, shareSectionLink } from "../share-time";
 
 describe("parseStartTime", () => {
   it("reads seconds (to the millisecond), units, and clock times", () => {
@@ -75,5 +75,28 @@ describe("share links that play a section", () => {
     assert.deepEqual(["0", "0:00", "00:00", "0s", "0.0", "1:05", "65", "1m5s", "1:05.5"].map(parseTimeInput), [0, 0, 0, 0, 0, 65, 65, 65, 65.5]);
     for (const t of [0, 5, 65, 65.4, 3723]) assert.equal(parseTimeInput(clockTime(t)), t, `round trip ${t}`);
     assert.equal(parseTimeInput("soon"), undefined);
+  });
+});
+
+describe("shareChapterLink", () => {
+  const base = "https://studio.test/share/vid_1";
+  it("plays one chapter: from its start as its own link starts, to the next chapter's start exactly", () => {
+    assert.equal(shareChapterLink(base, 0, 12_340), `${base}?end=12.34`);
+    assert.equal(shareChapterLink(base, 12_340, 30_000), `${base}?t=12.4&end=30`);
+    assert.equal(shareChapterLink(base, 12_341, 17_400), `${base}?t=12.4&end=17.4`);
+    const start = new URL(shareLinkAt(base, 12_340, 30_000)).searchParams.get("t");
+    assert.equal(new URL(shareChapterLink(base, 12_340, 30_000)).searchParams.get("t"), start, "the same start as the chapter's own link");
+    // A chapter under a second long is no section: its plain start link.
+    assert.equal(shareChapterLink(base, 5_000, 5_800), `${base}?t=5`);
+  });
+  it("says which chapters get a section, as the link itself decides", () => {
+    assert.equal(chapterSectionPlays(0, 12_340), true);
+    assert.equal(chapterSectionPlays(5_000, 5_800), false);
+    assert.equal(chapterSectionPlays(5_000, 6_000), true);
+    // The start rounds up to a tenth, so 1.0 s of chapter from 5.05 s is 0.95 s of link: no section.
+    assert.equal(chapterSectionPlays(5_050, 6_050), false);
+    for (const [a, b] of [[0, 999], [0, 1000], [12_340, 13_400], [12_341, 13_400], [12_399, 13_399], [7_777, 9_000]]) {
+      assert.equal(chapterSectionPlays(a, b), new URL(shareChapterLink(base, a, b)).searchParams.has("end"), `${a} to ${b}`);
+    }
   });
 });

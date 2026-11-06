@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { Check, Copy, Download, Link2, Pencil } from "lucide-react";
+import { Check, Copy, Download, Link2, Pencil, Scissors } from "lucide-react";
 import { Button, Card, inputClass } from "@/components/ui";
 import { captionDurationSec, chaptersText, sceneChapters, videoChapters, youtubeReadsChapters, type Timed } from "@/lib/chapters";
 import { api } from "@/lib/client";
 import { capSceneName, sceneName } from "@/lib/scene-text";
 import { formatTimestamp } from "@/lib/text";
-import { shareLinkAt } from "@/lib/share-time";
+import { chapterSectionPlays, shareChapterLink, shareLinkAt } from "@/lib/share-time";
 import type { Video } from "@/lib/types";
 
 type ChapterVideo = Timed & Partial<Pick<Video, "views" | "chapterViews" | "deletedAt">> & { id?: string; status?: string; captionCues?: Array<{ startMs: number; endMs: number; text: string }> };
@@ -69,7 +69,9 @@ export function VideoChapters({
   }, [saving, error]);
   // A link to the share page that starts at a chapter (`?t=`), for a made video that is not in the trash. Declared
   // before the early return below, as every hook must be, so a change in what the card shows keeps their order.
-  const [linkCopied, setLinkCopied] = useState<number | null>(null);
+  // Which chapter link was copied last (its start link or its play-only-this-chapter one), for its check mark: one at a
+  // time, so a second copy moves the mark rather than leaving two.
+  const [linkCopied, setLinkCopied] = useState<{ i: number; only: boolean } | null>(null);
   const linkable = video.status === "completed" && !video.deletedAt && !!video.id;
   if (chapters.length < 2 && !editable) return null;
   const text = chaptersText(chapters);
@@ -112,12 +114,28 @@ export function VideoChapters({
     const url = shareLinkAt(`${(shareOrigin || window.location.origin).replace(/\/$/, "")}/share/${video.id}`, startMs, nextMs);
     try {
       await navigator.clipboard.writeText(url);
-      setLinkCopied(i);
+      const mark = { i, only: false };
+      setLinkCopied(mark);
       // Emptied first, so a second copy of the same link is announced again.
       setSaved(null);
       const message = `Link to ${formatTimestamp(startMs / 1000)} copied.`;
       setTimeout(() => setSaved(message), 50);
-      setTimeout(() => setLinkCopied((at) => (at === i ? null : at)), 2000);
+      setTimeout(() => setLinkCopied((at) => (at === mark ? null : at)), 2000);
+    } catch {
+      window.prompt("Copy this link", url);
+    }
+  }
+  /** A link that plays only chapter `i`, up to where the next one starts. */
+  async function copyChapterOnly(i: number, title: string, startMs: number, nextMs: number) {
+    const url = shareChapterLink(`${(shareOrigin || window.location.origin).replace(/\/$/, "")}/share/${video.id}`, startMs, nextMs);
+    try {
+      await navigator.clipboard.writeText(url);
+      const mark = { i, only: true };
+      setLinkCopied(mark);
+      setSaved(null);
+      const message = `Link to ${title} only (${formatTimestamp(startMs / 1000)} to ${formatTimestamp(nextMs / 1000)}) copied.`;
+      setTimeout(() => setSaved(message), 50);
+      setTimeout(() => setLinkCopied((at) => (at === mark ? null : at)), 2000);
     } catch {
       window.prompt("Copy this link", url);
     }
@@ -257,9 +275,25 @@ export function VideoChapters({
                     title="Copy a link that starts here"
                     data-testid="chapter-link"
                   >
-                    {linkCopied === i ? <Check className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
+                    {linkCopied?.i === i && !linkCopied.only ? <Check className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
                   </button>
                 )}
+                {/* The last chapter's own link already plays to the end, and one under a second long is no section, so
+                    neither has "only this chapter": a spacer of the button's size keeps the icons in one column. */}
+                {linkable && (i < chapters.length - 1 && chapterSectionPlays(c.startMs, chapters[i + 1].startMs) ? (
+                  <button
+                    type="button"
+                    onClick={() => void copyChapterOnly(i, c.title, c.startMs, chapters[i + 1].startMs)}
+                    className="-my-0.5 shrink-0 rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                    aria-label={`Copy a link that plays only ${c.title}, ${formatTimestamp(c.startMs / 1000)} to ${formatTimestamp(chapters[i + 1].startMs / 1000)}`}
+                    title="Copy a link that plays only this chapter"
+                    data-testid="chapter-only-link"
+                  >
+                    {linkCopied?.i === i && linkCopied.only ? <Check className="h-4 w-4" /> : <Scissors className="h-4 w-4" />}
+                  </button>
+                ) : (
+                  <span aria-hidden className="-my-0.5 w-6 shrink-0" data-testid="chapter-only-spacer" />
+                ))}
               </li>
             ))}
           </ol>

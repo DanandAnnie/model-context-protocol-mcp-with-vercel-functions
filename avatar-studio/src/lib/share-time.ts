@@ -24,6 +24,26 @@ export function parseEndTime(raw: unknown, start?: number): number | undefined {
   return end !== undefined && end >= (start ?? 0) + MIN_SECTION_SEC ? end : undefined;
 }
 
+/** Where a chapter's link starts, in milliseconds: rounded up to a tenth, or to the millisecond to stay before `nextMs`. */
+function chapterStartMs(startMs: number, nextMs?: number): number {
+  const ms = Math.ceil(startMs / 100) * 100;
+  return nextMs !== undefined && ms >= nextMs ? Math.ceil(startMs) : ms;
+}
+
+/**
+ * A share link that plays one chapter only: from its start (as its own link starts) to the next chapter's start, where
+ * the share page pauses as the next chapter would begin. A chapter under a second long gets its plain start link.
+ */
+export function shareChapterLink(base: string, startMs: number, nextMs: number): string {
+  return shareSectionLink(base, chapterStartMs(startMs, nextMs) / 1000, nextMs / 1000);
+}
+
+/** Whether a chapter's play-only-this-chapter link is a section at all: one under a second long gets a plain start link. */
+export function chapterSectionPlays(startMs: number, nextMs: number): boolean {
+  // The same test, in seconds, as shareSectionLink makes, so the two never disagree on a rounding edge.
+  return nextMs / 1000 >= chapterStartMs(startMs, nextMs) / 1000 + MIN_SECTION_SEC;
+}
+
 /** A time in seconds as a link writes it: to the millisecond at most, without trailing zeros. */
 function linkTime(sec: number): string {
   return String(Number(sec.toFixed(3)));
@@ -76,8 +96,7 @@ function parseTime(raw: unknown): number | undefined {
  * chapter's start (`nextMs`). Whole seconds are written without decimals, and a start of 0 leaves the link plain.
  */
 export function shareLinkAt(base: string, startMs: number, nextMs?: number): string {
-  let ms = Math.ceil(startMs / 100) * 100;
-  if (nextMs !== undefined && ms >= nextMs) ms = Math.ceil(startMs);
+  const ms = chapterStartMs(startMs, nextMs);
   if (ms <= 0) return base;
   const t = ms % 1000 === 0 ? String(ms / 1000) : String(Number((ms / 1000).toFixed(3)));
   return `${base}${base.includes("?") ? "&" : "?"}t=${t}`;

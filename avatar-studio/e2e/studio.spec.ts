@@ -10400,11 +10400,27 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   expect(copied).toMatch(/^0:00 12 Maple Street\n\d+:\d\d The kitchen was redone last spring with quartz counters and…\n\d+:\d\d Call Dana to book a showing this weekend\.$/);
   // Each chapter copies a share link that starts there; the first one's is the plain link.
   await page.getByTestId("chapter-link").nth(1).click();
+  // Read once the copy is announced, so the clipboard holds this link and not the one before.
+  await expect(page.getByText(/^Link to \d+:\d\d copied\.$/)).toBeVisible();
   const chapterLink = await page.evaluate(() => navigator.clipboard.readText());
   expect(chapterLink).toMatch(new RegExp(`/share/${v.id}\\?t=\\d+(\\.\\d+)?$`));
-  await expect(page.getByText(/^Link to \d+:\d\d copied\.$/)).toBeVisible();
   await page.getByTestId("chapter-link").first().click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}$`));
+  // A chapter can be sent on its own: its link stops where the next chapter starts. The last chapter's own link
+  // already plays to the end, so it has none.
+  await expect(page.getByTestId("chapter-only-link")).toHaveCount(2);
+  // The last row keeps a spacer in that button's place, so the icons stay in one column.
+  await expect(list.getByRole("listitem").last().getByTestId("chapter-only-spacer")).toHaveCount(1);
+  await page.getByTestId("chapter-only-link").nth(1).click();
+  await expect(page.getByText(/^Link to The kitchen was redone .+ only \(\d+:\d\d to \d+:\d\d\) copied\.$/)).toBeVisible();
+  const onlyLink = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(onlyLink.searchParams.get("t")).toBe(new URL(chapterLink).searchParams.get("t"));
+  expect(Number(onlyLink.searchParams.get("end"))).toBeGreaterThan(Number(onlyLink.searchParams.get("t")) + 1);
+  await page.getByTestId("chapter-only-link").first().click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}\\?end=\\d+(\\.\\d+)?$`));
+  // One check mark at a time: the copy just made has it, the ones before have lost it.
+  await expect(list.locator("svg.lucide-check")).toHaveCount(1);
+  await expect(page.getByTestId("chapter-only-link").first().locator("svg.lucide-check")).toHaveCount(1);
   // The same chapters as a WebVTT chapters file, for players and hosts that read one.
   await expect(page.getByRole("link", { name: "Chapters file" })).toHaveAttribute("href", `/api/videos/${v.id}/captions?format=chapters`);
   const file = await page.request.get(`/api/videos/${v.id}/captions?format=chapters`);

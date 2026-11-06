@@ -1806,3 +1806,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Take titles fit the server's limit as it counts, so a title of emoji no longer stops every take.
     - A clip deleted elsewhere no longer counts toward the five takes.
     - The docs now describe the titles and retries as the page does them.
+- QA pass 33: lip sync options, captions, frame rate, and takes in a browser (`b72c663`). The Lip sync page was used by mouse and keyboard at desktop and phone widths, with failures forced where they could happen. Fixed from what it found:
+  - **Caption downloads keep the focus:** the SRT and WebVTT buttons stay focusable while a download runs (busy rather than disabled), so a keyboard user's focus is no longer dropped to the page.
+  - **A failed caption download is said on its card,** where the button was pressed. On a phone, the page-top banner had appeared far above the view.
+  - **A long title no longer squeezes the form:** the two columns keep their share of the width however long a card's title is.
+  - **Whole titles:** card titles wrap rather than being cut off, so a take's clip name is not hidden on a phone.
+  - **Why Lip-sync video is off:** a line under the button says what is missing (the video, an https link, the new audio, the upload, or a fix to the part), and is linked to the button for screen readers.
+  - **Typing moments on a phone:** From and To no longer bring up a number pad without ":", and a comma decimal ("1,5") reads as a point.
+  - **A retried start under another title:** when a start tried again finds its lip sync already made, the page says the title it went through as and that it can be renamed from its card. It no longer reports the old title as if the new one had been taken.
+  - **Wording:** the frame rate option "As the footage's" is now "Same as the footage".
+  - Left for later: hints read as part of their field's name (from the shared Field component, used across the studio), and smaller polish.
+  - An independent review found nothing blocking. Fixed from its findings: a rename of the lip sync from the page on a retry was dropped, since it could undo a rename made from the card meanwhile; a link that is not https now says so; and the reason under the button is shown in a neutral tone.

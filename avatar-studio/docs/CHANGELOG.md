@@ -1795,3 +1795,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - HeyGen not answering, a timeout, or a dropped connection is now a `502` to try again, and HeyGen's own message (which names its job id) stays on the server.
     - Caption downloads are counted only once HeyGen is about to be asked, the account's own allowance first, so refused requests never use up the allowance every account shares.
     - The docs now say that a blank value means "left out" only for the frame rate.
+- Lip sync takes (`e6eb4df`). One video can now be lip-synced to several audio clips at once, such as a voice-over in a few languages or a line read a few ways.
+  - **Choosing takes:** with an audio clip chosen, Also sync to other clips lists the account's other clips. Up to four more can be chosen, five takes in all, and the page says how many.
+  - **One lip sync each:** each take is its own start of the same footage and options, through the existing `POST /api/lipsyncs`. Each counts against the hour's starts and has its own `Idempotency-Key`, made from the start's key and the clip's id. Each take is titled with the typed title, or the video's title marked "(lip-synced)", followed by the clip's name, within the server's 120 characters.
+  - **When a take fails:** the takes already started stay listed. The failed take and those after it stay chosen, and a clip deleted meanwhile drops out, so trying again starts only those, each under the key and title it first went with. Choosing or leaving out takes keeps those keys; changing the footage or an option starts afresh.
+  - HeyGen's own lip sync batches were not used: they answer with a batch to follow rather than the lip syncs themselves, and the studio's single starts already carry their keys and limits.
+  - An independent review found nothing blocking. Fixed from its findings:
+    - A take tried again alone keeps its clip-named title, so it never reaches HeyGen under the same key with another title.
+    - Choosing or leaving out a take no longer gives the other takes new keys, which could have started one twice after a lost answer.
+    - Take titles fit the server's limit as it counts, so a title of emoji no longer stops every take.
+    - A clip deleted elsewhere no longer counts toward the five takes.
+    - The docs now describe the titles and retries as the page does them.

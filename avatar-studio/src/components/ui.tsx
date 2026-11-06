@@ -1,5 +1,5 @@
 "use client";
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode, Ref } from "react";
+import { cloneElement, isValidElement, useId, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type Ref } from "react";
 import { Loader2 } from "lucide-react";
 import type { VideoStatus } from "@/lib/types";
 
@@ -56,18 +56,33 @@ export function SectionTitle({ title, subtitle, action }: { title: ReactNode; su
   );
 }
 
-/** `hintId` names the hint, for a control whose own aria-label would otherwise leave the hint unannounced. */
+/**
+ * A labelled control with an optional hint. The hint sits outside the label and is linked to the control as its
+ * description (`aria-describedby`), so a screen reader announces the control by its label alone and the hint after.
+ * `hintId` names the hint, for a control inside a wrapper (an icon beside it, say) that links it itself.
+ */
 export function Field({ label, hint, hintId, children }: { label: string; hint?: string; hintId?: string; children: ReactNode }) {
+  const ownId = useId();
+  const id = hint ? (hintId ?? `${ownId}-hint`) : undefined;
+  // A single control is described by the hint, alongside anything it is already described by.
+  const control =
+    id && isValidElement<{ "aria-describedby"?: string }>(children)
+      ? cloneElement(children, {
+          "aria-describedby": [...new Set([...(children.props["aria-describedby"] ?? "").split(/\s+/).filter(Boolean), id])].join(" "),
+        })
+      : children;
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
-      {children}
+    <div className="block">
+      <label className="block">
+        <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
+        {control}
+      </label>
       {hint && (
-        <span id={hintId} className="mt-1 block text-xs text-slate-500">
+        <span id={id} className="mt-1 block text-xs text-slate-500">
           {hint}
         </span>
       )}
-    </label>
+    </div>
   );
 }
 

@@ -2749,10 +2749,11 @@ function CreateInner() {
                     </div>
                   </div>
                 )}
-                <Field label="Image URL" hint="A public image URL. Shown behind the avatar.">
+                <Field label="Image URL" hintId="background-image-url-hint" hint="A public image URL. Shown behind the avatar.">
                   <div className="flex gap-2">
                     <input
                       className={inputClass}
+                      aria-describedby="background-image-url-hint"
                       placeholder="https://…/background.jpg"
                       value={background.type === "image" && !backdropIdOf(background) ? background.value : ""}
                       onChange={(e) => setBackground(e.target.value ? { type: "image", value: e.target.value } : DEFAULT_BG)}
@@ -2760,10 +2761,11 @@ function CreateInner() {
                     <span className="flex items-center text-slate-400"><ImageIcon className="h-5 w-5" /></span>
                   </div>
                 </Field>
-                <Field label="Video URL" hint="A public MP4 or WebM URL that loops behind the avatar. HeyGen plays it; other renderers use their default background.">
+                <Field label="Video URL" hintId="background-video-url-hint" hint="A public MP4 or WebM URL that loops behind the avatar. HeyGen plays it; other renderers use their default background.">
                   <div className="flex gap-2">
                     <input
                       className={inputClass}
+                      aria-describedby="background-video-url-hint"
                       placeholder="https://…/background.mp4"
                       value={background.type === "video" && !footageIdOf(background) ? background.value : ""}
                       onChange={(e) => setBackground(e.target.value ? { type: "video", value: e.target.value } : DEFAULT_BG)}

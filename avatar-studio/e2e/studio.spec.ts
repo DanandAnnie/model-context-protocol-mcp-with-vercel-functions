@@ -2285,6 +2285,9 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   await page.getByLabel("Upload the new audio").setInputFiles({ name: "retake.wav", mimeType: "audio/wav", buffer: toneWav(2) });
   const clipPicker = page.getByRole("combobox", { name: /^Audio clip\b/ });
   await expect(clipPicker.locator("option:checked")).toHaveText("retake (2s)");
+  // A field is named by its label alone; its hint is read after, as its description.
+  await expect(clipPicker).toHaveAccessibleName("Audio clip");
+  await expect(clipPicker).toHaveAccessibleDescription(/up to 90 seconds/);
   // The button is busy, not disabled, while it uploads, so a keyboard user's focus stays on it.
   await expect(page.getByRole("button", { name: "Upload audio" })).toBeFocused();
   const clipId = await clipPicker.inputValue();

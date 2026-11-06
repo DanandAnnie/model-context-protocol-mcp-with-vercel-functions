@@ -1728,3 +1728,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The 4K warning is a live region from the start, so a change to it is announced.
     - The unit tests check the hidden-presenter rule directly and match the engine message exactly.
     - The docs say a 4K video's music mix is 1080p.
+- Avatar III as an engine choice (`ac1b5bd`). HeyGen's v3 video API renders scenes on its re-engineered photo-to-video Avatar III engine (`engine: { "type": "avatar_iii" }`) at any quality, for photo avatars as well as video avatars. The studio used it only for 4K; at 720p and 1080p the engine choice offered Avatar IV and Avatar V.
+  - **Where to choose it:** Avatar III is a third choice in the editor's Avatar engine select. Templates, copies, retries, and batch rows keep it, and the API takes `avatarEngine: "avatar_iii"`.
+  - **Which presenters:** a scene renders on it when its presenter is a look HeyGen lists Avatar III for (photo avatars included, at up to 1080p) or a digital twin trained here. Other presenters and uploaded portraits stay on Avatar IV. The editor names the choice "not sent" when no presenter in the video renders on it.
+  - **Motion:** Avatar III takes neither expressiveness nor gestures. A photo avatar given them stays on Avatar IV with them, and a scene on Avatar III is sent none.
+  - **Elsewhere:** the video page shows the engine. A batch started from a template on Avatar III says so, and can go back to Avatar IV. When HeyGen refuses a render that asked for Avatar III, the error says to make a copy on Avatar IV. More blinking stays an Avatar V setting.
+  - An independent review found nothing blocking. From its optional findings:
+    - A digital twin trained here is treated as the video avatar it is: it renders on Avatar III when that is chosen, even with motion settings, and is never sent photo avatar motion. Before, on Avatar IV it was sent a gesture prompt, which HeyGen refuses for a video avatar.
+    - The editor's More blinking and engine hints name the engine chosen, Avatar III included.
+    - A 4K batch from a template with an engine says the template's engine is not sent, rather than contradicting itself.
+    - The video page's 4K engine row says when no scene shows the presenter.
+    - A unit test's title now matches what it checks.

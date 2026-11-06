@@ -1930,3 +1930,14 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A refused copy pointed at a field or box no longer shown. That note now shows only while the field or box does.
     - The e2e check could pass with no link at all. It now keeps the section valid while the times change.
   - **Tests.** A unit test covers the snippet (size by shape, escaping, a section from the start, three decimals at most) and checks that the share page reads its address back as the same section. The e2e test copies the embed code and checks it, and that the note clears when a time changes.
+- Copy a chapter only (`7fab964`). Each chapter on the video page now has a second button beside its copy-link button: a link that plays only that chapter, so one part of a longer video can be sent on its own.
+  - **The link.** It starts where the chapter's own link starts and adds `end=`, the next chapter's start, so the share page pauses as the next chapter would begin (Watch it again, Keep watching).
+    - The last chapter has no such button, since its own link already plays to the end.
+    - A chapter whose link would play under a second has none either.
+    - The page says which chapter was copied, with its times.
+  - **Review.** An independent review found no blocking issues and four minor ones, all fixed:
+    - The last row's icons sat one place over from the rows above. A spacer of the button's size now keeps them in one column.
+    - A chapter just over a second long, whose link start rounds up, showed a button whose link could not stop. The button now shows only when the link is a section, decided by the same test the link uses.
+    - Copying both links of one chapter left two check marks. One mark now moves to the latest copy.
+    - The older chapter-link e2e step read the clipboard before the copy was announced. It now waits for the announcement first.
+  - **Tests.** Unit tests cover the chapter link: the same start as the chapter's own link, the end at the next chapter's start exactly, a first chapter with no `t`, and a chapter too short to stop, and that the button's test always agrees with the link. The chapters e2e test copies a middle and a first chapter's link-only and checks both, that the last chapter has none (a spacer keeps its place), and that only one check mark shows at a time.

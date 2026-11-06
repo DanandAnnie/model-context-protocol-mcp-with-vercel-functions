@@ -1778,3 +1778,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The demo writer is no longer offered as Claude in a studio that speaks with HeyGen.
     - Tags timed as words by HeyGen are left out of captions.
     - Drafts have an instance-wide hourly cap beside the per-account one.
+- Lip sync options (`a40bde2`). HeyGen's lip sync takes a few options beyond the footage, the audio, and the quality, and the Lip sync page and `POST /api/lipsyncs` now offer them.
+  - **Only part of the video:** From and To, as seconds (12.5) or minutes and seconds (1:05), sync just that part, from the start or to the end when one is left blank. The part must last at least a second and stay within the first 4 hours. For a library video, a part that starts within a second of its end, or ends past it, is said under the fields before anything is sent. The API refuses it too, saying how long the video is.
+  - **Four switches:** take out the footage's background music, clean up the new audio's speech, keep the video's own length whatever the new audio's (HeyGen otherwise stretches the video to the audio), and keep its resolution and bitrate. Only the options turned on are sent to HeyGen, so its defaults stand otherwise.
+  - **Kept with the job:** each lip sync stores its part and options, and its card lists them ("0:05 to 0:12.5 · music taken out · length kept"). A start retried with the same `Idempotency-Key` must ask for the same options, or it is a `409`.
+  - An independent review found nothing blocking. Fixed from its findings:
+    - The page rounds moments to a tenth, as the server does, so it no longer allows a start the server refuses.
+    - The latest start a video allows is named in whole seconds rounded down, so the moment named is one that is taken.
+    - The page refuses a part past the first 4 hours itself, and the API's messages name the part's start or end instead of a field name.
+    - `null` is taken as an option left out, as it already was for the part's start and end.

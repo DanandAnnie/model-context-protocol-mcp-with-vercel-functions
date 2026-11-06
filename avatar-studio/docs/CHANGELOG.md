@@ -1817,3 +1817,8 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Wording:** the frame rate option "As the footage's" is now "Same as the footage".
   - Left for later: hints read as part of their field's name (from the shared Field component, used across the studio), and smaller polish.
   - An independent review found nothing blocking. Fixed from its findings: a rename of the lip sync from the page on a retry was dropped, since it could undo a rename made from the card meanwhile; a link that is not https now says so; and the reason under the button is shown in a neutral tone.
+- Field hints read as descriptions, studio-wide (`823b8f9`). Every labelled field's hint (about 65 of the studio's 108 labelled fields have one) used to sit inside its label. A screen reader therefore announced it as part of the field's name: the Lip sync page's audio picker was "Audio clip Your saved clips, including… 16 kHz mono WAV". The browser QA pass of the Lip sync page found it.
+  - The shared `Field` component now puts the hint after the label and links it to the control as its description (`aria-describedby`). A screen reader announces the field by its label alone and reads the hint after it. A control's own descriptions (an error, a status line) are kept beside the hint, in their order, with no id listed twice.
+  - Where a field's input sits in a wrapper beside an icon (the editor's background Image URL and Video URL), the input is linked to its hint directly.
+  - A test checks that the audio picker is named by its label alone and described by its hint.
+  - An independent review of every call site found nothing blocking. From its findings: the two wrapped inputs above are linked directly, and a stale note on the component was rewritten.

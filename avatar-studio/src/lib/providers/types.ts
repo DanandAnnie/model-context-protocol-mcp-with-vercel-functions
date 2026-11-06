@@ -49,6 +49,11 @@ export interface AvatarJobStatus {
   agentWaiting?: boolean;
   durationSec?: number;
   error?: string;
+  /**
+   * When the render finished (ISO), where the renderer says: a video re-rendered in place under the same id reads as
+   * completed from its earlier render until the new one starts, so only a completion after a fix was sent is the fix's.
+   */
+  completedAt?: string;
 }
 
 /** Avatars and voices referenced by a request's scenes, keyed by id. */
@@ -128,6 +133,18 @@ export interface AvatarProvider {
   directedScenes?(renderJobId: string): Promise<{ editVersion: string; scenes: DirectedScene[] }>;
   /** Revises the scenes named (one instruction each) of a render the session made; the new cut is another render to follow. */
   editDirectedScenes?(input: { sessionId: string; renderJobId: string; editVersion: string; edits: Array<{ sceneId: string; text: string }> }): Promise<{ providerJobId: string }>;
+  /**
+   * A finished studio render's scenes as the renderer holds them, in order: each scene's id and the id of its one spoken
+   * line (absent when it has none, or more than one), and the version of the whole document to edit against.
+   * `sceneCount` is how many scenes the studio sent (the demo renderer answers with that many).
+   */
+  videoLines?(providerJobId: string, sceneCount: number): Promise<{ editVersion: string; scenes: Array<{ id: string; lineId?: string }> }>;
+  /**
+   * Re-renders a finished studio render in place with new words for the lines named (the studio's script, pauses
+   * included); the other scenes keep their footage. `key` makes a retried send replay the first answer. Answers with the
+   * job to follow (HeyGen's is the same video).
+   */
+  editVideoLines?(input: { providerJobId: string; editVersion: string; edits: Array<{ sceneId: string; lineId: string; script: string }>; key: string }): Promise<{ providerJobId: string }>;
   /** The curated styles its Video Agent composes in (`directed.styleId`), where it offers them. */
   listAgentStyles?(): Promise<AgentStyle[]>;
   /**

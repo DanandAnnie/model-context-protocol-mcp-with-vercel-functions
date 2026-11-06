@@ -24,6 +24,7 @@ const AREA_OF_KIND: Record<ActivityKind, ActivityArea> = {
   "video.trashed": "videos",
   "video.restored": "videos",
   "video.purged": "videos",
+  "video.lines_fixed": "videos",
   "batch.created": "videos",
   "video.review_requested": "reviews",
   "video.approved": "reviews",
@@ -136,6 +137,8 @@ export function describeActivity(e: ActivityEvent, viewerId?: string): string {
       return `${who} approved ${what || "a video"}`;
     case "video.changes_requested":
       return `${who} asked for changes to ${what || "a video"}`;
+    case "video.lines_fixed":
+      return `${who} fixed spoken lines in ${what || "a video"}`;
     case "usage.replaced": {
       // Worded here from the counts, so the sentence is never cut short; a name the server could not find is left out.
       const thing = e.replaced?.kind === "voice" ? "voice" : e.replaced?.kind === "avatar" ? "presenter" : "presenter or voice";

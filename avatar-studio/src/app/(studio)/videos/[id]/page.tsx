@@ -17,6 +17,8 @@ import { ShareQrCode } from "@/components/ShareQrCode";
 import { OtherSizes } from "@/components/OtherSizes";
 import { HighlightClips } from "@/components/HighlightClips";
 import { DirectedSceneEdits } from "@/components/DirectedSceneEdits";
+import { LineFixes } from "@/components/LineFixes";
+import { lineFixProblem } from "@/lib/line-fixes";
 import { AgentConversation } from "@/components/AgentConversation";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
@@ -1600,6 +1602,15 @@ export default function VideoDetailPage() {
               {video.status === "completed" && canEdit !== null && <HighlightClips video={video} canEdit={canEdit === true} />}
               {video.directed?.review && video.agentSessionId && !video.deletedAt && canEdit !== null && <AgentConversation video={video} canEdit={canEdit === true} onAnswered={() => void refetch()} />}
               {video.directed && video.agentSessionId && video.status === "completed" && !video.deletedAt && canEdit === true && <DirectedSceneEdits video={video} />}
+              {canEdit === true && (!lineFixProblem(video) || (video.lineFix?.pending && !video.deletedAt)) && <LineFixes
+                  video={video}
+                  onFixed={(next) => {
+                    setData((prev) => (prev ? { ...prev, video: next } : prev));
+                    // Read again, which follows the new render until it is ready (setting the data alone does not poll).
+                    void refetch();
+                  }}
+                  onRefresh={() => void refetch()}
+                />}
               <ReviewPanel video={video} onChange={(next) => setData({ video: next })} />
               <VideoComments key={video.id} videoId={video.id} title={video.title} player={video.status === "completed" && video.videoUrl ? player : undefined} />
             </div>

@@ -342,6 +342,51 @@ export interface LookPackJob {
  */
 export const DEMO_UPLOAD_URL = "demo:discard";
 
+/** One spoken line a fix changes, as the renderer is sent it: its scene's and line's ids there, and the new words. */
+export interface LineEdit {
+  sceneId: string;
+  lineId: string;
+  script: string;
+}
+
+/** What a fix of spoken lines changed on the video, kept until its render is ready so a fix that fails can be undone. */
+export interface LineFixBefore {
+  scenes?: Scene[];
+  script?: string;
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  gifUrl?: string;
+  gifCheckedAt?: string;
+  durationSec?: number;
+  captionCues?: Video["captionCues"];
+  subtitles?: Video["subtitles"];
+  review?: Video["review"];
+  lineFix?: LineFix;
+}
+
+export interface LineFix {
+  at: string;
+  scenes: number[];
+  count: number;
+  key: string;
+  /**
+   * The fix in flight: the version and lines sent with its key (sent again as they were when the renderer's answer was
+   * lost), whether the renderer took it, the month it was counted in, and the video as it was before it.
+   */
+  pending?: {
+    editVersion: string;
+    edits: LineEdit[];
+    sent?: true;
+    countedIn?: string;
+    /** When a request last took it to send (one at a time; one that never finished is taken over after a while), and how many sends so far. */
+    sendingAt?: string;
+    attempts: number;
+    before: LineFixBefore;
+  };
+  /** Why the last fix did not take; the video is as it was before it. */
+  error?: string;
+}
+
 export interface TwinJob {
   id: string;
   ownerId: string;
@@ -1258,6 +1303,12 @@ export interface Video extends VideoRequest {
   agentSessionId?: string;
   /** A directed video under review whose agent is waiting for the account's answer (its storyboard, or a question). */
   agentWaiting?: boolean;
+  /**
+   * The latest fix of spoken lines made to the finished video in place (the renderer re-renders only the scenes named,
+   * under the same video): when, which scenes (numbered from 1), how many fixes so far, and the key it was sent with.
+   * `pending` while it is being sent or rendered; `error` when the last one did not take (the video is as it was).
+   */
+  lineFix?: LineFix;
   videoUrl?: string;
   thumbnailUrl?: string;
   /** The renderer's short animated GIF of the video, for an email; signed for a limited time and renewed when old. */
@@ -1704,6 +1755,7 @@ export type ActivityKind =
   | "video.trashed"
   | "video.restored"
   | "video.purged"
+  | "video.lines_fixed"
   | "batch.created"
   | "member.joined"
   | "member.left"

@@ -7,7 +7,7 @@ import { getStore } from "../store";
 import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
 export { videoNeeds, videoPresenters, videoVoices };
-import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
+import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, LineEdit, LineFixBefore, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
 import { buildCues } from "../captions";
 import { captionDurationSec, sceneBoundsMs, videoChapters, type Timed } from "../chapters";
 import { graphemes, wellFormed } from "../text";
@@ -16,7 +16,7 @@ import { baseLanguageCode } from "../language";
 import type { AgentFile, AvatarProvider, RenderCast } from "../providers/types";
 import { LOCAL_OWNER } from "../owner-id";
 import { renderLimitFor } from "../billing";
-import { ConflictError, ForbiddenError, LimitError, NotFoundError, ValidationError } from "../errors";
+import { ConflictError, ForbiddenError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
 import { isWorkspaceId, type User } from "../workspaces";
 import { getAvatar, madeLooksOf, rememberMadeLooks } from "./avatars";
 import { getClip, getClipAudio, saveClipAssetIds } from "./clips";
@@ -34,6 +34,7 @@ import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSc
 import { getBrandKit } from "./brand";
 import { agentKitFor } from "./agent-brand";
 import { pronunciationsFor, spokenCopy } from "../pronounce";
+import { MAX_LINE_CHARS, MAX_LINE_FIX_SCENES, lineFixProblem, speaks, spokenLines } from "../line-fixes";
 import { clearComments, commentCounts } from "./comments";
 import { clearVideoLeads } from "./leads";
 import { clearHighlights } from "./highlights";
@@ -203,6 +204,30 @@ async function countRender(video: Video, ownerId: string): Promise<void> {
  * failure; a marker record that only one of them can insert makes the refund happen once.
  */
 async function afterTransition(before: Video, next: Video): Promise<void> {
+  const fix = before.lineFix?.pending;
+  if (fix && !next.lineFix?.pending) {
+    const ownerId = next.ownerId ?? LOCAL_OWNER;
+    // A fix that did not take: the video is as it was, its render given back once; nothing is announced.
+    if (next.lineFix?.error) {
+      if (fix.countedIn) {
+        try {
+          const marker = { id: `refund_${next.id}_${before.lineFix!.key}`, ownerId, month: fix.countedIn, refundedAt: nowIso() };
+          if (await getStore().insert("usage", marker)) await adjustRenderUsage(ownerId, fix.countedIn, -1);
+        } catch (err) {
+          console.error(`render usage refund for the fix of ${next.id} failed:`, err);
+        }
+      }
+      return;
+    }
+    // A fix whose answer was lost but which rendered all the same is counted now.
+    if (!fix.countedIn) {
+      try {
+        await adjustRenderUsage(ownerId, usageMonth(), 1);
+      } catch (err) {
+        console.error(`render usage for ${ownerId} could not be recorded:`, err);
+      }
+    }
+  }
   if (next.status === "failed" && before.status !== "failed" && next.countedIn) {
     const ownerId = next.ownerId ?? LOCAL_OWNER;
     try {
@@ -989,8 +1014,11 @@ const inFlight = new Map<string, Promise<Video>>();
 
 async function refreshNow(video: Video): Promise<Video> {
   let update: Partial<Video>;
+  let completedAt: string | undefined;
   try {
-    update = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId!);
+    const { completedAt: finishedAt, ...answer } = await getAvatarProviderByName(video.provider).getStatus(video.providerJobId!);
+    update = answer;
+    completedAt = finishedAt;
     refreshRetryAt.delete(video.id);
   } catch (err) {
     // Transient provider errors should not flip the job to failed; surface in logs only.
@@ -1005,7 +1033,9 @@ async function refreshNow(video: Video): Promise<Video> {
     if (!isPending(current)) return { next: current }; // someone else already recorded the outcome
     // A webhook moved it to another job (its render) while this check asked about the old one: that answer is stale.
     if (current.providerJobId !== video.providerJobId) return { next: current };
-    const next: Video = settledReview(current, { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() });
+    // A video whose lines are being fixed in place: its earlier render's completion is not the fix's.
+    const next: Video = settleLineFix(current, settledReview(current, { ...current, ...stripUndefined(stampGif(update)), updatedAt: nowIso() }), completedAt);
+    if (next === current) return { next: current };
     // A render that moved to another job (a directed video once it renders) is stored, so the next check follows it.
     if (next.status === current.status && next.videoUrl === current.videoUrl && next.providerJobId === current.providerJobId && next.agentWaiting === current.agentWaiting) return { next };
     await getStore().put("video", next);
@@ -1250,6 +1280,12 @@ const COUNTER_FIELDS = ["views", "embedViews", "lastViewedAt", "viewsByDay", "wa
  * owner edit changes none of them.
  */
 const CONCURRENT_FIELDS = [...COUNTER_FIELDS, "subtitles", "captionCues", "deletedAt", "review", "gifUrl", "gifCheckedAt"] as const;
+/**
+ * The render and its words, which status checks, webhooks, and a fix of the video's lines write under the lock and an
+ * owner edit never changes: taken from the stored record too, so an edit that read the video before a fix (or before its
+ * render finished) cannot put the old words, render, or status back.
+ */
+const RENDER_FIELDS = ["status", "providerJobId", "agentSessionId", "agentWaiting", "videoUrl", "thumbnailUrl", "durationSec", "error", "script", "lineFix", "countedIn"] as const;
 
 /**
  * Writes a video built from `base` while keeping whatever counters, subtitle tracks, and trash mark
@@ -1270,9 +1306,9 @@ function putKeepingCounters(
     // Deleted (or purged) between the caller's read and this write: never bring it back without its side records.
     if (!stored) throw new NotFoundError(`Video ${base.id} not found`);
     const next: Video = { ...base };
-    for (const field of CONCURRENT_FIELDS) delete next[field];
+    for (const field of [...CONCURRENT_FIELDS, ...RENDER_FIELDS]) delete next[field];
     const theirs: Partial<Video> = {};
-    for (const field of CONCURRENT_FIELDS) if (stored[field] !== undefined) Object.assign(theirs, { [field]: stored[field] });
+    for (const field of [...CONCURRENT_FIELDS, ...RENDER_FIELDS]) if (stored[field] !== undefined) Object.assign(theirs, { [field]: stored[field] });
     // An approval covers what viewers of the share page see; changing that sends the video back to "not reviewed".
     const drop = typeof opts.dropApproval === "function" ? opts.dropApproval(stored) : opts.dropApproval;
     if (drop && theirs.review?.status === "approved") delete theirs.review;
@@ -1636,6 +1672,271 @@ export async function editDirectedVideo(id: string, input: z.infer<typeof sceneE
     if (started instanceof Error) throw started;
     return started;
   });
+}
+
+export const lineFixSchema = z
+  .object({
+    scenes: z
+      .array(
+        z
+          .object({
+            /** The scene, numbered from 1 as the video page shows it. */
+            scene: z.number("Name the scene to fix").int().min(1).max(MAX_SCENES),
+            /** Its script as it was read, so a fix written against words that changed meanwhile is refused. */
+            from: z.string().max(MAX_LINE_CHARS),
+            script: z.string("Write the scene's new words").trim().min(1, "Write the scene's new words").max(MAX_LINE_CHARS, `A scene's words are at most ${MAX_LINE_CHARS.toLocaleString("en-US")} characters`),
+          })
+          .strict(),
+        "Fix at least one scene's words",
+      )
+      .superRefine((scenes, ctx) => {
+        if (!scenes.length) return void ctx.addIssue({ code: "custom", message: "Fix at least one scene's words" });
+        if (scenes.length > MAX_LINE_FIX_SCENES) return void ctx.addIssue({ code: "custom", message: `One fix changes at most ${MAX_LINE_FIX_SCENES} scenes` });
+        if (new Set(scenes.map((s) => s.scene)).size !== scenes.length) ctx.addIssue({ code: "custom", message: "Fix each scene once" });
+      }),
+  })
+  .strict();
+
+/** A completion read with no time of its own is taken as the fix's only this long after the fix was sent. */
+const LINE_FIX_UNDATED_MS = 60 * 1000;
+/** A fix the renderer never confirmed, whose render never came, is given up on after this long. */
+export const LINE_FIX_UNCONFIRMED_MS = 30 * 60 * 1000;
+/** A send that never finished (its function cut off) may be taken over by another request after this long. */
+const LINE_FIX_SEND_HOLD_MS = 45 * 1000;
+
+/** The changes that change words (a scene sent with its words as they were changes nothing). */
+function wordChanges(changes: z.infer<typeof lineFixSchema>["scenes"]) {
+  return changes.filter((c) => c.script !== c.from);
+}
+
+/** Whether a fix already recorded is this one: every scene it changes holds these words, and the fix named it. */
+function isThisFix(video: Video, changes: z.infer<typeof lineFixSchema>["scenes"]): boolean {
+  const fix = video.lineFix;
+  const changed = wordChanges(changes);
+  if (!fix || !changed.length) return false;
+  const lines = spokenLines(video);
+  return changed.every((c) => lines[c.scene - 1]?.script === c.script && fix.scenes.includes(c.scene));
+}
+
+/** Sets or clears each field `before` names on `next` (a field `before` holds no value for is removed). */
+function withBefore(next: Video, before: LineFixBefore): Video {
+  const out: Video = { ...next };
+  for (const key of ["scenes", "script", "videoUrl", "thumbnailUrl", "gifUrl", "gifCheckedAt", "durationSec", "captionCues", "subtitles"] as const) {
+    if (before[key] === undefined) delete out[key];
+    else Object.assign(out, { [key]: before[key] });
+  }
+  return out;
+}
+
+/**
+ * The video as it was before a fix in flight (its words, render, captions, and subtitle tracks), finished: the fix
+ * never reached the renderer (`error` absent: no trace of it is kept) or did not take (`error` noted on the fix).
+ */
+function undoLineFix(video: Video, error?: string): Video {
+  const pending = video.lineFix?.pending;
+  if (!pending) return video;
+  const next = withBefore({ ...video, status: "completed", updatedAt: nowIso() }, pending.before);
+  delete next.error;
+  // The approval the fix took off covers the words the video speaks again, unless a review was asked for meanwhile.
+  if (pending.before.review && !video.review) next.review = pending.before.review;
+  if (error) {
+    const { pending: _pending, ...fix } = video.lineFix!;
+    void _pending;
+    next.lineFix = { ...fix, count: fix.count - 1, error };
+  } else if (pending.before.lineFix) next.lineFix = pending.before.lineFix;
+  else delete next.lineFix;
+  return next;
+}
+
+/**
+ * What a status answer means for a video whose lines are being fixed in place. The renderer keeps the video's id, so
+ * until the new render starts it answers with the old one, finished: only a completion after the fix was sent is the
+ * fix's (an earlier one is not written). A failed render, or a fix the renderer never confirmed and never rendered,
+ * leaves the video as it was, with the reason noted. Any other answer is written as it is.
+ */
+export function settleLineFix(current: Video, next: Video, completedAt?: string, now = Date.now()): Video {
+  const fix = current.lineFix;
+  if (!fix?.pending) return next;
+  const sentAt = Date.parse(fix.at);
+  if (next.status === "failed") return undoLineFix(current, next.error ?? "The renderer could not render the fix");
+  if (next.status !== "completed") return next;
+  const done = completedAt ? Date.parse(completedAt) : NaN;
+  // HeyGen gives whole seconds, so a render finished in the second the fix was sent counts as after it.
+  const fresh = Number.isFinite(done) ? done >= Math.floor(sentAt / 1000) * 1000 : now - sentAt > LINE_FIX_UNDATED_MS;
+  if (!fresh) return !fix.pending.sent && now - sentAt > LINE_FIX_UNCONFIRMED_MS ? undoLineFix(current, "HeyGen never confirmed the fix; the video is as it was, so send the fix again") : current;
+  const { pending: _pending, ...settled } = fix;
+  void _pending;
+  return { ...next, lineFix: settled };
+}
+
+/**
+ * New words for spoken lines of a finished video, rendered in place: the renderer re-renders only the scenes named
+ * (HeyGen's video edit, `POST /v3/videos/{id}`), and the video keeps its id, link, settings, views, and comments.
+ *
+ * The fix is reserved on the video first, under its lock, from the record as stored then: the words checked against
+ * what was read (a change meanwhile is a conflict), the new words stored, the old render, captions, and subtitle tracks
+ * set aside, an approval taken off (viewers will hear other words), and the video followed again. Only the request
+ * that reserved it sends it and counts it as a render. A refusal from the renderer undoes it; an answer that is lost
+ * (a timeout, a server error) leaves it reserved, and sending the same fix again sends it with the same key and body,
+ * as HeyGen asks, so it is not rendered twice. `sent` says whether this request asked the renderer.
+ */
+export async function fixVideoLines(id: string, input: z.infer<typeof lineFixSchema>, ownerId: string = LOCAL_OWNER): Promise<{ video: Video; sent: boolean }> {
+  const video = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
+  if (purgeDue(video, Date.now())) throw new NotFoundError(`Video ${id} not found`);
+  const changes = [...input.scenes].sort((a, b) => a.scene - b.scene);
+  // This fix again (a retried request, a second tab): sent again when its answer was lost, else answered as it stands.
+  if (isThisFix(video, changes)) {
+    if (video.lineFix?.pending && !video.lineFix.pending.sent) return resendLineFix(video, ownerId);
+    if (video.lineFix?.pending || video.status === "completed") return { video, sent: false };
+  }
+  if (video.lineFix?.pending) throw new ConflictError("A fix of this video's lines is still being made; wait for it to finish");
+  const problem = lineFixProblem(video);
+  if (problem) throw new ValidationError(problem);
+  const provider = getAvatarProviderByName(video.provider);
+  if (!provider.videoLines || !provider.editVideoLines || !video.providerJobId) throw new ValidationError(`Lines cannot be fixed in a video made with the ${video.provider} renderer`);
+  const lines = spokenLines(video);
+  const checkAgainst = (stored: Video) => {
+    const now = spokenLines(stored);
+    for (const c of changes) {
+      const line = now[c.scene - 1];
+      if (!line) throw new ValidationError(`This video has no scene ${c.scene}`);
+      if (!line.spoken) throw new ValidationError(`Scene ${c.scene} has no spoken line to fix (it plays a recording, or holds a pause)`);
+      if (line.script !== c.from) throw new ConflictError("The video's words changed since they were read; open them again and resend the fix");
+    }
+  };
+  checkAgainst(video);
+  for (const c of changes) if (!speaks(c.script)) throw new ValidationError(`Scene ${c.scene} needs words to speak, not only pauses`);
+  const changed = wordChanges(changes);
+  if (!changed.length) throw new ValidationError("Change the words of at least one scene");
+  const scriptsAfter = lines.map((l) => changed.find((c) => c.scene === l.scene)?.script ?? l.script);
+  if (scriptsAfter.join("\n\n").length > MAX_LINE_CHARS) throw new ValidationError(`All the scenes' words together are at most ${MAX_LINE_CHARS.toLocaleString("en-US")} characters`);
+  await enforceRenderLimit(ownerId);
+  const held = await provider.videoLines(video.providerJobId, lines.length);
+  if (held.scenes.length !== lines.length) throw new ValidationError("HeyGen's copy of this video no longer matches its scenes here, so its lines cannot be fixed; make a copy with the new words instead");
+  // The renderer speaks the brand kit's pronunciations, as when the video was made; the stored words keep the spelling.
+  const rules = (await getBrandKit(ownerId))?.pronunciations ?? [];
+  const voices = rules.length ? Object.fromEntries((await listVoices(ownerId)).map((v) => [v.id, v])) : {};
+  const scenesAfter = (video.scenes?.length ? video.scenes : [{ script: video.script ?? "" }]).map((sc, i) => ({ ...sc, script: scriptsAfter[i] }));
+  const said = spokenCopy({ script: scriptsAfter[0], voiceId: video.voiceId, scenes: scenesAfter as Scene[] }, rules, voices);
+  const edits: LineEdit[] = changed.map((c) => {
+    const { id: sceneId, lineId } = held.scenes[c.scene - 1];
+    if (!lineId) throw new ValidationError(`HeyGen holds scene ${c.scene} without one spoken line to edit; make a copy with the new words instead`);
+    return { sceneId, lineId, script: said.scenes?.[c.scene - 1]?.script ?? c.script };
+  });
+  // A key of its own for each fix sent (a fix of the same words after one that failed is another render at HeyGen).
+  const reservedAt = nowIso();
+  const key = `lf_${createHash("sha256").update(`${ownerId}\0${video.id}\0${held.editVersion}\0${reservedAt}\0${JSON.stringify(edits)}`).digest("base64url").slice(0, 40)}`;
+  let won = false;
+  const reserved = await updateKeepingCounters(id, ownerId, (stored) => {
+    // The same fix reserved by another request meanwhile: that request sends it.
+    if (stored.lineFix?.pending && isThisFix(stored, changes)) return stored;
+    if (stored.lineFix?.pending) throw new ConflictError("A fix of this video's lines is still being made; wait for it to finish");
+    const again = lineFixProblem(stored);
+    if (again) throw new ValidationError(again);
+    checkAgainst(stored);
+    won = true;
+    const before: LineFixBefore = stripUndefined({
+      scenes: stored.scenes,
+      script: stored.script,
+      videoUrl: stored.videoUrl,
+      thumbnailUrl: stored.thumbnailUrl,
+      gifUrl: stored.gifUrl,
+      gifCheckedAt: stored.gifCheckedAt,
+      durationSec: stored.durationSec,
+      captionCues: stored.captionCues,
+      subtitles: stored.subtitles,
+      review: stored.review,
+      lineFix: stored.lineFix,
+    });
+    const now = reservedAt;
+    // The new words, and the old render, captions, and tracks set aside: they speak the old words.
+    const next = withBefore({ ...stored, status: "processing", updatedAt: now }, {});
+    delete next.error;
+    if (stored.scenes?.length) {
+      next.scenes = stored.scenes.map((sc, i) => ({ ...sc, script: scriptsAfter[i] }));
+      next.script = scriptsAfter.join("\n\n");
+    } else next.script = scriptsAfter[0];
+    // An approval covered the words viewers heard; these are others.
+    if (next.review?.status === "approved") delete next.review;
+    const { error: _error, ...earlier } = stored.lineFix ?? { count: 0 };
+    void _error;
+    // Reserved to be sent by this request.
+    next.lineFix = { at: now, scenes: changed.map((c) => c.scene), count: (earlier.count ?? 0) + 1, key, pending: { editVersion: held.editVersion, edits, before, sendingAt: now, attempts: 1 } };
+    return next;
+  });
+  if (!won) return { video: reserved, sent: false };
+  return { video: await sendLineFix(reserved, ownerId), sent: true };
+}
+
+/**
+ * Sends again a reserved fix whose answer was lost, with its own key and body, as HeyGen asks: taken under the lock by
+ * one request at a time (a send that never finished is taken over after a while), so two retries do not both send it.
+ */
+async function resendLineFix(video: Video, ownerId: string): Promise<{ video: Video; sent: boolean }> {
+  let claimed = false;
+  const held = await updateKeepingCounters(video.id, ownerId, (stored) => {
+    const pending = stored.lineFix?.pending;
+    if (!pending || pending.sent || stored.lineFix!.key !== video.lineFix!.key) return stored;
+    if (pending.sendingAt && Date.now() - Date.parse(pending.sendingAt) < LINE_FIX_SEND_HOLD_MS) return stored;
+    claimed = true;
+    return { ...stored, lineFix: { ...stored.lineFix!, pending: { ...pending, sendingAt: nowIso(), attempts: pending.attempts + 1 } } };
+  });
+  if (!claimed) return { video: held, sent: false };
+  return { video: await sendLineFix(held, ownerId), sent: true };
+}
+
+/**
+ * Sends a reserved fix, taken by this request, to the renderer with its own key and body. Taken: it is counted once as
+ * a render and followed until its render is ready. Refused the first time: the video is as it was. Anything else (no
+ * answer, the same key still being taken, a refusal of a fix sent before): it stays reserved, to be sent again.
+ */
+async function sendLineFix(video: Video, ownerId: string): Promise<Video> {
+  const fix = video.lineFix!;
+  const pending = fix.pending!;
+  const provider = getAvatarProviderByName(video.provider);
+  const release = () =>
+    updateKeepingCounters(video.id, ownerId, (stored) => {
+      const p = stored.lineFix?.pending;
+      if (!p || stored.lineFix!.key !== fix.key) return stored;
+      const { sendingAt: _at, ...rest } = p;
+      void _at;
+      return { ...stored, lineFix: { ...stored.lineFix!, pending: rest } };
+    });
+  let out: { providerJobId: string };
+  try {
+    out = await provider.editVideoLines!({ providerJobId: video.providerJobId!, editVersion: pending.editVersion, edits: pending.edits, key: fix.key });
+  } catch (err) {
+    const refused = err instanceof ValidationError || err instanceof LimitError || err instanceof ConflictError;
+    // Refused when first sent: nothing was saved at the renderer, so nothing is kept of the fix here either. A refusal of
+    // a fix sent before may follow an earlier answer that was lost; it stays reserved until the renderer settles it.
+    if (refused && pending.attempts <= 1) {
+      await updateKeepingCounters(video.id, ownerId, (stored) => (stored.lineFix?.key === fix.key && stored.lineFix.pending ? undoLineFix(stored) : stored));
+      throw err;
+    }
+    await release();
+    if (refused) throw err;
+    if (!(err instanceof UpstreamError)) console.error(`line fix for ${video.id} got no answer:`, err);
+    throw err instanceof UpstreamError ? err : new UpstreamError("HeyGen did not confirm the fix; send it again to finish it (it is not rendered twice)");
+  }
+  // Recorded as counted under the lock, so only one request counts it.
+  const month = usageMonth();
+  let count = false;
+  const stored = await updateKeepingCounters(video.id, ownerId, (current) => {
+    const p = current.lineFix?.pending;
+    if (current.lineFix?.key !== fix.key || !p) return current;
+    count = !p.countedIn;
+    const { sendingAt: _at, ...rest } = p;
+    void _at;
+    return { ...current, providerJobId: out.providerJobId, lineFix: { ...current.lineFix, pending: { ...rest, sent: true, countedIn: p.countedIn ?? month } }, updatedAt: nowIso() };
+  });
+  if (count) {
+    try {
+      await adjustRenderUsage(ownerId, month, 1);
+    } catch (err) {
+      console.error(`render usage for ${ownerId} could not be recorded:`, err);
+    }
+  }
+  return stored;
 }
 
 /** How long a keyed render's reserved row stands for a start still being sent (a function is cut off well before). */
@@ -2085,6 +2386,9 @@ export async function applyAvatarWebhook(providerName: string, body: unknown): P
   const byJob = parsed.providerJobId ? await getStore().findBy<Video>("video", "providerJobId", parsed.providerJobId) : null;
   const video = byJob ?? (await awaitingRender(providerName, parsed.callbackId));
   if (!video) return null;
+  // A video whose lines are being fixed keeps its id at the renderer, so a webhook cannot say which render it is about
+  // (a late one from the earlier render, say): the renderer is asked, which says when the render it has finished.
+  if (video.lineFix?.pending) return isPending(video) ? refreshStatus(video) : video;
   // Found by its own id, it is still following the agent's session: from now on it follows the render the webhook names
   // (a failure names none worth following).
   const moved: Partial<Video> = !byJob && parsed.providerJobId && parsed.update.status !== "failed" ? { ...parsed.update, providerJobId: parsed.providerJobId } : parsed.update;
@@ -2394,7 +2698,8 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
   const videos = query.limit ? matched.slice(0, query.limit) : matched;
   return {
     // Subtitle text and corrected captions are for the video page and the share player, not for a card: they are left off the page.
-    videos: videos.map(({ subtitles: _subtitles, captionCues: _captionCues, ...rest }) => rest),
+    // A fix in flight lists only that it is (the words and render it set aside stay on the video's own page).
+    videos: videos.map(({ subtitles: _subtitles, captionCues: _captionCues, ...rest }) => (rest.lineFix?.pending ? { ...rest, lineFix: { ...rest.lineFix, pending: { editVersion: "", edits: [], attempts: rest.lineFix.pending.attempts, before: {} } } } : rest)),
     matched: matched.length,
     total: live.length,
     hasMore: videos.length < matched.length,

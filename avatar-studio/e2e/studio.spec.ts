@@ -14147,3 +14147,53 @@ test("the bulk bar never sends more than the 200 videos one action takes", async
   const starred = (await (await page.request.get(`/api/videos?q=${encodeURIComponent(tag)}&starred=1&limit=1`)).json()).matched as number;
   expect(starred).toBe(200);
 });
+
+test("a spoken line of a finished video is fixed in place: only that scene re-renders, under the same link", async ({ page }) => {
+  const title = `Line fix ${Date.now().toString(36)}`;
+  const video = await createVideoViaApi(page, title, {
+    script: undefined,
+    scenes: [
+      { script: "Welcome to the quarterly update.", name: "Opening", background: { type: "color", value: "#f1f5f9" } },
+      { script: "Revenue grew ten percent this quarter.", background: { type: "color", value: "#f1f5f9" } },
+    ],
+  });
+  await expect.poll(async () => ((await (await page.request.get(`/api/videos/${video.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");
+  await page.goto(`/videos/${video.id}`);
+  const card = page.getByTestId("line-fixes");
+  const open = card.getByRole("button", { name: "Fix a line" });
+  await expect(open).toHaveAccessibleDescription(/HeyGen re-renders only those, in this same video/);
+  await open.click();
+  const opening = card.getByRole("textbox", { name: "Scene 1 · Opening" });
+  await expect(opening).toBeFocused();
+  await expect(opening).toHaveValue("Welcome to the quarterly update.");
+  const second = card.getByRole("textbox", { name: "Scene 2", exact: true });
+  const send = card.getByRole("button", { name: /^Re-render/ });
+  await expect(send).toBeDisabled();
+  await expect(send).toHaveAccessibleDescription("Change the words of a scene to fix it.");
+  // A scene of only pauses would have nothing to say.
+  await second.fill("[pause 2s]");
+  await expect(send).toHaveAccessibleDescription("Scene 2 needs words to speak, not only pauses.");
+  await second.fill("Revenue grew fifteen percent this quarter.");
+  await expect(send).toHaveText("Re-render the scene");
+  await expect(send).toHaveAccessibleDescription("1 scene changed.");
+  const posted = page.waitForRequest((r) => r.url().endsWith(`/api/videos/${video.id}/lines`) && r.method() === "POST");
+  await send.click();
+  expect((await posted).postDataJSON()).toEqual({ scenes: [{ scene: 2, from: "Revenue grew ten percent this quarter.", script: "Revenue grew fifteen percent this quarter." }] });
+  // The same video renders again; the panel says which scene and takes the keyboard.
+  await expect(card.getByRole("heading", { name: "Fix a line" })).toBeFocused();
+  await expect(card.getByTestId("line-fix-rendering")).toHaveText("Re-rendering scene 2 with the new words. This page updates when it is ready.");
+  expect(page.url()).toContain(`/videos/${video.id}`);
+  // Ready again: the new words are the video's, and the panel offers another fix.
+  await expect(open).toBeVisible({ timeout: 20_000 });
+  const stored = (await (await page.request.get(`/api/videos/${video.id}`)).json()).video as { status: string; scenes: Array<{ script: string }>; lineFix: { scenes: number[]; count: number } };
+  expect(stored.status).toBe("completed");
+  expect(stored.scenes.map((s) => s.script)).toEqual(["Welcome to the quarterly update.", "Revenue grew fifteen percent this quarter."]);
+  expect(stored.lineFix).toMatchObject({ scenes: [2], count: 1 });
+  // Words read before the fix are stale now: sent again from the old words, the server refuses with a conflict.
+  const stale = await page.request.post(`/api/videos/${video.id}/lines`, { data: { scenes: [{ scene: 2, from: "Revenue grew ten percent this quarter.", script: "Revenue grew twenty percent." }] } });
+  expect(stale.status()).toBe(409);
+  // A video with no line to fix shows no panel: a still-rendering one, for instance.
+  const fresh = await createVideoViaApi(page, `${title} new`);
+  await page.goto(`/videos/${fresh.id}`);
+  await expect(page.getByTestId("line-fixes")).toHaveCount(0);
+});

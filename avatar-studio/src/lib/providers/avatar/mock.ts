@@ -459,6 +459,21 @@ export class MockAvatarProvider implements AvatarProvider {
     return { editVersion: `mockev_${m[1]}`, scenes: DEMO_DIRECTED_SCENES.map((script, i) => ({ id: `mockscene_${m[1]}_${i + 1}`, script })) };
   }
 
+  /** A demo studio render's scenes, as many as the studio sent, their ids and edit version drawn from the render's own id. */
+  async videoLines(providerJobId: string, sceneCount: number): Promise<{ editVersion: string; scenes: Array<{ id: string; lineId?: string }> }> {
+    const m = /^mock_(\d+)_\d+$/.exec(providerJobId);
+    if (!m) throw new ValidationError("The demo renderer has no scenes to edit for this video");
+    return { editVersion: `mockev_${m[1]}`, scenes: Array.from({ length: sceneCount }, (_, i) => ({ id: `mockscene_${m[1]}_${i + 1}`, lineId: `mockline_${m[1]}_${i + 1}` })) };
+  }
+
+  /** A demo line fix: checked like HeyGen's (the version current, every line the render's), then the sample rendered again. */
+  async editVideoLines({ providerJobId, editVersion, edits }: { providerJobId: string; editVersion: string; edits: Array<{ sceneId: string; lineId: string; script: string }>; key: string }): Promise<{ providerJobId: string }> {
+    const m = /^mock_(\d+)_(\d+)$/.exec(providerJobId);
+    if (!m || editVersion !== `mockev_${m[1]}`) throw new ConflictError("The video changed at HeyGen since its lines were read; open them again and resend the fix");
+    if (edits.some((e) => !e.sceneId.startsWith(`mockscene_${m[1]}_`) || e.lineId !== e.sceneId.replace("mockscene_", "mockline_"))) throw new ValidationError("HeyGen could not fix those lines: a line named is not one of this video's");
+    return { providerJobId: `mock_${Date.now()}_${m[2]}` };
+  }
+
   /** A demo scene edit: checked like HeyGen's (the version current, every scene the render's), then a new sample render. */
   async editDirectedScenes({ renderJobId, editVersion, edits }: { sessionId: string; renderJobId: string; editVersion: string; edits: Array<{ sceneId: string; text: string }> }): Promise<{ providerJobId: string }> {
     const { editVersion: current, scenes } = await this.directedScenes(renderJobId);
@@ -497,6 +512,7 @@ export class MockAvatarProvider implements AvatarProvider {
       thumbnailUrl: demoAssetUrl(SAMPLE_THUMB),
       gifUrl: demoAssetUrl(SAMPLE_GIF),
       durationSec: Number(duration),
+      completedAt: new Date(Number(startedAt) + MockAvatarProvider.RENDER_MS).toISOString(),
     };
   }
 }

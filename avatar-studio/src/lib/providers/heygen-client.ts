@@ -478,6 +478,16 @@ export class HeyGenClient {
     return this.request<{ video_id: string }>(`${V3}/templates/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(body), ...(key ? { headers: { "Idempotency-Key": key } } : {}) });
   }
 
+  /** Edits a finished video in place (`POST /v3/videos/{video_id}`): only the scenes named re-render, under the same id. */
+  editVideo(videoId: string, body: Record<string, unknown>, key: string) {
+    return this.request<{ video_id?: string; status?: string; version_id?: string }>(`${V3}/videos/${encodeURIComponent(videoId)}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "Idempotency-Key": key },
+      signal: AbortSignal.timeout(30_000),
+    });
+  }
+
   /** A video (v3, `POST /v3/videos`); a studio request composes its scenes into one render. */
   generateVideo(body: Record<string, unknown>, key?: string) {
     return this.request<{ video_id: string; status?: string }>(`${V3}/videos`, { method: "POST", body: JSON.stringify(body), ...(key ? { headers: { "Idempotency-Key": key } } : {}) });
@@ -524,7 +534,7 @@ export class HeyGenClient {
 
   /** A video's scenes as its editor document holds them (`GET /v3/videos/{id}/scenes`), with the document's edit version. */
   videoScenes(videoId: string) {
-    type ScriptItem = { type?: string; text?: string | null };
+    type ScriptItem = { id?: string; type?: string; text?: string | null };
     return this.request<{ video_id?: string; edit_version?: string; scenes?: Array<{ id?: string; script?: ScriptItem[] | null }> }>(`${V3}/videos/${encodeURIComponent(videoId)}/scenes`, { signal: AbortSignal.timeout(15_000) });
   }
 
@@ -551,6 +561,7 @@ export class HeyGenClient {
       thumbnail_url?: string;
       gif_url?: string | null;
       duration?: number;
+      completed_at?: number | null;
       failure_code?: string;
       failure_message?: string;
       // Bounded: a webhook's answer waits on it too (a directed video's render, checked as its agent names it).

@@ -1240,6 +1240,59 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   /**
+   * A finished studio render's scenes (`GET /v3/videos/{id}/scenes`): each scene's id and its one text line's id (the
+   * studio sends one per spoken scene; a clip or a silence has none), and the document's `edit_version`.
+   */
+  async videoLines(providerJobId: string): Promise<{ editVersion: string; scenes: Array<{ id: string; lineId?: string }> }> {
+    let data;
+    try {
+      data = await this.client.videoScenes(providerJobId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ValidationError("HeyGen is still preparing this video's scenes; try again in a minute");
+      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has this video, so its lines cannot be fixed; make a copy instead");
+      if (/ failed: 400 /.test(message)) throw new ValidationError(`HeyGen cannot edit this video: ${heygenReason(message, "it was made before HeyGen's editor; make a copy instead")}`);
+      throw err;
+    }
+    const scenes = (data.scenes ?? []).map((sc) => {
+      const lines = (sc.script ?? []).filter((i) => i.type === "text");
+      return { id: sc.id ?? "", ...(lines.length === 1 && lines[0].id ? { lineId: lines[0].id } : {}) };
+    });
+    if (!data.edit_version || !scenes.length || scenes.some((s) => !s.id)) throw new ValidationError("HeyGen has no scenes to edit for this video; make a copy instead");
+    return { editVersion: data.edit_version, scenes };
+  }
+
+  /**
+   * New words for the lines named of a finished studio render (`POST /v3/videos/{id}` with the `edit_version` and each
+   * line's `text`, pauses as break tags as when it was made); HeyGen re-renders only those scenes, under the same id.
+   */
+  async editVideoLines({ providerJobId, editVersion, edits, key }: { providerJobId: string; editVersion: string; edits: Array<{ sceneId: string; lineId: string; script: string }>; key: string }): Promise<{ providerJobId: string }> {
+    const body = {
+      edit_version: editVersion,
+      scenes: edits.map((e) => ({ id: e.sceneId, script: [{ id: e.lineId, type: "text", text: withBreakTags(e.script) }] })),
+      ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen") } : {}),
+    };
+    try {
+      await this.client.editVideo(providerJobId, body, key);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      const code = heygenCode(message);
+      if (/ failed: 409 /.test(message)) {
+        if (code === "stale_edit_version") throw new ConflictError("The video changed at HeyGen since its lines were read; open them again and resend the fix");
+        if (code === "resource_not_ready") throw new ConflictError("HeyGen is still rendering this video; fix its lines once it is ready");
+        // The same key still being taken (or taken with another body): HeyGen has not answered it yet, which is no refusal.
+        throw new UpstreamError("HeyGen is still taking this fix; send it again in a moment");
+      }
+      if (/ failed: 402 /.test(message)) throw new ValidationError("The HeyGen account has no credits left for this fix");
+      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has this video, so its lines cannot be fixed; make a copy instead");
+      if (/ failed: 429 /.test(message)) throw new LimitError("HeyGen is taking too many edits just now; try again in a minute");
+      if (/ failed: (400|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not fix those lines: ${heygenReason(message, "make a copy with the new words instead")}`);
+      throw err;
+    }
+    return { providerJobId };
+  }
+
+  /**
    * Revises the scenes named of a render its session made (`POST /v3/video-agents/{session_id}` with an `edit_plan`, one
    * item per scene against that render's `edit_version`); the other scenes keep their script and visuals. The new cut
    * is another render, followed like any.
@@ -1302,7 +1355,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
     const s = await this.client.videoStatus(providerJobId);
     if (s.status === "completed") {
-      return stripEmpty({ status: "completed" as const, videoUrl: s.video_url, thumbnailUrl: s.thumbnail_url, gifUrl: httpsOnly(s.gif_url), durationSec: s.duration });
+      const completedAt = typeof s.completed_at === "number" && s.completed_at > 0 ? new Date(s.completed_at * 1000).toISOString() : undefined;
+      return stripEmpty({ status: "completed" as const, videoUrl: s.video_url, thumbnailUrl: s.thumbnail_url, gifUrl: httpsOnly(s.gif_url), durationSec: s.duration, completedAt });
     }
     if (s.status === "failed") return { status: "failed", error: s.failure_message ?? "Render failed" };
     return { status: s.status === "pending" || s.status === "waiting" ? "queued" : "processing" };

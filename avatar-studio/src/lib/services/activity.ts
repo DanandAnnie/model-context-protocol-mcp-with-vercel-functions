@@ -113,7 +113,7 @@ function sorted(events: ActivityEvent[]): ActivityEvent[] {
 const LINK_CHECKS_AT_ONCE = 10;
 
 /** The kinds whose subject is a video, and so link to its page while it is still kept (the trash included). */
-const VIDEO_KINDS = new Set<ActivityKind>(["video.created", "video.trashed", "video.restored", "video.review_requested", "video.approved", "video.changes_requested"]);
+const VIDEO_KINDS = new Set<ActivityKind>(["video.created", "video.trashed", "video.restored", "video.review_requested", "video.approved", "video.changes_requested", "video.lines_fixed"]);
 
 /**
  * Where each event's line leads, keyed by event id: a video's page, the shared presenters, the API keys, the

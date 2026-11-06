@@ -1957,3 +1957,17 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The e2e check for sideways scroll measured the page, which never scrolls; it now measures the scrolling main area.
     - The API reference now names `?end=` and the long clock forms.
   - **Tests.** Unit tests cover long minutes in a clock (to just under a day) and the malformed clocks still refused. The section e2e test checks the focus after each button, that a long-minutes end is read as a time, and the link's width at 375 pixels.
+- Copy link at current time on the share page (`81ea9e4`). A viewer can now send someone the moment they are watching. A "Copy link at 1:05" button sits under the share page's player, beside the call-to-action and Download buttons. It copies a link to the video that starts at that second.
+  - **The time.** The time on the button follows the player, to the second, and is read again when pressed, so the link is the moment on screen.
+    - The link starts at the whole second the viewer is in, so it opens a moment before, never after, what they saw. In the first second it is the plain link.
+    - In the clip's last half second, where the player would start a link from the beginning, it names the last second a link still starts at. The player and the button now share that rule, so they cannot drift apart.
+  - **The link.** It is written at the site's own address, as the studio's copy buttons and oEmbed write it. It carries only its own start: an end, or options of the link the page was opened from, are left off. It is not shown in embeds or before the video is made, and it works on password and email-gated links once the viewer is in.
+  - **Accessibility.** The button's name stays "Copy link at the current time" while the time on it changes, so a screen reader does not read every second. The status line says which moment was copied. Where the browser refuses the clipboard, the link appears in a field that takes the focus, and the status line says to copy it from there.
+  - **Review.** An independent review found no blocking issues and four minor points, all fixed:
+    - A copy in the clip's last half second named a time the player would not start at.
+    - The button's name changed every second.
+    - A refused clipboard was not always announced, and its field was not focused.
+    - The e2e test did not cover the end of the clip or the refused clipboard.
+
+    Its nits were taken too: the site's own address instead of the one in the browser, a time slot wide enough for 10:00, and a status line that takes no room until it speaks.
+  - **Tests.** Unit tests cover the moment's second (a hair short of a second, the last half second, a clip whose length is not known yet), checked against the player's own start rule, and the link. The e2e test copies at the start, at a moment, in the clip's last half second, from a section link, and with the clipboard refused, and checks that an embed has no button.

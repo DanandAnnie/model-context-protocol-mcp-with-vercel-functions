@@ -719,6 +719,20 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     }
   }
 
+  async submitTwinConsentVideo(groupId: string, assetId: string, key: string) {
+    try {
+      const out = await this.client.createConsent(groupId, key, assetId);
+      const consent = consentOf(out.consentStatus);
+      return { consent: consent === "accepted" ? ("accepted" as const) : consent === "rejected" ? ("rejected" as const) : ("pending" as const) };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
+      // HeyGen answers 400 while a consent is under review, once it is given, and for an account without the upload flow.
+      if (/ failed: (400|403|404|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen did not take the consent video: ${heygenReason(message, "send the consent link instead")}`);
+      throw err;
+    }
+  }
+
   async twinConsentStatus(groupId: string) {
     let group;
     try {

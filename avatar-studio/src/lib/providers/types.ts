@@ -277,6 +277,8 @@ export interface AvatarProvider {
   finishTwinUpload?(assetId: string): Promise<void>;
   /** A page for the person in the footage to record their consent on (valid for a day), and where consent stands. */
   requestTwinConsent?(groupId: string, key: string): Promise<{ url?: string; consent: "pending" | "accepted" | "rejected" }>;
+  /** Submits a recorded consent video (an asset uploaded with `startTwinUpload`) for review, in place of the page. */
+  submitTwinConsentVideo?(groupId: string, assetId: string, key: string): Promise<{ consent: "pending" | "accepted" | "rejected" }>;
   /**
    * Where the person's consent to a twin stands, with the reason when it was refused; `gone` when the renderer no
    * longer has the twin. `askedAt` is when the consent link was last asked for.

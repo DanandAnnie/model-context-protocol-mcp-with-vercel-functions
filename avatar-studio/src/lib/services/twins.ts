@@ -56,7 +56,14 @@ export const twinUploadRequestSchema = z.object({
   fileName: z.string().trim().min(1, "Choose a video file").max(200, "The file name is too long"),
   contentType: z.enum(TWIN_UPLOAD_TYPES, { message: "Choose an MP4, MOV, or WebM video" }),
   sizeBytes: z.number().int().min(1, "The file is empty").max(MAX_TWIN_UPLOAD_BYTES, "The file is over 200 MB; trim or compress it first"),
-});
+  /** The footage a twin is trained from (the default), or a recorded consent video for a twin already trained or training. */
+  purpose: z.enum(["footage", "consent"]).default("footage"),
+  /** The twin a consent video is for (required with purpose "consent"), so one it cannot be sent for is refused before the file goes. */
+  twinId: z
+    .string()
+    .regex(/^tw_[A-Za-z0-9_-]{1,64}$/, "Unknown digital twin")
+    .optional(),
+}).refine((u) => u.purpose !== "consent" || !!u.twinId, { message: "Say which digital twin the consent video is for", path: ["twinId"] });
 
 /** What an upload's token vouches for: the account, the renderer, its asset there, the file's name and size, and until when. */
 type UploadClaim = { o: string; p: string; a: string; n: string; s: number; e: number };
@@ -101,6 +108,15 @@ function readUpload(token: string, ownerId: string, providerName: string): Uploa
   return claim;
 }
 
+/**
+ * Whether a recorded consent video can be uploaded in place of the consent link: with the demo renderer, or with HeyGen
+ * where the operator turned it on (`TWIN_CONSENT_UPLOAD`; HeyGen offers it to enterprise accounts only).
+ */
+export function twinConsentUploadsAvailable(): boolean {
+  const provider = getAvatarProvider();
+  return twinUploadsAvailable() && typeof provider.submitTwinConsentVideo === "function" && (provider.name === "mock" || config.twinConsentUploads);
+}
+
 /** Whether footage can be uploaded from the browser with the renderer in use (else it is pasted as a link). */
 export function twinUploadsAvailable(): boolean {
   const provider = getAvatarProvider();
@@ -119,8 +135,15 @@ export async function startTwinUpload(
 ): Promise<{ token: string; url: string; headers: Record<string, string>; expiresAt: string }> {
   const provider = getAvatarProvider();
   if (!provider.startTwinUpload || !provider.finishTwinUpload) throw new ValidationError(`Uploading footage is not available with the ${provider.name} renderer; paste a link to it instead`);
-  // Refused before a large file is sent for nothing.
-  if ((await getStore().list<TwinJob>("twin", ownerId)).length >= MAX_TWINS) throw new ConflictError(`An account keeps at most ${MAX_TWINS} digital twins; forget one to train another`);
+  if (input.purpose === "consent") {
+    if (!twinConsentUploadsAvailable()) throw new ValidationError("Uploading a consent video is not turned on here; send the person the consent link instead");
+    // Refused before a large file is sent for nothing: the twin must be one a consent video can be sent for now.
+    const refusal = consentVideoRefusal(owned(await getStore().get<TwinJob>("twin", input.twinId!), ownerId, "Digital twin"));
+    if (refusal) throw refusal;
+  } else if ((await getStore().list<TwinJob>("twin", ownerId)).length >= MAX_TWINS) {
+    // Refused before a large file is sent for nothing.
+    throw new ConflictError(`An account keeps at most ${MAX_TWINS} digital twins; forget one to train another`);
+  }
   opts.admit?.();
   const key = `twu_${createHash("sha256").update(`${ownerId}\0${opts.key ?? newId("k")}`).digest("base64url").slice(0, 40)}`;
   const out = await provider.startTwinUpload({ fileName: input.fileName, contentType: input.contentType, sizeBytes: input.sizeBytes, key });
@@ -145,14 +168,15 @@ export function twinsAvailable(): boolean {
 }
 
 /** What the account sees of a twin: never the renderer, its look, or its character, which stay on the server. */
-export type PublicTwin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "voiceId" | "imageUrl" | "footageAssetId"> & { consentLinkExpired?: true };
+export type PublicTwin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "voiceId" | "imageUrl" | "footageAssetId" | "consentVideoAsset"> & { consentLinkExpired?: true };
 /**
  * What the account sees of a twin. The consent link is the person's to record consent with, so only an account that
  * may edit sees it (`canEdit` false hides it from viewers of a workspace).
  */
 export function publicTwin(job: TwinJob, now = Date.now(), canEdit = true): PublicTwin {
-  const { ownerId: _o, provider: _p, lookId: _l, groupId: _g, voiceId: _v, imageUrl: _i, footageAssetId: _a, ...rest } = job;
+  const { ownerId: _o, provider: _p, lookId: _l, groupId: _g, voiceId: _v, imageUrl: _i, footageAssetId: _a, consentVideoAsset: _c, ...rest } = job;
   void _a;
+  void _c;
   void _o;
   void _p;
   void _l;
@@ -365,6 +389,8 @@ export async function requestTwinConsent(id: string, ownerId: string = LOCAL_OWN
   if (!job.groupId) throw new ConflictError(STILL_SENDING);
   const fresh = job.consentUrl && job.consentUrlAt && Date.now() - Date.parse(job.consentUrlAt) < CONSENT_LINK_MS && job.consent !== "rejected";
   if (fresh) return job;
+  // A video under review is HeyGen's answer to wait for; a link now would be refused the same way.
+  if (consentVideoUnderReview(job)) throw new ConflictError(`The consent video for "${job.name}" is still being reviewed; wait for it`);
   const provider = getAvatarProviderByName(job.provider);
   if (!provider.requestTwinConsent) throw new ValidationError(`Consent links are not available with the ${job.provider} renderer`);
   // Counted only when a new link is asked for; the one still valid is handed back as often as it is wanted.
@@ -374,9 +400,69 @@ export async function requestTwinConsent(id: string, ownerId: string = LOCAL_OWN
   const now = nowIso();
   const next: TwinJob = { ...job, consent: out.consent, ...(out.url ? { consentUrl: out.url, consentUrlAt: now } : {}), updatedAt: now };
   delete next.error;
+  // The link replaces a refused video: what the person records on it is what is reviewed now.
+  delete next.consentVideo;
   // Written only over the record that was read, so a forget meanwhile stays forgotten.
   if (!(await getStore().putIf("twin", next, "updatedAt", job.updatedAt))) throw new ConflictError(`"${job.name}" changed meanwhile; try again`);
   return next;
+}
+
+/** Whether a recorded consent video is waiting for the renderer's review (no link or other video is sent meanwhile). */
+export function consentVideoUnderReview(job: Pick<TwinJob, "consent" | "consentVideo">): boolean {
+  return !!job.consentVideo && job.consent === "pending";
+}
+
+/** Why a consent video cannot be sent for `job` now, as the error to throw; null when it can. */
+function consentVideoRefusal(job: TwinJob): Error | null {
+  if (job.status === "failed") return new ValidationError(`"${job.name}" could not be trained${job.error ? `: ${job.error}` : ""}; train it again from other footage`);
+  if (job.consent === "accepted") return new ConflictError(`Consent for "${job.name}" is already given`);
+  if (!job.groupId) return new ConflictError(STILL_SENDING);
+  if (consentVideoUnderReview(job)) return new ConflictError(`The consent video for "${job.name}" is still being reviewed; wait for it`);
+  return null;
+}
+
+/**
+ * Submits a recorded consent video for a twin, in place of the link the person records on (HeyGen's upload flow,
+ * `POST /v3/avatars/{group}/consent` with `consent_video` as the uploaded asset): `upload` is the token of a file the
+ * browser sent to the renderer (`startTwinUpload` with purpose "consent"). It is reviewed at the renderer, followed as
+ * a link's consent is; a refusal says why and another video (or a link) can be sent. A link not yet used is dropped.
+ * `finish` counts each finish asked of the renderer (refused or not), `admit` each video submitted.
+ */
+export async function submitTwinConsentVideo(id: string, upload: string, ownerId: string = LOCAL_OWNER, opts: { admit?: () => void; finish?: () => void } = {}): Promise<TwinJob> {
+  const job = owned(await getStore().get<TwinJob>("twin", twinIdSchema.parse(id)), ownerId, "Digital twin");
+  const refusal = consentVideoRefusal(job);
+  if (refusal) throw refusal;
+  if (!twinConsentUploadsAvailable()) throw new ValidationError("Uploading a consent video is not turned on here; send the person the consent link instead");
+  const provider = getAvatarProviderByName(job.provider);
+  if (!provider.submitTwinConsentVideo || !provider.finishTwinUpload) throw new ValidationError(`Consent videos are not available with the ${job.provider} renderer`);
+  const claim = readUpload(upload, ownerId, provider.name);
+  assertFresh(claim);
+  const asset = createHash("sha256").update(claim.a).digest("base64url").slice(0, 16);
+  // A video already sent would only be answered again from the renderer's cache, as if it were under review anew
+  // (it is sent once: after a refusal, or a link asked for in its place, another video is recorded).
+  if (job.consentVideoAsset === asset) throw new ValidationError("That consent video was already sent and not accepted; record and upload another, or send the consent link");
+  // Its own limit, as for footage: a finish refused afterwards (a file not yet received) asks the renderer all the same.
+  opts.finish?.();
+  await provider.finishTwinUpload(claim.a);
+  // Counted only once the video is checked and finished, so a refused one does not use up the hour's submissions.
+  opts.admit?.();
+  const groupId = job.groupId!;
+  const out = await provider.submitTwinConsentVideo(groupId, claim.a, `${job.id}.cv.${asset}`);
+  const sentAt = nowIso();
+  // The renderer has the video now, so it is recorded on the twin as it is when written: a check that moved the twin on
+  // meanwhile (its training finished, say) is kept, not refused, and the video is not lost.
+  let read = job;
+  for (let attempt = 0; ; attempt++) {
+    const next: TwinJob = { ...read, consent: read.consent === "accepted" ? "accepted" : out.consent, consentVideo: { name: claim.n, sizeBytes: claim.s, at: sentAt }, consentVideoAsset: asset, updatedAt: nowIso() };
+    delete next.consentUrl;
+    delete next.consentUrlAt;
+    if (next.status !== "failed") delete next.error;
+    if (await getStore().putIf("twin", next, "updatedAt", read.updatedAt)) return next;
+    const latest = await getStore().get<TwinJob>("twin", job.id);
+    if (!latest || latest.ownerId !== job.ownerId) throw new ConflictError(`"${job.name}" was forgotten meanwhile`);
+    if (attempt >= 4) throw new ConflictError(`"${job.name}" changed meanwhile; try again`);
+    read = latest;
+  }
 }
 
 /**
@@ -443,7 +529,9 @@ async function refreshTwin(read: TwinJob): Promise<TwinJob> {
     // Consent is asked about once its link has been asked for, or once the twin is trained (a workspace the renderer
     // lets skip the step has it given already), until it is given.
     if (next.status === "processing" && (next.consent !== "not_requested" || next.training === "completed") && next.consent !== "accepted" && provider.twinConsentStatus) {
-      const out = await provider.twinConsentStatus(job.groupId, job.consentUrlAt);
+      // The latest request for consent: a link, or a recorded video sent in its place.
+      const askedAt = [job.consentUrlAt, job.consentVideo?.at].filter((t): t is string => !!t).sort().at(-1);
+      const out = await provider.twinConsentStatus(job.groupId, askedAt);
       if (out.gone) next = { ...next, training: "failed", status: "failed", error: out.error ?? "The renderer no longer has this twin" };
       else {
         if (out.consent !== "not_requested") next = { ...next, consent: out.consent };

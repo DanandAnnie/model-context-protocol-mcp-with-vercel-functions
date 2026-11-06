@@ -51,6 +51,11 @@ export const config = {
   stripeSecretKey: providerSecret("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: providerSecret("STRIPE_WEBHOOK_SECRET"),
   stripePricePro: env("STRIPE_PRICE_PRO"),
+  /**
+   * Digital twins' consent can be given by uploading a recorded consent video, where the HeyGen account allows it
+   * (HeyGen offers that to enterprise accounts only); off by default, so the consent link is the only way.
+   */
+  twinConsentUploads: (env("TWIN_CONSENT_UPLOAD") ?? "false").toLowerCase() === "true",
 };
 
 function parsePositiveInt(v: string | undefined): number | undefined {

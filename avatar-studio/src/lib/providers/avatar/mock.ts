@@ -250,6 +250,11 @@ export class MockAvatarProvider implements AvatarProvider {
     return { url: "/demo-consent", consent: "pending" as const };
   }
 
+  /** A demo consent video is reviewed like a demo link: given a few seconds after it was sent. */
+  async submitTwinConsentVideo() {
+    return { consent: "pending" as const };
+  }
+
   /** Consent is "given" a few seconds after its link was asked for (the studio keeps when, so any instance agrees). */
   async twinConsentStatus(_groupId: string, askedAt?: string) {
     if (!askedAt) return { consent: "not_requested" as const };

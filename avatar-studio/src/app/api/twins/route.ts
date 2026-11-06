@@ -1,7 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
-import { LimitError, listTwins, publicTwin, startTwin, twinKeySchema, twinRequestSchema, twinUploadsAvailable, twinsAvailable } from "@/lib/services";
+import { LimitError, listTwins, publicTwin, startTwin, twinKeySchema, twinConsentUploadsAvailable, twinRequestSchema, twinUploadsAvailable, twinsAvailable } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -30,7 +30,7 @@ export async function GET() {
       () => false,
     );
     const now = Date.now();
-    return json({ twins: (await listTwins(owner)).map((t) => publicTwin(t, now, canEdit)), available: twinsAvailable(), uploads: twinUploadsAvailable() });
+    return json({ twins: (await listTwins(owner)).map((t) => publicTwin(t, now, canEdit)), available: twinsAvailable(), uploads: twinUploadsAvailable(), consentUploads: twinConsentUploadsAvailable() });
   } catch (err) {
     return errorResponse(err);
   }

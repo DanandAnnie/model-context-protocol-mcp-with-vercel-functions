@@ -35,14 +35,16 @@ function fileProblem(file: File): string | null {
  * Rejects with a message the page can show.
  */
 function putFile(url: string, headers: Record<string, string>, file: File, onProgress: (fraction: number) => void, signal: AbortSignal): Promise<void> {
-  // The demo renderer keeps nothing: its link is not sent the file, and the progress is stood in for.
+  // The demo renderer keeps nothing: its link is not sent the file, and the progress is stood in for, at about 2 MB a
+  // second (one to ten seconds in all), so a larger file takes longer as it would.
   if (url === DEMO_UPLOAD_URL) {
+    const stepMs = Math.min(1000, Math.max(100, (file.size / (2 * 1024 * 1024)) * 100));
     return new Promise((resolve, reject) => {
       let step = 0;
       const timer = setInterval(() => {
         onProgress(++step / 10);
         if (step === 10) (clearInterval(timer), resolve());
-      }, 100);
+      }, stepMs);
       signal.addEventListener("abort", () => (clearInterval(timer), reject(new DOMException("The upload was stopped", "AbortError"))), { once: true });
     });
   }
@@ -64,8 +66,17 @@ function stepOf(t: Twin): string {
   if (t.status === "completed") return "Ready: it is in your avatars";
   if (t.status === "failed") return t.error ?? "It could not be trained";
   const training = t.training === "completed" ? "Trained" : "Training from the footage (usually a few minutes)";
+  const what = t.consentVideo ? "consent video" : "consent";
   const consent =
-    t.consent === "accepted" ? "consent given" : t.consent === "rejected" ? `consent not accepted${t.error ? `: ${t.error}` : ""}` : t.consent === "pending" ? "waiting for the person's consent" : "consent not asked for yet";
+    t.consent === "accepted"
+      ? "consent given"
+      : t.consent === "rejected"
+        ? `${what} not accepted${t.error ? `: ${t.error}` : ""}`
+        : t.consent === "pending"
+          ? t.consentVideo
+            ? "consent video being reviewed"
+            : "waiting for the person's consent"
+          : "consent not asked for yet";
   return `${training} · ${consent}`;
 }
 
@@ -75,7 +86,7 @@ function stepOf(t: Twin): string {
  * from a link the account sends them. Once both are done the twin is in the avatars, like a photo avatar.
  */
 export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; onReady: () => void }) {
-  const { data, error, setData, refetch } = useApi<{ twins: Twin[]; available: boolean; uploads?: boolean }>("/api/twins");
+  const { data, error, setData, refetch } = useApi<{ twins: Twin[]; available: boolean; uploads?: boolean; consentUploads?: boolean }>("/api/twins");
   const twins = data?.twins ?? [];
   // While a twin is trained or waits for consent the list is asked again, only while the tab is visible. A consent whose
   // link is past its day may still be under review, so it is asked about too, once a minute.
@@ -102,6 +113,9 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
   /** How much of the file is sent (0 to 1) while it uploads. */
   const [progress, setProgress] = useState<number | null>(null);
   const uploadAbort = useRef<AbortController | null>(null);
+  /** The twin whose recorded consent video is being sent, and how much of it is sent (null before the file goes). */
+  const [consentSend, setConsentSend] = useState<{ twin: string; progress: number | null } | null>(null);
+  const consentAbort = useRef<AbortController | null>(null);
   const [uploadKey, setUploadKey] = useState(() => newKey());
   const trainButton = useRef<HTMLButtonElement>(null);
   // An upload still running when the panel goes (another page opened, say) is stopped, and no twin is started from it.
@@ -111,6 +125,7 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     return () => {
       alive.current = false;
       uploadAbort.current?.abort();
+      consentAbort.current?.abort();
     };
   }, []);
   const [gender, setGender] = useState<"" | "female" | "male">("");
@@ -255,6 +270,63 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
     } finally {
       setAsking(null);
     }
+  }
+
+  /**
+   * Sends a recorded consent video for a twin in place of the link (where the operator turned it on): the file goes to
+   * the renderer as footage does, then is submitted for review. The row says when it is accepted or refused.
+   */
+  async function sendConsentVideo(t: Twin, f: File) {
+    if (consentSend) return;
+    const wrong = fileProblem(f);
+    if (wrong) {
+      setErr(`Consent video: ${wrong.charAt(0).toLowerCase()}${wrong.slice(1)}.`);
+      return;
+    }
+    setErr(null);
+    setConsentSend({ twin: t.id, progress: null });
+    // The chosen file's input goes with the choice, so the keyboard is kept on the twin rather than dropped on the page.
+    focusAfterRender(() => rowOf(t.id));
+    const abort = new AbortController();
+    consentAbort.current = abort;
+    try {
+      const { upload: u } = await api<{ upload: { token: string; url: string; headers: Record<string, string> } }>("/api/twins/uploads", {
+        method: "POST",
+        body: JSON.stringify({ fileName: f.name.slice(0, 200), contentType: uploadTypeOf(f), sizeBytes: f.size, purpose: "consent", twinId: t.id }),
+        headers: { "Idempotency-Key": newKey() },
+      });
+      if (abort.signal.aborted || !alive.current) throw new DOMException("The upload was stopped", "AbortError");
+      setConsentSend({ twin: t.id, progress: 0 });
+      // The file input went with the choice; the keyboard waits on Stop upload while the file is sent.
+      focusAfterRender(() => rowOf(t.id)?.querySelector<HTMLElement>("[data-consent-stop]") ?? rowOf(t.id));
+      await putFile(u.url, u.headers, f, (p) => setConsentSend({ twin: t.id, progress: p }), abort.signal);
+      setConsentSend({ twin: t.id, progress: null });
+      focusAfterRender(() => rowOf(t.id));
+      const { twin } = await api<{ twin: Twin }>(`/api/twins/${t.id}/consent`, { method: "POST", body: JSON.stringify({ upload: u.token }) });
+      setData((prev) => (prev ? { ...prev, twins: prev.twins.map((x) => (x.id === twin.id ? twin : x)) } : prev));
+      void refetch();
+      say(`The consent video for ${twin.name} is sent. HeyGen reviews it; this row says when it is accepted.`);
+      focusAfterRender(() => rowOf(twin.id));
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        if (alive.current) say("The consent video upload was stopped.");
+      } else {
+        setErr(e instanceof Error ? e.message : "The consent video could not be sent");
+        // A twin that changed meanwhile (a video sent from another tab, say) is shown as it is now, before the keyboard
+        // is placed, so it is not left on a control the new state takes away.
+        if (isRefusal(e)) await refetch().catch(() => undefined);
+      }
+      // Back on the file input to choose again, or on the twin when the input is gone (a video now under review, say).
+      focusAfterRender(() => rowOf(t.id)?.querySelector<HTMLElement>("[data-consent-file]") ?? rowOf(t.id));
+    } finally {
+      if (consentAbort.current === abort) consentAbort.current = null;
+      if (alive.current) setConsentSend(null);
+    }
+  }
+
+  /** A twin's row in the list, if it is still shown. */
+  function rowOf(id: string): HTMLElement | null {
+    return listRef.current?.querySelector<HTMLElement>(`[data-twin="${CSS.escape(id)}"]`) ?? null;
   }
 
   async function copy(t: Twin) {
@@ -416,7 +488,12 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                   )}
                 </div>
               </div>
-              {t.status === "processing" && canEdit === true && (
+              {t.status === "processing" && canEdit === true && t.consentVideo && t.consent === "pending" && (
+                <p className="mt-2 text-xs text-slate-600" data-testid="twin-consent-video">
+                  Consent video sent: {t.consentVideo.name} · {sizeOf(t.consentVideo.sizeBytes)} · {formatDate(t.consentVideo.at)}. HeyGen reviews it, usually within a day.
+                </p>
+              )}
+              {t.status === "processing" && canEdit === true && !(t.consentVideo && t.consent === "pending") && t.consent !== "accepted" && (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   {t.consentUrl && t.consent !== "rejected" ? (
                     <>
@@ -433,7 +510,49 @@ export function DigitalTwins({ canEdit, onReady }: { canEdit: boolean | null; on
                       {t.consent === "rejected" || t.consentLinkExpired ? "Get a new consent link" : "Get the consent link"}
                     </Button>
                   )}
+                  {data?.consentUploads && consentSend?.twin !== t.id && (
+                    <label
+                      className={`inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 focus-within:ring-2 focus-within:ring-brand-500 hover:bg-slate-50 ${consentSend ? "pointer-events-none opacity-60" : ""}`}
+                    >
+                      <Upload className="h-3.5 w-3.5" aria-hidden /> {t.consent === "rejected" && t.consentVideo ? "Upload another consent video" : "Upload a consent video"}
+                      <input
+                        type="file"
+                        data-consent-file
+                        accept="video/mp4,video/quicktime,video/webm,.mp4,.m4v,.mov,.webm"
+                        className="sr-only"
+                        disabled={!!consentSend}
+                        aria-label={`Upload a recorded consent video for ${t.name}`}
+                        onChange={(e) => {
+                          const f = e.currentTarget.files?.[0];
+                          e.currentTarget.value = "";
+                          if (f) void sendConsentVideo(t, f);
+                        }}
+                      />
+                    </label>
+                  )}
+                  {consentSend?.twin === t.id && (
+                    <div className="flex min-w-48 flex-1 items-center gap-3" data-testid="twin-consent-sending">
+                      {consentSend.progress === null ? (
+                        <span className="text-xs text-slate-600" role="status">
+                          Sending the consent video…
+                        </span>
+                      ) : (
+                        <>
+                          <div role="progressbar" aria-label={`Uploading the consent video for ${t.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(consentSend.progress * 100)} className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                            <div className="h-full rounded-full bg-brand-600 transition-[width]" style={{ width: `${Math.round(consentSend.progress * 100)}%` }} />
+                          </div>
+                          <span className="w-10 text-right text-xs tabular-nums text-slate-600">{Math.round(consentSend.progress * 100)}%</span>
+                          <button type="button" data-consent-stop className="text-xs font-medium text-slate-600 hover:underline" onClick={() => consentAbort.current?.abort()}>
+                            Stop upload
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
+              )}
+              {t.status === "processing" && canEdit === true && data?.consentUploads && !(t.consentVideo && t.consent === "pending") && t.consent !== "accepted" && (
+                <p className="mt-1 text-xs text-slate-500">Or upload a video of the person reading HeyGen&apos;s consent statement to camera, in place of the link (MP4, MOV, or WebM, up to 200 MB).</p>
               )}
             </Card>
           ))}

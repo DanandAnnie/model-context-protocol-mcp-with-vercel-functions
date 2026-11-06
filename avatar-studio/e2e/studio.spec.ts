@@ -3540,6 +3540,71 @@ test("a digital twin is trained from a video file uploaded from this computer", 
   expect((await page.request.delete(`/api/twins/${String(listed.id)}`)).ok()).toBe(true);
 });
 
+test("a recorded consent video is uploaded for a digital twin in place of the consent link", async ({ page }) => {
+  const name = `Consent twin ${Date.now().toString(36)}`;
+  const made = await page.request.post("/api/twins", { data: { name, footageUrl: "https://93.184.216.34/footage.mp4", agreed: true } });
+  expect(made.ok()).toBe(true);
+  const id = ((await made.json()).twin as { id: string }).id;
+  expect((await (await page.request.get("/api/twins")).json()).consentUploads).toBe(true);
+  // A JSON body without an upload (as some clients always send) still asks for a link, as no body does.
+  const linked = await page.request.post(`/api/twins/${id}/consent`, { data: {} });
+  expect(linked.ok()).toBe(true);
+  expect(((await linked.json()).twin as { consentUrl?: string }).consentUrl).toMatch(/\/demo-consent$/);
+  await page.goto("/avatars");
+  const twin = page.getByTestId("twin").filter({ hasText: name });
+  await expect(twin.getByTestId("twin-step")).toContainText("waiting for the person's consent");
+  await expect(twin.getByRole("textbox", { name: `Consent link for ${name}` })).toBeVisible();
+  const input = twin.getByLabel(`Upload a recorded consent video for ${name}`);
+  // A file that is not a video HeyGen takes is refused here, before anything is sent.
+  const uploads: string[] = [];
+  page.on("request", (r) => r.url().endsWith("/api/twins/uploads") && r.method() === "POST" && uploads.push(r.url()));
+  await input.setInputFiles({ name: "consent.avi", mimeType: "video/x-msvideo", buffer: Buffer.alloc(2048, 1) });
+  await expect(page.getByTestId("digital-twins").getByRole("alert")).toContainText("Consent video: choose an MP4, MOV, or WebM video.");
+  expect(uploads).toEqual([]);
+  // An upload can be stopped: the keyboard waits on Stop upload, nothing is submitted, and it returns to the file input.
+  const submits: string[] = [];
+  page.on("request", (r) => r.url().endsWith(`/api/twins/${id}/consent`) && r.method() === "POST" && submits.push(r.url()));
+  // 8 MB takes the demo about four seconds to "send", time enough to stop it.
+  await input.setInputFiles({ name: "first-take.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(8 * 1024 * 1024, 1) });
+  const stop = twin.getByRole("button", { name: "Stop upload" });
+  await expect(stop).toBeFocused();
+  await stop.click();
+  await expect(input).toBeFocused();
+  expect(submits).toEqual([]);
+  // A video is uploaded as a consent video (not footage), then sent for review with its token.
+  const begun = page.waitForRequest((r) => r.url().endsWith("/api/twins/uploads") && r.method() === "POST");
+  const submitted = page.waitForRequest((r) => r.url().endsWith(`/api/twins/${id}/consent`) && r.method() === "POST");
+  await input.setInputFiles({ name: "dana-consent.mp4", mimeType: "video/mp4", buffer: Buffer.alloc(200 * 1024, 1) });
+  expect((await begun).postDataJSON()).toEqual({ fileName: "dana-consent.mp4", contentType: "video/mp4", sizeBytes: 200 * 1024, purpose: "consent", twinId: id });
+  const body = (await submitted).postDataJSON() as Record<string, unknown>;
+  expect(Object.keys(body)).toEqual(["upload"]);
+  await expect(twin).toBeFocused();
+  await expect(twin.getByTestId("twin-step")).toContainText("consent video being reviewed");
+  await expect(twin.getByTestId("twin-consent-video")).toContainText("Consent video sent: dana-consent.mp4 · 200 KB");
+  // The video replaces the unused link. While it is reviewed no link is offered, and the API refuses another video,
+  // another upload for this twin (before any file is sent), or a link.
+  await expect(twin.getByRole("textbox", { name: `Consent link for ${name}` })).toHaveCount(0);
+  await expect(twin.getByRole("button", { name: /consent link/ })).toHaveCount(0);
+  const early = await page.request.post("/api/twins/uploads", { data: { fileName: "b.mp4", contentType: "video/mp4", sizeBytes: 1024, purpose: "consent", twinId: id } });
+  expect(early.status()).toBe(409);
+  await expect(twin.getByLabel(`Upload a recorded consent video for ${name}`)).toHaveCount(0);
+  const again = await page.request.post(`/api/twins/${id}/consent`, { data: body });
+  expect(again.status()).toBe(409);
+  expect((await again.json()).error).toContain("still being reviewed");
+  expect((await page.request.post(`/api/twins/${id}/consent`)).status()).toBe(409);
+  const wrong = await page.request.post(`/api/twins/${id}/consent`, { data: { upload: body.upload, extra: true } });
+  expect(wrong.status()).toBe(400);
+  // The demo accepts it a few seconds later; the page follows on its own.
+  await expect(twin.getByTestId("twin-step")).toContainText("Ready: it is in your avatars", { timeout: 30_000 });
+  const listed = ((await (await page.request.get("/api/twins")).json()).twins as Array<Record<string, unknown>>).find((t) => t.id === id)!;
+  expect((listed.consentVideo as { name: string }).name).toBe("dana-consent.mp4");
+  const voices = (await (await page.request.get("/api/voices")).json()).voices as Array<{ id: string; name: string }>;
+  const voice = voices.find((v) => v.name === `${name} (twin)`);
+  expect((await page.request.delete(`/api/twins/${id}`)).ok()).toBe(true);
+  expect((await page.request.delete(`/api/avatars/${String(listed.avatarId)}`)).status()).toBe(200);
+  if (voice) expect((await page.request.delete(`/api/voices/${voice.id}`)).status()).toBe(204);
+});
+
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
   await page.goto("/templates");
   const section = page.getByTestId("studio-templates");

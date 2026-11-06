@@ -414,6 +414,10 @@ export interface TwinJob {
   /** The renderer's page for the person to record consent on, and when it was made (it lasts a day). */
   consentUrl?: string;
   consentUrlAt?: string;
+  /** A recorded consent video uploaded in place of the link: its file's name and size, and when it was sent for review. */
+  consentVideo?: { name: string; sizeBytes: number; at: string };
+  /** A digest of that video's asset at the renderer (never shown), so a video it refused is not sent again as new. */
+  consentVideoAsset?: string;
   /** The twin's picture once trained, kept for the photo avatar it becomes. */
   imageUrl?: string;
   /** The photo avatar the twin became once trained and consented to. */

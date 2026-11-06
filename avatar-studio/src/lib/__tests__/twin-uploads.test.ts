@@ -12,9 +12,12 @@ import {
   forgetTwinChecks,
   listTwins,
   publicTwin,
+  requestTwinConsent,
   setTwinPictureFetch,
   startTwin,
   startTwinUpload,
+  submitTwinConsentVideo,
+  twinConsentUploadsAvailable,
   twinRequestSchema,
   twinUploadRequestSchema,
   twinUploadsAvailable,
@@ -203,5 +206,172 @@ describe("digital twins from an uploaded file", () => {
       await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(file), "u1"), /refused uploads for the studio's key/);
       upload = { asset_id: "asset_x", upload_url: "http://heygen-uploads.s3.amazonaws.com/x", upload_headers: {}, expires_in_seconds: 60 };
       await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(file), "u1"), /not https/);
+    }));
+});
+
+/** A twin already sent to the renderer: trained (or training), its consent link made but not yet used. */
+const sentTwin = (over: Partial<TwinJob> = {}): TwinJob => {
+  const at = new Date(Date.now() - 60_000).toISOString();
+  return { id: "tw_cv1", ownerId: "u1", name: "Dana Ruiz", footageUrl: "https://93.184.216.34/a.mp4", provider: "mock", lookId: "look_cv", groupId: "group_cv", training: "completed", consent: "pending", consentUrl: "/demo-consent", consentUrlAt: at, status: "processing", createdAt: at, updatedAt: at, ...over };
+};
+const consentFile = { fileName: "dana-consent.mp4", contentType: "video/mp4" as const, sizeBytes: 9_000_000, purpose: "consent" as const, twinId: "tw_cv1" };
+
+describe("a recorded consent video in place of the consent link", () => {
+  it("in demo mode, is uploaded past the twin limit, sent for review in place of the link, and accepted like a link", async () => {
+    assert.equal(twinConsentUploadsAvailable(), true);
+    assert.equal(twinUploadRequestSchema.parse(file).purpose, "footage", "an upload is footage unless it says otherwise");
+    // The limit on twins is about training more; a consent video for one already kept is not refused by it.
+    for (let i = 0; i < MAX_TWINS - 1; i++) await getStore().put("twin", sentTwin({ id: `tw_full${i}`, status: "failed", training: "failed" }));
+    const job = sentTwin();
+    await getStore().put("twin", job);
+    const up = await startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1");
+
+    // Another account's twin is not found, and another account cannot use this upload.
+    await assert.rejects(submitTwinConsentVideo(job.id, up.token, "u2"), /not found/i);
+    await getStore().put("twin", sentTwin({ id: "tw_cv2", ownerId: "u2" }));
+    await assert.rejects(submitTwinConsentVideo("tw_cv2", up.token, "u2"), /not this account's/);
+
+    let admitted = 0;
+    const sent = await submitTwinConsentVideo(job.id, up.token, "u1", { admit: () => void admitted++ });
+    assert.equal(admitted, 1);
+    assert.deepEqual([sent.consent, sent.consentVideo?.name, sent.consentVideo?.sizeBytes, sent.consentUrl, sent.consentUrlAt], ["pending", "dana-consent.mp4", 9_000_000, undefined, undefined]);
+    assert.deepEqual(publicTwin(sent).consentVideo, sent.consentVideo);
+    // While it is reviewed, neither another video nor a link is sent; neither is counted.
+    await assert.rejects(submitTwinConsentVideo(job.id, up.token, "u1", { admit: () => void admitted++ }), (e: unknown) => e instanceof ConflictError && /still being reviewed/.test((e as Error).message));
+    await assert.rejects(requestTwinConsent(job.id, "u1", { admit: () => void admitted++ }), (e: unknown) => e instanceof ConflictError && /still being reviewed/.test((e as Error).message));
+    assert.equal(admitted, 1);
+
+    // The demo accepts it a few seconds after it was sent, counted from the video rather than the old link.
+    Date.now = () => realNow() + 5_000;
+    forgetTwinChecks();
+    const after = (await listTwins("u1")).find((t) => t.id === job.id)!;
+    assert.deepEqual([after.consent, after.status], ["accepted", "completed"]);
+    await assert.rejects(submitTwinConsentVideo(job.id, up.token, "u1"), /already given/);
+  });
+
+  it("is refused for a twin that failed, one not yet at the renderer, or one consented to; a refused video is not sent again", async () => {
+    await getStore().put("twin", sentTwin());
+    const up = await startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1");
+    await getStore().put("twin", sentTwin({ status: "failed", training: "failed", error: "The footage was too short" }));
+    await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), (e: unknown) => e instanceof ValidationError && /too short/.test((e as Error).message));
+    await getStore().put("twin", sentTwin({ groupId: undefined }));
+    await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), ConflictError);
+    await getStore().put("twin", sentTwin({ consent: "accepted" }));
+    await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), (e: unknown) => e instanceof ConflictError && /already given/.test((e as Error).message));
+    // A refused video can be followed by another one, or by a link.
+    await getStore().put("twin", sentTwin({ consent: "rejected", consentVideo: { name: "old.mp4", sizeBytes: 10, at: new Date().toISOString() }, error: "The statement was not read in full" }));
+    const again = await submitTwinConsentVideo("tw_cv1", up.token, "u1");
+    assert.deepEqual([again.consent, again.consentVideo?.name, again.error], ["pending", "dana-consent.mp4", undefined]);
+    assert.equal("consentVideoAsset" in publicTwin(again), false, "the asset's digest stays on the server");
+    // The same video, once refused, is not sent again as if it were new (the renderer would answer from its cache).
+    await getStore().put("twin", { ...again, consent: "rejected", error: "The statement was not read in full" });
+    await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), (e: unknown) => e instanceof ValidationError && /already sent and not accepted/.test((e as Error).message));
+    // A link asked for after a refused video replaces it: the row offers the link, and a video can follow later.
+    const link = await requestTwinConsent("tw_cv1", "u1");
+    assert.deepEqual([link.consentUrl, link.consent, link.consentVideo, link.consentVideoAsset !== undefined], ["/demo-consent", "pending", undefined, true]);
+    assert.equal(publicTwin(link).consentVideo, undefined);
+    // Nor once a link stands in its place: the renderer would replay its old answer for the same video.
+    await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), /already sent and not accepted/);
+    const other = await startTwinUpload(twinUploadRequestSchema.parse({ ...consentFile, fileName: "take-2.mp4" }), "u1");
+    assert.equal((await submitTwinConsentVideo("tw_cv1", other.token, "u1")).consentVideo?.name, "take-2.mp4");
+  });
+
+  it("says which twin it is for, and is refused before the file is sent when that twin cannot take one", async () => {
+    assert.throws(() => twinUploadRequestSchema.parse({ ...consentFile, twinId: undefined }), /which digital twin/);
+    assert.throws(() => twinUploadRequestSchema.parse({ ...consentFile, twinId: "../x" }), /Unknown digital twin/);
+    let admitted = 0;
+    const admit = () => void admitted++;
+    await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1", { admit }), /not found/i);
+    await getStore().put("twin", sentTwin({ ownerId: "u2" }));
+    await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1", { admit }), /not found/i);
+    await getStore().put("twin", sentTwin({ consentVideo: { name: "a.mp4", sizeBytes: 1, at: new Date().toISOString() } }));
+    await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1", { admit }), /still being reviewed/);
+    await getStore().put("twin", sentTwin({ consent: "accepted" }));
+    await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1", { admit }), /already given/);
+    await getStore().put("twin", sentTwin({ groupId: undefined }));
+    await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1", { admit }), ConflictError);
+    assert.equal(admitted, 0, "a refused upload is not counted");
+  });
+
+  it("counts each finish, and keeps the video when the twin moved on while HeyGen was asked", async () => {
+    await getStore().put("twin", sentTwin({ training: "processing" }));
+    const up = await startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1");
+    const store = getStore();
+    const realPutIf = store.putIf.bind(store);
+    let moved = false;
+    // A check finishes the training between the read and the write (the page lists twins every ten seconds).
+    store.putIf = (async (kind: string, value: TwinJob, field: string, expected: unknown) => {
+      if (!moved && kind === "twin") {
+        moved = true;
+        const now = await store.get<TwinJob>("twin", value.id);
+        await store.put("twin", { ...now!, training: "completed", updatedAt: new Date(Date.now() + 1000).toISOString() });
+      }
+      return realPutIf(kind as "twin", value, field as "updatedAt", expected as string);
+    }) as typeof store.putIf;
+    let finished = 0;
+    try {
+      const sent = await submitTwinConsentVideo("tw_cv1", up.token, "u1", { finish: () => void finished++ });
+      assert.deepEqual([sent.training, sent.consent, sent.consentVideo?.name, sent.consentUrl], ["completed", "pending", "dana-consent.mp4", undefined]);
+    } finally {
+      store.putIf = realPutIf;
+    }
+    assert.equal(finished, 1);
+    const kept = (await store.get<TwinJob>("twin", "tw_cv1"))!;
+    assert.deepEqual([kept.training, kept.consentVideo?.name], ["completed", "dana-consent.mp4"]);
+  });
+
+  it("is sent to HeyGen as consent_video only where the operator turned it on; maps HeyGen's refusals", () =>
+    inHeygen(async () => {
+      const { config } = await import("../config");
+      const calls: Array<{ url: string; method: string; body: unknown; idem: string | null }> = [];
+      let consent: { status: number; message: string } | null = null;
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+        calls.push({ url, method, body, idem: new Headers(init?.headers).get("idempotency-key") });
+        if (url === "https://api.heygen.com/v3/assets/direct-uploads") return Response.json({ data: { asset_id: "asset_cv", upload_url: "https://heygen-uploads.s3.amazonaws.com/asset_cv", upload_headers: { "Content-Type": "video/mp4" } } });
+        if (url === "https://api.heygen.com/v3/assets/asset_cv/complete") return Response.json({ data: { asset_id: "asset_cv", status: "processing" } });
+        if (url === "https://api.heygen.com/v3/avatars/group_cv/consent" && method === "POST") {
+          if (consent) return Response.json({ error: { code: "invalid_parameter", message: consent.message } }, { status: consent.status });
+          return Response.json({ data: { avatar_group: { id: "group_cv", consent_status: "pending" } } });
+        }
+        return new Response("unexpected", { status: 500 });
+      }) as typeof fetch;
+      // HeyGen offers the upload flow to enterprise accounts only, so it is off unless the operator says so.
+      assert.equal(twinConsentUploadsAvailable(), false);
+      await getStore().put("twin", sentTwin({ provider: "heygen" }));
+      await assert.rejects(startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1"), (e: unknown) => e instanceof ValidationError && /not turned on here/.test((e as Error).message));
+      assert.equal(calls.length, 0, "nothing is asked of HeyGen when it is off");
+      Object.assign(config, { twinConsentUploads: true });
+      try {
+        assert.equal(twinConsentUploadsAvailable(), true);
+        await getStore().put("twin", sentTwin({ provider: "heygen", consentUrl: "https://app.heygen.com/consent/abc" }));
+        const up = await startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1");
+        const sent = await submitTwinConsentVideo("tw_cv1", up.token, "u1");
+        assert.ok(calls.some((c) => c.url.endsWith("/v3/assets/asset_cv/complete")), "the upload is finished first");
+        const post = calls.find((c) => c.url.endsWith("/group_cv/consent"))!;
+        assert.deepEqual(post.body, { consent_video: { type: "asset_id", asset_id: "asset_cv" } });
+        assert.match(post.idem!, /^tw_cv1\.cv\.[A-Za-z0-9_-]{16}$/);
+        assert.deepEqual([sent.consent, sent.consentUrl], ["pending", undefined]);
+
+        // HeyGen refusing the video is the account's to act on; nothing is kept.
+        await getStore().put("twin", sentTwin({ provider: "heygen" }));
+        consent = { status: 403, message: "Consent video upload is available on Enterprise plans only." };
+        await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), (e: unknown) => e instanceof ValidationError && /did not take the consent video: Consent video upload is available on Enterprise plans only/.test((e as Error).message));
+        consent = { status: 409, message: "in progress" };
+        await assert.rejects(submitTwinConsentVideo("tw_cv1", up.token, "u1"), ConflictError);
+        const kept = await getStore().get<TwinJob>("twin", "tw_cv1");
+        assert.equal(kept?.consentVideo, undefined);
+        // A token from the demo renderer is not HeyGen's.
+        await getStore().put("twin", sentTwin({ provider: "heygen" }));
+        Object.assign(config, { avatarProvider: "mock" });
+        const demo = await startTwinUpload(twinUploadRequestSchema.parse(consentFile), "u1");
+        Object.assign(config, { avatarProvider: "heygen" });
+        consent = null;
+        await assert.rejects(submitTwinConsentVideo("tw_cv1", demo.token, "u1"), /not this account's/);
+      } finally {
+        Object.assign(config, { twinConsentUploads: false });
+      }
     }));
 });

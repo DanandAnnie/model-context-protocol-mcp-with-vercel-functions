@@ -205,10 +205,11 @@ export class HeyGenClient {
   }
 
   /** Starts the consent flow for a character (`POST /v3/avatars/{group_id}/consent`): a page for the person, for a day. */
-  async createConsent(groupId: string, key: string): Promise<{ url?: string; consentStatus?: string | null }> {
+  async createConsent(groupId: string, key: string, consentVideoAssetId?: string): Promise<{ url?: string; consentStatus?: string | null }> {
     const out = await this.request<{ url?: string; avatar_group?: { consent_status?: string | null } }>(`${V3}/avatars/${encodeURIComponent(groupId)}/consent`, {
       method: "POST",
-      body: JSON.stringify({}),
+      // With a recorded consent video (HeyGen's upload flow), it is sent on its own and reviewed at once; no page is made.
+      body: JSON.stringify(consentVideoAssetId ? { consent_video: { type: "asset_id", asset_id: consentVideoAssetId } } : {}),
       headers: { "Idempotency-Key": key },
     });
     return { url: out?.url, consentStatus: out?.avatar_group?.consent_status };

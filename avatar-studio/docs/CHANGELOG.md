@@ -1891,3 +1891,15 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
 
     A second review confirmed the fixes. Its three minor points were also fixed: a timing-sensitive e2e step, the re-send guard, and focus after a two-tab refusal.
   - **Tests.** Unit tests cover the demo and HeyGen paths (the request body, the operator setting, HeyGen's refusals), the checks, the merge, and the limits. An e2e test covers upload, stop, review, and acceptance.
+- QA pass 34: twin uploads, consent videos, and line fixes in a browser (`d6d8c2c`). The three latest features were walked in a real browser against the demo build, at desktop and phone widths, by keyboard and by accessibility tree: footage file upload with Stop and retry, consent video upload, Stop, review, and acceptance, and Fix a line through sending and re-rendering. Nothing overflowed at phone width, and no console or HTTP errors appeared. Found and fixed:
+  - **Fix a line lost words on Escape.** Escape (or Cancel) closed the form and silently dropped the changed words. It now asks first ("Discard the changed words of 1 scene?"); declined, the words and the keyboard stay.
+  - **Fix a line was silent when ready.** Sending was announced, but the render finishing or failing was not. The panel's status region now says "The fixed video is ready, at the same link.", or why the fix did not take.
+  - **Consent video upload had no description.** Its hint (what to record, file types, size) is now the input's accessible description.
+  - **Two consent requests at once.** "Get the consent link" stayed active while that twin's consent video was uploading. It now waits for the upload.
+  - **Review.** An independent review of these fixes found three more edge cases, fixed:
+    - A first send HeyGen refused would have been announced as ready. "Ready" is now said only when the video still carries the fix that was rendering.
+    - A fix started from another tab could repeat the last announcement unheard. The announcement is now cleared when a render starts.
+    - A consent video could be chosen while a consent link was being made. The upload now waits for the link.
+
+    Escape that ends an IME composition in Safari no longer asks to discard.
+  - **Tests.** The e2e tests check the Escape confirmation, the ready announcement, and the upload's description.

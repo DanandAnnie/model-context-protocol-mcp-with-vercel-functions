@@ -2159,7 +2159,8 @@ test("a lip sync takes part of the video and HeyGen's options, said on its card,
   await page.getByRole("textbox", { name: "From", exact: true }).fill("0:01");
   await page.getByRole("textbox", { name: "To", exact: true }).fill("0:01.5");
   await expect(hint).toHaveText("End the part at least a second after it starts.");
-  await page.getByRole("textbox", { name: "To", exact: true }).fill("4.5");
+  // A comma decimal, as many keyboards type it, reads as a point.
+  await page.getByRole("textbox", { name: "To", exact: true }).fill("4,5");
   await expect(hint).toHaveText(/^Seconds \(12\.5\) or minutes and seconds/);
   await expect(start).toBeEnabled();
   await page.getByLabel(/^Take out the background music/).check();
@@ -2177,9 +2178,13 @@ test("a lip sync takes part of the video and HeyGen's options, said on its card,
   const early = await page.request.get(`/api/lipsyncs/${job.id}/captions`);
   if (early.status() !== 200) expect((await early.json()).error).toBe("The captions are ready once the lip sync is finished");
   await expect(item.getByRole("link", { name: /^Download / })).toHaveAttribute("href", /\/demo\/render\.webm$/, { timeout: 20_000 });
+  // By keyboard: the button keeps the focus while the captions are fetched and after.
+  const srt = item.getByRole("button", { name: /^Download captions for .+ as SRT$/ });
   const saved = page.waitForEvent("download");
-  await item.getByRole("button", { name: /^Download captions for .+ as SRT$/ }).click();
+  await srt.focus();
+  await page.keyboard.press("Enter");
   const download = await saved;
+  await expect(srt).toBeFocused();
   expect(download.suggestedFilename()).toMatch(/_lip-synced\.srt$/);
   const fs = await import("node:fs/promises");
   expect(await fs.readFile((await download.path())!, "utf8")).toMatch(/^1\n00:00:00,000 --> 00:00:03,800\nThis is the demo lip sync\./);
@@ -2187,6 +2192,13 @@ test("a lip sync takes part of the video and HeyGen's options, said on its card,
   expect(vtt.headers()["content-type"]).toContain("text/vtt");
   expect(await vtt.text()).toMatch(/^WEBVTT\n/);
   expect((await page.request.get("/api/lipsyncs/ls_missing123/captions")).status()).toBe(404);
+  // A download that fails is said on its card, where the button is, and the button keeps the focus.
+  await page.route("**/api/lipsyncs/*/captions*", (route) => route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "HeyGen's captions could not be read; try again" }) }));
+  await item.getByRole("button", { name: /^Download captions for .+ as WebVTT$/ }).focus();
+  await page.keyboard.press("Enter");
+  await expect(item.getByRole("alert")).toHaveText("HeyGen's captions could not be read; try again");
+  await expect(item.getByRole("button", { name: /^Download captions for .+ as WebVTT$/ })).toBeFocused();
+  await page.unroute("**/api/lipsyncs/*/captions*");
   // Past a library video's end, the API says how long the video is.
   const length = (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.durationSec as number;
   const late = await page.request.post("/api/lipsyncs", { data: { videoId: v.id, audioUrl: "https://93.184.216.34/retake.mp3", endSec: Math.ceil(length) + 5 } });
@@ -2266,6 +2278,8 @@ test("a video is lip-synced to an uploaded clip or a linked track, at the chosen
   // Nothing to start until both the footage and the new audio are chosen.
   await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
   await expect(start).toBeDisabled();
+  // What is missing is said under the button.
+  await expect(page.locator("#lipsync-start-why")).toHaveText("Choose the new audio first.");
   // An uploaded file is converted to WAV in the browser, saved as an audio clip, and chosen.
   await page.getByRole("button", { name: "Upload audio" }).focus();
   await page.getByLabel("Upload the new audio").setInputFiles({ name: "retake.wav", mimeType: "audio/wav", buffer: toneWav(2) });

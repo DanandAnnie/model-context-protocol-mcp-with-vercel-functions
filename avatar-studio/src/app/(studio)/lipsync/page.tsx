@@ -34,7 +34,8 @@ function fitTitle(base: string, suffix: string): string {
 
 /** A moment typed as seconds ("12.5") or minutes and seconds ("1:05"), in seconds; blank is none, anything else NaN. */
 function momentOf(text: string): number | undefined {
-  const t = text.trim();
+  // A comma decimal ("1,5") is read as a point, as many keyboards type it.
+  const t = text.trim().replace(",", ".");
   if (!t) return undefined;
   const m = /^(?:(\d+):)?(\d+(?:\.\d+)?)$/.exec(t);
   if (!m || (m[1] !== undefined && Number(m[2]) >= 60)) return NaN;
@@ -54,7 +55,7 @@ function momentSaid(sec: number): string {
 const FRAME_RATE_LABEL: Record<LipsyncFrameRate, { option: string; said: string }> = {
   constant: { option: "Constant (for editing software)", said: "constant frame rate" },
   variable: { option: "Variable", said: "variable frame rate" },
-  source: { option: "As the footage's", said: "footage's frame rate" },
+  source: { option: "Same as the footage", said: "footage's frame rate" },
 };
 
 function optionsSaid(l: Pick<Lipsync, "startSec" | "endSec" | "removeMusic" | "enhanceSpeech" | "keepLength" | "keepFormat" | "frameRate">): string[] {
@@ -149,6 +150,8 @@ export default function LipsyncPage() {
   const [frameRate, setFrameRate] = useState<LipsyncFrameRate | "">("");
   /** The lip sync whose captions are being fetched, and in which format. */
   const [captionsBusy, setCaptionsBusy] = useState<string | null>(null);
+  /** A caption download that failed, said on its own card (where the button pressed is) rather than at the top. */
+  const [captionErr, setCaptionErr] = useState<{ id: string; message: string } | null>(null);
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -240,6 +243,23 @@ export default function LipsyncPage() {
             ? "End the part at least a second after it starts."
             : partPastEnd(fromSec, toSec);
 
+  /** Why Lip-sync video cannot be pressed yet, said under it (null when it can). */
+  const startBlocked = !canStart
+    ? null
+    : !videoReady
+      ? from === "link"
+        ? "Paste an https link to the footage first."
+        : "Choose the video to lip-sync first."
+      : uploading
+        ? "Waiting for the audio to finish uploading."
+        : !audioReady
+          ? audioFrom === "link" && audioUrl.trim()
+            ? "Paste an https link to the new audio first."
+            : "Choose the new audio first."
+          : partProblem !== null
+            ? "Fix the part of the video above first."
+            : null;
+
   /** For a library video whose length is known, a part that starts or ends past it (the server's own rule). */
   function partPastEnd(start: number | undefined, end: number | undefined): string | null {
     const length = from === "library" ? videos.find((v) => v.id === videoId)?.durationSec : undefined;
@@ -254,7 +274,7 @@ export default function LipsyncPage() {
   async function saveCaptions(l: Lipsync, format: "srt" | "vtt") {
     if (captionsBusy) return;
     setCaptionsBusy(`${l.id}:${format}`);
-    setErr(null);
+    setCaptionErr(null);
     try {
       const res = await fetch(`/api/lipsyncs/${encodeURIComponent(l.id)}/captions${format === "vtt" ? "?format=vtt" : ""}`).catch(() => {
         throw new Error("Could not reach the server to get the captions");
@@ -269,7 +289,7 @@ export default function LipsyncPage() {
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not get the captions");
+      setCaptionErr({ id: l.id, message: e instanceof Error && e.message !== "Could not get the captions" ? e.message : "Could not get the captions; try again in a moment" });
     } finally {
       setCaptionsBusy(null);
     }
@@ -325,7 +345,16 @@ export default function LipsyncPage() {
       setVoiceGone(null);
       setTitle("");
       const first = started[0];
-      setNote(started.length > 1 ? `Lip-syncing ${started.length} takes; each appears here when it is ready.` : `Lip-syncing ${first.title}; it appears here when it is ready.`);
+      // A start tried again returns the lip sync it already made, under the title it was made with (or renamed to since):
+      // said, so a title typed meanwhile is not thought lost; it is renamed from its card, never behind the account's back.
+      const askedTitle = title.trim();
+      setNote(
+        started.length > 1
+          ? `Lip-syncing ${started.length} takes; each appears here when it is ready.`
+          : !several && askedTitle && first.title !== askedTitle
+            ? `This start had already gone through as ${first.title}; rename it from its card to call it ${askedTitle}.`
+            : `Lip-syncing ${first.title}; it appears here when it is ready.`,
+      );
       // Focus goes to the new lip sync, rather than being lost with the cleared form.
       focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-lipsync="${first.id}"]`) ?? firstInput.current);
     } catch (e) {
@@ -421,8 +450,8 @@ export default function LipsyncPage() {
       <p role="status" className="sr-only">
         {note ?? ""}
       </p>
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.4fr]">
-        <Card className="p-5">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <Card className="min-w-0 p-5">
           {data?.available === false ? (
             <p className="text-sm text-slate-600">Lip sync needs the HeyGen renderer; the current renderer has no such feature.</p>
           ) : (
@@ -589,10 +618,10 @@ export default function LipsyncPage() {
                   <div className="ml-6 space-y-1">
                     <div className="grid grid-cols-2 gap-2">
                       <Field label="From">
-                        <input className={inputClass} value={partFrom} inputMode="decimal" placeholder="0:00" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartFrom(e.target.value), changed())} />
+                        <input className={inputClass} value={partFrom} inputMode="text" autoComplete="off" placeholder="0:00" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartFrom(e.target.value), changed())} />
                       </Field>
                       <Field label="To">
-                        <input className={inputClass} value={partTo} inputMode="decimal" placeholder="the end" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartTo(e.target.value), changed())} />
+                        <input className={inputClass} value={partTo} inputMode="text" autoComplete="off" placeholder="the end" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartTo(e.target.value), changed())} />
                       </Field>
                     </div>
                     <p id="lipsync-part-hint" role="status" className={`text-xs ${partProblem ? "text-amber-700" : "text-slate-500"}`}>
@@ -630,15 +659,20 @@ export default function LipsyncPage() {
               <Field label="Title (optional)">
                 <input className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => setTitle(e.target.value)} placeholder={from === "library" ? "The video's title, marked lip-synced" : "Lip-synced video"} />
               </Field>
-              <Button onClick={submit} loading={busy} disabled={!videoReady || !audioReady || uploading || !canStart || partProblem !== null} className="w-full">
+              <Button onClick={submit} loading={busy} disabled={!canStart || startBlocked !== null} aria-describedby={startBlocked ? "lipsync-start-why" : undefined} className="w-full">
                 <AudioLines className="h-4 w-4" /> Lip-sync video
               </Button>
+              {startBlocked && (
+                <p id="lipsync-start-why" className="text-xs text-slate-500">
+                  {startBlocked}
+                </p>
+              )}
               <p className="text-xs text-slate-500">The lip-synced video is not added to the library; download it once it is ready. {keepLength ? "The video keeps its length, whatever the new audio's." : "When the new audio is longer or shorter, the video is stretched to fit it."}</p>
             </div>
           )}
         </Card>
 
-        <div ref={listRef}>
+        <div ref={listRef} className="min-w-0">
           <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
             Lip-synced videos
           </h2>
@@ -651,7 +685,7 @@ export default function LipsyncPage() {
                 <Card key={l.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="lipsync" data-lipsync={l.id} tabIndex={-1}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-slate-900">{l.title}</div>
+                      <div className="break-words text-sm font-medium text-slate-900">{l.title}</div>
                       <div className="mt-0.5 break-words text-xs text-slate-500" data-testid="lipsync-meta">
                         {l.videoId ? "A library video" : "A linked video"} · {l.voiceChangeId ? `“${l.audioName ?? "a recording"}” in your voice` : l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]}
                         {optionsSaid(l).map((o) => ` · ${o}`).join("")} · {formatDate(l.createdAt)}
@@ -685,8 +719,8 @@ export default function LipsyncPage() {
                           <button
                             key={format}
                             type="button"
-                            className="font-medium text-brand-700 hover:underline disabled:cursor-wait disabled:opacity-60"
-                            disabled={captionsBusy !== null}
+                            className="font-medium text-brand-700 hover:underline aria-busy:cursor-wait aria-busy:opacity-60"
+                            aria-busy={captionsBusy === `${l.id}:${format}` || undefined}
                             aria-label={`Download captions for ${l.title} as ${format === "srt" ? "SRT" : "WebVTT"}`}
                             onClick={() => saveCaptions(l, format)}
                           >
@@ -694,6 +728,11 @@ export default function LipsyncPage() {
                           </button>
                         ))}
                       </span>
+                      {captionErr?.id === l.id && (
+                        <p role="alert" className="mt-1 text-xs text-rose-600">
+                          {captionErr.message}
+                        </p>
+                      )}
                     </>
                   )}
                 </Card>

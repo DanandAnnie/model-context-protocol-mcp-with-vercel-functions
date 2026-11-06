@@ -7,6 +7,7 @@ import { ShareCta } from "./ShareCta";
 import { SharePlayer } from "./SharePlayer";
 import { ShareTranscript } from "./ShareTranscript";
 import { ShareChapters } from "./ShareChapters";
+import { ShareKeys } from "./ShareKeys";
 import { ShareMoment } from "./ShareMoment";
 import { ViewBeacon } from "./ViewBeacon";
 
@@ -82,6 +83,8 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
           {moment && <ShareMoment playerId={SHARE_PLAYER_ID} shareUrl={body.shareUrl} />}
         </p>
       )}
+      {/* The player's keyboard shortcuts, in an embed's frame too; the list of them only on the page. */}
+      {player && <ShareKeys playerId={SHARE_PLAYER_ID} list={!embed} burnedIn={player.captions && !player.trackDefault} />}
       {!embed && body.description && (
         <p className="mt-6 whitespace-pre-wrap text-base leading-relaxed text-slate-100" data-testid="share-description">
           {body.description}

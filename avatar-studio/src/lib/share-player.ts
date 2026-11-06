@@ -10,5 +10,8 @@ export const SHARE_PLAYER_ID = "share-player";
  */
 export function shareTrackId(language: string): string {
   // A language stored before names were checked could hold half an emoji, which encodeURIComponent throws on.
-  return `share-track-${encodeURIComponent(wellFormed(language))}`;
+  return `${SHARE_TRACK_PREFIX}${encodeURIComponent(wellFormed(language))}`;
 }
+
+/** How a translated subtitle track's id starts (the script's own track has none). */
+export const SHARE_TRACK_PREFIX = "share-track-";

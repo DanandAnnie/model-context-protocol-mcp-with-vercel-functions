@@ -10571,6 +10571,118 @@ test("a share link plays only a section: made on the video page, it pauses at it
   expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
 });
 
+test("a share page's player answers the video-site keyboard shortcuts, listed under it", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Keys ${Date.now().toString(36)}`, { captions: true });
+  await expect.poll(async () => ((await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");
+  await page.goto(`/share/${v.id}`);
+  const player = page.getByTestId("share-player");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  const at = () => player.evaluate((el: HTMLVideoElement) => el.currentTime);
+  const duration = await player.evaluate((el: HTMLVideoElement) => el.duration);
+  await player.evaluate((el: HTMLVideoElement) => (el.muted = true));
+  const paused = () => player.evaluate((el: HTMLVideoElement) => el.paused);
+  // K and Space play and pause, from anywhere on the page.
+  await page.locator("body").press("k");
+  await expect.poll(paused).toBe(false);
+  await page.keyboard.press("k");
+  await expect.poll(paused).toBe(true);
+  await page.keyboard.press(" ");
+  await expect.poll(paused).toBe(false);
+  await page.keyboard.press(" ");
+  await expect.poll(paused).toBe(true);
+  // A held key does not flip a toggle back and forth: its repeats are left alone.
+  await page.keyboard.down("k");
+  await page.keyboard.down("k");
+  await page.keyboard.down("k");
+  await page.keyboard.up("k");
+  await expect.poll(paused).toBe(false);
+  await page.keyboard.press("k");
+  await expect.poll(paused).toBe(true);
+  // J and L go ten seconds, the arrows five, a digit to that tenth, all within the clip.
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 1));
+  await page.locator("body").press("l");
+  await expect.poll(at).toBeCloseTo(Math.min(11, duration), 1);
+  await page.keyboard.press("j");
+  await expect.poll(at).toBeCloseTo(Math.min(11, duration) - 10, 1);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(at).toBeCloseTo(Math.min(11, duration) - 5, 1);
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(at).toBeCloseTo(Math.min(11, duration) - 10, 1);
+  // On the player itself the arrows are five seconds, once (the player's own controls may take the key, and land a
+  // frame or so off; never both).
+  await player.focus();
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 2));
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(at).toBeCloseTo(7, 0);
+  await page.locator("body").focus();
+  await page.keyboard.press("5");
+  await expect.poll(at).toBeCloseTo(duration / 2, 1);
+  await page.keyboard.press("0");
+  await expect.poll(at).toBeCloseTo(0, 1);
+  // M and C are announced, since neither shows on the picture.
+  const status = page.getByTestId("share-keys-status");
+  await page.keyboard.press("m");
+  await expect(status).toHaveText("Sound on.");
+  expect(await player.evaluate((el: HTMLVideoElement) => el.muted)).toBe(false);
+  await page.keyboard.press("m");
+  await expect(status).toHaveText("Muted.");
+  const showing = () => player.evaluate((el: HTMLVideoElement) => Array.from(el.textTracks).filter((t) => t.kind === "subtitles" && t.mode === "showing").length);
+  expect(await showing()).toBe(1);
+  await page.keyboard.press("c");
+  await expect(status).toHaveText("Captions off.");
+  expect(await showing()).toBe(0);
+  await page.keyboard.press("c");
+  await expect(status).toHaveText("Captions on.");
+  expect(await showing()).toBe(1);
+  // F goes full screen and back.
+  await page.locator("body").press("f");
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id ?? null)).toBe("share-player");
+  await page.keyboard.press("f");
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBeNull();
+  // Keys with Ctrl are left alone; Space on a button presses the button, and keys typed into a field stay there.
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 3));
+  await page.locator("body").press("Control+l");
+  await page.waitForTimeout(200);
+  expect(await at()).toBeCloseTo(3, 1);
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new Error("denied"));
+  });
+  await page.getByTestId("share-moment").focus();
+  await page.keyboard.press(" ");
+  const field = page.getByRole("textbox", { name: "Link at this moment" });
+  await expect(field).toBeFocused();
+  expect(await paused()).toBe(true);
+  await page.keyboard.press("l");
+  await page.keyboard.press("k");
+  await page.waitForTimeout(200);
+  expect(await at()).toBeCloseTo(3, 1);
+  expect(await paused()).toBe(true);
+  // The list of shortcuts, under the player, with a switch for the letter and number ones (for speech input).
+  const list = page.getByTestId("share-shortcuts");
+  await list.getByText("Keyboard shortcuts").click();
+  await expect(list.getByText("Back or forward 10 seconds")).toBeVisible();
+  const singleKeys = list.getByRole("checkbox", { name: /Letter and number shortcuts/ });
+  await expect(singleKeys).toBeChecked();
+  await singleKeys.uncheck();
+  await page.locator("body").press("l");
+  await page.waitForTimeout(200);
+  expect(await at()).toBeCloseTo(3, 1);
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(at).toBeCloseTo(8, 1);
+  // Kept for this browser, as the studio's own switch is.
+  await page.reload();
+  await page.getByTestId("share-shortcuts").getByText("Keyboard shortcuts").click();
+  await expect(page.getByTestId("share-shortcuts").getByRole("checkbox", { name: /Letter and number shortcuts/ })).not.toBeChecked();
+  await page.getByTestId("share-shortcuts").getByRole("checkbox", { name: /Letter and number shortcuts/ }).check();
+  // An embed answers them too, without the list.
+  await page.goto(`/share/${v.id}?embed=1`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 1));
+  await page.locator("body").press("l");
+  await expect.poll(at).toBeCloseTo(Math.min(11, duration), 1);
+  await expect(page.getByTestId("share-shortcuts")).toHaveCount(0);
+});
+
 test("a share page copies a link at the moment the viewer is watching", async ({ page }) => {
   const v = await createVideoViaApi(page, `Moment ${Date.now().toString(36)}`);
   await expect.poll(async () => ((await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");

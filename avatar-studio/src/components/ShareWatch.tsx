@@ -7,6 +7,7 @@ import { ShareCta } from "./ShareCta";
 import { SharePlayer } from "./SharePlayer";
 import { ShareTranscript } from "./ShareTranscript";
 import { ShareChapters } from "./ShareChapters";
+import { ShareMoment } from "./ShareMoment";
 import { ViewBeacon } from "./ViewBeacon";
 
 /** A share page's player, button, download link, description, and transcript, from what the server let this viewer see. */
@@ -22,6 +23,8 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
   const ratio = body.aspect === "9:16" ? 9 / 16 : body.aspect === "1:1" ? 1 : body.aspect === "4:5" ? 4 / 5 : body.aspect === "5:4" ? 5 / 4 : 16 / 9;
   const embedBox = embed ? { width: `min(100vw, ${+(ratio * 100).toFixed(4)}vh)`, height: `min(100vh, ${+(100 / ratio).toFixed(4)}vw)` } : undefined;
   const { player, cta } = body;
+  // A made video (one with a player) can be linked at the moment a viewer is watching.
+  const moment = !!player;
   return (
     <>
       {body.status === "completed" && <ViewBeacon videoId={body.videoId} />}
@@ -62,7 +65,7 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
           </div>
         )}
       </div>
-      {!embed && (cta || body.download) && (
+      {!embed && (cta || body.download || moment) && (
         <p className="mt-4 flex flex-wrap items-center gap-3">
           {cta && <ShareCta videoId={body.videoId} label={cta.label} url={cta.url} background={cta.background} dark={cta.dark} />}
           {body.download && (
@@ -76,6 +79,7 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
               Download video
             </a>
           )}
+          {moment && <ShareMoment playerId={SHARE_PLAYER_ID} shareUrl={body.shareUrl} />}
         </p>
       )}
       {!embed && body.description && (

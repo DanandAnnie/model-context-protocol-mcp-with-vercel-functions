@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { chaptersPlayed, type PlayMark } from "@/lib/chapter-play";
 import { SHARE_PLAYER_ID, shareTrackId } from "@/lib/share-player";
+import { startPlays } from "@/lib/share-time";
 import { wellFormed } from "@/lib/text";
 import type { CaptionFont, CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
 
@@ -67,7 +68,7 @@ export function SharePlayer({
   const startAt = (el: HTMLVideoElement) => {
     if (!start || started.current || !(el.readyState >= 1) || !Number.isFinite(el.duration) || el.duration <= 0) return;
     started.current = true;
-    if (start < el.duration - 0.5) el.currentTime = start;
+    if (startPlays(start, el.duration)) el.currentTime = start;
   };
   // The server-rendered player may have its metadata before this script runs, and so before the handler is there.
   useEffect(() => {

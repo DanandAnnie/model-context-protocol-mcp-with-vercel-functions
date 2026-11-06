@@ -102,3 +102,27 @@ export function shareLinkAt(base: string, startMs: number, nextMs?: number): str
   const t = ms % 1000 === 0 ? String(ms / 1000) : String(Number((ms / 1000).toFixed(3)));
   return `${base}${base.includes("?") ? "&" : "?"}t=${t}`;
 }
+
+/**
+ * Whether the share player starts a clip of `durationSec` at `start`: a start within its last half second (or past it)
+ * would leave nothing to watch, so the player plays from the beginning instead.
+ */
+export function startPlays(start: number, durationSec: number): boolean {
+  return start < durationSec - 0.5;
+}
+
+/**
+ * The whole second a "copy link at current time" names for a viewer at `sec`: the one the player is in (so the link
+ * starts a moment before, never after, what they saw; a hair under it counts as in it), or, in the clip's last half
+ * second, where a link would play from the beginning, the last whole second a link still starts at.
+ */
+export function momentSecond(sec: number, durationSec?: number): number {
+  const at = Number.isFinite(sec) && sec > 0 ? Math.floor(sec + 1e-3) : 0;
+  if (!at || durationSec === undefined || !Number.isFinite(durationSec) || durationSec <= 0 || startPlays(at, durationSec)) return at;
+  return Math.max(0, Math.ceil(durationSec - 0.5) - 1);
+}
+
+/** A share link starting at the whole second `sec` (see `momentSecond`): the plain link at 0. */
+export function shareMomentLink(base: string, sec: number): string {
+  return shareLinkAt(base, Number.isFinite(sec) && sec > 0 ? Math.floor(sec) * 1000 : 0);
+}

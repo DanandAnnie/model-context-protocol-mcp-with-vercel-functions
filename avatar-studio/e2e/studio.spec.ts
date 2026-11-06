@@ -10571,6 +10571,61 @@ test("a share link plays only a section: made on the video page, it pauses at it
   expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
 });
 
+test("a share page copies a link at the moment the viewer is watching", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Moment ${Date.now().toString(36)}`);
+  await expect.poll(async () => ((await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(`/share/${v.id}`);
+  const player = page.getByTestId("share-player");
+  const button = page.getByTestId("share-moment");
+  // At the start it is the plain link.
+  await expect(button).toHaveText("Copy link at 0:00");
+  await button.click();
+  await expect(page.getByRole("status").filter({ hasText: "Link to the start copied." })).toHaveCount(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}$`));
+  // The time on the button follows the player, to the whole second, and so does the link.
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 2.7));
+  await expect(button).toHaveText("Copy link at 0:02");
+  await button.click();
+  await expect(page.getByRole("status").filter({ hasText: "Link at 0:02 copied." })).toHaveCount(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}\\?t=2$`));
+  // In the clip's last half second a link would play from the beginning, so it names the last second one still starts at.
+  const last = await player.evaluate((el: HTMLVideoElement) => {
+    el.currentTime = el.duration - 0.1;
+    return Math.ceil(el.duration - 0.5) - 1;
+  });
+  const lastLabel = `0:${String(last).padStart(2, "0")}`;
+  await expect(button).toHaveText(`Copy link at ${lastLabel}`);
+  await button.click();
+  await expect(page.getByRole("status").filter({ hasText: `Link at ${lastLabel} copied.` })).toHaveCount(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}\\?t=${last}$`));
+  // The button's name holds still while the time on it changes.
+  await expect(button).toHaveAccessibleName("Copy link at the current time");
+  // Where the browser refuses the clipboard, the link is shown in a field, which takes the focus.
+  await page.evaluate(() => {
+    navigator.clipboard.writeText = () => Promise.reject(new Error("denied"));
+  });
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 2.2));
+  await expect(button).toHaveText("Copy link at 0:02");
+  await button.click();
+  const field = page.getByRole("textbox", { name: "Link at this moment" });
+  await expect(field).toBeFocused();
+  await expect(field).toHaveValue(new RegExp(`/share/${v.id}\\?t=2$`));
+  await expect(page.getByRole("status").filter({ hasText: "Copy the link from the field." })).toHaveCount(1);
+  // Opened from a section link, the moment's link keeps only its own start: the end belonged to the other link.
+  await page.goto(`/share/${v.id}?t=1&end=3`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(0.99);
+  await expect(button).toHaveText("Copy link at 0:01");
+  await button.click();
+  await expect(page.getByRole("status").filter({ hasText: "Link at 0:01 copied." })).toHaveCount(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(new RegExp(`/share/${v.id}\\?t=1$`));
+  // An embed is the player alone.
+  await page.goto(`/share/${v.id}?embed=1`);
+  await expect(player).toBeVisible();
+  await expect(page.getByTestId("share-moment")).toHaveCount(0);
+});
+
 test("share-page viewers who play a chapter are counted under it on the video page", async ({ page }) => {
   const bg = { type: "color", value: "#0f172a" };
   const v = await createVideoViaApi(page, `Reach ${Date.now().toString(36)}`, {

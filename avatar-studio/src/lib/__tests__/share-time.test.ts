@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chapterSectionPlays, clockTime, parseEndTime, parseStartTime, parseTimeInput, shareChapterLink, shareLinkAt, shareSectionLink } from "../share-time";
+import { chapterSectionPlays, clockTime, momentSecond, shareMomentLink, startPlays, parseEndTime, parseStartTime, parseTimeInput, shareChapterLink, shareLinkAt, shareSectionLink } from "../share-time";
 
 describe("parseStartTime", () => {
   it("reads seconds (to the millisecond), units, and clock times", () => {
@@ -102,5 +102,37 @@ describe("shareChapterLink", () => {
     for (const [a, b] of [[0, 999], [0, 1000], [12_340, 13_400], [12_341, 13_400], [12_399, 13_399], [7_777, 9_000]]) {
       assert.equal(chapterSectionPlays(a, b), new URL(shareChapterLink(base, a, b)).searchParams.has("end"), `${a} to ${b}`);
     }
+  });
+});
+
+describe("shareMomentLink", () => {
+  const base = "https://studio.test/share/vid_1";
+  it("starts at the whole second the viewer is in, and is the plain link in the first second", () => {
+    assert.equal(shareMomentLink(base, 65.9), `${base}?t=65`);
+    assert.equal(shareMomentLink(base, 1), `${base}?t=1`);
+    assert.equal(shareMomentLink(base, 0.99), base);
+    assert.equal(shareMomentLink(base, 0), base);
+    assert.equal(shareMomentLink(base, Number.NaN), base);
+    assert.equal(shareMomentLink(`${base}?x=1`, 12.2), `${base}?x=1&t=12`);
+    assert.equal(parseStartTime(new URL(shareMomentLink(base, 3723.4)).searchParams.get("t")), 3723, "read back as the same second");
+  });
+});
+
+describe("momentSecond", () => {
+  it("is the whole second the viewer is in, a hair under it counting as in it", () => {
+    assert.equal(momentSecond(65.9, 120), 65);
+    assert.equal(momentSecond(64.9999, 120), 65, "a start read back a hair short");
+    assert.equal(momentSecond(0.4, 120), 0);
+    assert.equal(momentSecond(Number.NaN, 120), 0);
+    assert.equal(momentSecond(5.2), 5, "the clip's length not known yet");
+  });
+  it("steps back from the clip's last half second, where a link would play from the beginning", () => {
+    for (const [sec, duration, want] of [[8.2, 8.4, 7], [8.4, 8.4, 7], [11.9, 12, 11], [12, 12, 11], [8.1, 8.6, 8], [7.9, 8.5, 7], [0.3, 0.6, 0]]) {
+      const got = momentSecond(sec, duration);
+      assert.equal(got, want, `${sec} of ${duration}`);
+      assert.ok(got === 0 || startPlays(got, duration), `the player starts ${duration} s at ${got}`);
+    }
+    assert.equal(startPlays(7, 8.4), true);
+    assert.equal(startPlays(8, 8.4), false);
   });
 });

@@ -3,6 +3,7 @@
 // the page (an open link) or in the answer to the email gate (a gated one), so a gated page's source holds
 // none of it until an email is given.
 import { captionsBurnedIn } from "./captions";
+import { config } from "./config";
 import { isDarkHex, posterUrl } from "./client";
 import { languageCode } from "./language";
 import { stripPauses } from "./pauses";
@@ -13,6 +14,8 @@ import type { AspectRatio, BrandKit, CaptionStyle, Video, WatermarkCorner } from
 
 export interface ShareBody {
   videoId: string;
+  /** The share link at the site's own address (as the studio's copy buttons and oEmbed write it), without a query. */
+  shareUrl: string;
   status: Video["status"];
   aspect: AspectRatio;
   /** Set once the video has rendered. */
@@ -53,6 +56,7 @@ export function shareBodyFor(video: Video, brand: BrandKit | null): ShareBody {
   const logoSrc = publicLogoSrc(brand, `/api/videos/${encodeURIComponent(video.id)}/logo`);
   return {
     videoId: video.id,
+    shareUrl: `${config.appUrl.replace(/\/$/, "")}/share/${encodeURIComponent(video.id)}`,
     status: video.status,
     aspect: video.aspect,
     ...(rendered && {

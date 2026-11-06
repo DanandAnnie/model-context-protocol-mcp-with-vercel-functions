@@ -110,6 +110,7 @@ export function providerStatus(): ProviderStatus {
     studioTemplates: typeof getAvatarProvider().listStudioTemplates === "function",
     cinematicShots: getAvatarProvider().cinematicShots === true,
     directedVideos: !!getAvatarProvider().startDirected,
+    agentBrandKits: !!(getAvatarProvider().startDirected && getAvatarProvider().importBrandKit && getAvatarProvider().brandKitDetails),
     authEnabled: authEnabled(),
     authMode: authMode(),
     renderLimitPerMonth: config.renderLimitPerMonth ?? null,

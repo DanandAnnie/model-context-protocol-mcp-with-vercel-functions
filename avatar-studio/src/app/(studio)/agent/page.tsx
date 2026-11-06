@@ -12,7 +12,7 @@ import { useCanEdit } from "@/hooks/useCanEdit";
 import { ApiError, api } from "@/lib/client";
 import { AGENT_DRAFT_KEY } from "@/lib/agent-draft";
 import { documentText } from "@/lib/document-text";
-import type { AgentStyle, Avatar, Backdrop, FootageJob, ProviderStatus, ShootJob, Video, Voice } from "@/lib/types";
+import type { AgentBrandKit, AgentStyle, Avatar, Backdrop, FootageJob, ProviderStatus, ShootJob, Video, Voice } from "@/lib/types";
 
 const LENGTHS = [
   { sec: 30, label: "About 30 seconds" },
@@ -53,6 +53,8 @@ export default function VideoAgentPage() {
   // The account's pictures, clips, and shoot photos for HeyGen's agent to use, listed where it directs videos.
   const [media, setMedia] = useState<MediaRef[]>([]);
   const [mediaBusy, setMediaBusy] = useState(false);
+  // The account's HeyGen brand kit, which every directed video is dressed in (set on the Brand page).
+  const { data: kitData } = useApi<{ kit: AgentBrandKit | null }>(status?.agentBrandKits ? "/api/brand/heygen" : null);
   const { data: backdropData, setData: setBackdropData } = useApi<{ backdrops: Backdrop[] }>(status?.directedVideos ? "/api/backdrops" : null);
   const { data: clipData } = useApi<{ footage: FootageJob[] }>(status?.directedVideos && status.generatedFootage ? "/api/footage" : null);
   const { data: shootData } = useApi<{ shoots: ShootJob[] }>(status?.directedVideos && status.photoShoots ? "/api/shoots" : null);
@@ -386,6 +388,20 @@ export default function VideoAgentPage() {
               />
             )}
             {byHeygen && styleErr && <p className="text-xs text-slate-500">HeyGen&apos;s styles could not be listed just now; the agent will choose the look.</p>}
+            {byHeygen && status?.agentBrandKits && kitData && (
+              <p className="text-xs text-slate-500" data-testid="agent-brand-kit-note">
+                {kitData.kit && !kitData.kit.missing ? (
+                  <>
+                    Dressed in your HeyGen brand kit, {kitData.kit.name || new URL(kitData.kit.url).hostname}: its colours, fonts, and logo.{" "}
+                  </>
+                ) : (
+                  <>HeyGen can dress this video in your website&apos;s colours, fonts, and logo. </>
+                )}
+                <Link href="/brand" className="text-brand-700 hover:underline">
+                  {kitData.kit && !kitData.kit.missing ? "Change it on the Brand page" : "Import them on the Brand page"}
+                </Link>
+              </p>
+            )}
             {byHeygen ? (
               <Button ref={(el) => void (buttons.current.direct = el)} onClick={() => run("direct")} loading={busy === "direct"} disabled={!ready} className="w-full">
                 <Sparkles className="h-4 w-4" /> Generate with HeyGen

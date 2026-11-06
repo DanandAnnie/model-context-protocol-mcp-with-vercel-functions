@@ -465,6 +465,34 @@ export class HeyGenClient {
     return this.request<{ session_id?: string; status?: string; video_id?: string | null }>(`${V3}/video-agents`, { method: "POST", body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
   }
 
+  /**
+   * A brand kit imported from a public web page (`POST /v3/brand-kits`): its id comes back at once, usable while the
+   * import finishes. Each call makes a new kit; the key makes a retried call the same one.
+   */
+  createBrandKit(body: { url: string; name?: string }, key: string) {
+    return this.request<{ brand_kit_id?: string; status?: string }>(`${V3}/brand-kits`, { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key }, signal: AbortSignal.timeout(20_000) });
+  }
+
+  /** A brand kit (`GET /v3/brand-kits/{id}`): whether its import finished, and its colours, logos, and fonts by role. */
+  brandKit(id: string) {
+    return this.request<{
+      brand_kit_id?: string;
+      name?: string | null;
+      status?: "loading" | "completed" | "error" | string;
+      colors?: string[] | null;
+      color_roles?: Partial<Record<"primary" | "secondary" | "tertiary" | "accent", string | null>> | null;
+      logos?: Array<{ logo_id?: string; name?: string | null; url?: string | null }> | null;
+      logo_roles?: { primary?: string | null } | null;
+      fonts?: Array<{ font_id?: string; name?: string | null }> | null;
+      font_roles?: Partial<Record<"title_text" | "body_text", { font_id?: string | null } | string | null>> | null;
+    }>(`${V3}/brand-kits/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(10_000) });
+  }
+
+  /** Deletes a brand kit with its colours, logos, and fonts (`DELETE /v3/brand-kits/{id}`); videos made with it keep their look. */
+  async deleteBrandKit(id: string): Promise<void> {
+    await this.request(`${V3}/brand-kits/${encodeURIComponent(id)}`, { method: "DELETE", signal: AbortSignal.timeout(10_000) });
+  }
+
   /** The curated styles the Video Agent composes in (`GET /v3/video-agents/styles`), every page up to a few. */
   listAgentStyles() {
     type Style = { style_id?: string; name?: string; thumbnail_url?: string | null; preview_video_url?: string | null; tags?: string[] | null; aspect_ratio?: string | null };

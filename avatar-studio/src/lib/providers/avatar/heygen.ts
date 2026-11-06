@@ -1,4 +1,4 @@
-import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, movesAsPhoto, rendersOnAvatarIII, rendersOnAvatarV, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, movesAsPhoto, rendersOnAvatarIII, rendersOnAvatarV, MAX_AGENT_KIT_COLORS, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions, isUnspaced } from "../../captions";
@@ -8,7 +8,7 @@ import { loadImage } from "../image";
 import { glossaryWith } from "../heygen-glossary";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../../errors";
-import type { AgentFile, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
+import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
 import { createHash } from "node:crypto";
@@ -989,6 +989,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       // Its webhooks name the render it starts, which the studio does not know yet: the studio's video id comes back.
       ...(webhookUrl("heygen") ? { callback_url: webhookUrl("heygen"), callback_id: videoId } : {}),
     };
+    // The account's own HeyGen brand kit (colours, fonts, logo), read from its record as the video starts.
+    if (directed.brandKitId) Object.assign(body, { brand_kit_id: directed.brandKitId });
     // The brand kit's pronunciations, as the workspace glossary's terms in the video's language (set once per session).
     const said = (directed.pronunciations ?? []).map((p) => ({ term: p.word, pronunciation: p.sayAs }));
     const code = baseLanguageCode(directed.language);
@@ -1014,11 +1016,67 @@ export class HeyGenAvatarProvider implements AvatarProvider {
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       if (/ failed: 402 /.test(message)) throw new ValidationError("The HeyGen account has no credits left for the Video Agent");
+      // A kit HeyGen no longer has (deleted there) is refused up front: said as the kit's, with the way past it.
+      if (directed.brandKitId && / failed: (400|404) /.test(message) && /brand[\s_-]?kit/i.test(message)) throw new ValidationError("HeyGen no longer has your HeyGen brand kit; import it again on the Brand page, or remove it there");
       if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen's Video Agent could not take that brief: ${heygenReason(message, "describe the video in more detail")}`);
       throw err;
     }
     if (!data.session_id) throw new Error("HeyGen's Video Agent answered without a session");
     return { providerJobId: `${AGENT_JOB}${Date.now()}_${data.session_id}`, agentSessionId: data.session_id };
+  }
+
+  /**
+   * A brand kit HeyGen imports from a public page (`POST /v3/brand-kits`), its id usable while the import runs. A page
+   * HeyGen cannot read and a workspace that may not make kits are said as such.
+   */
+  async importBrandKit(input: { url: string; name?: string }, key: string): Promise<{ kitId: string }> {
+    let out;
+    try {
+      out = await this.client.createBrandKit(stripEmpty({ url: input.url, name: input.name }), key);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (/ failed: 403 /.test(message)) throw new ValidationError("The studio's HeyGen workspace does not allow creating brand kits; ask its owner to allow them");
+      if (/ failed: 409 /.test(message)) throw new ConflictError("HeyGen is still starting the last import; try again in a few seconds");
+      if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not import that page: ${heygenReason(message, "use a public page that opens without a login")}`);
+      throw err;
+    }
+    if (!out?.brand_kit_id) throw new Error("HeyGen answered without a brand kit");
+    return { kitId: out.brand_kit_id };
+  }
+
+  /**
+   * A brand kit as HeyGen has it (`GET /v3/brand-kits/{id}`), null once HeyGen no longer has it: colours by role first
+   * (a role may name one outside the palette), then the rest, each a 6-digit hex once; the primary logo (else the first)
+   * by an https link; the title and body fonts first. A role naming an asset deleted since is passed over.
+   */
+  async brandKitDetails(kitId: string): Promise<AgentKitDetails | null> {
+    let kit;
+    try {
+      kit = await this.client.brandKit(kitId);
+    } catch (err) {
+      if (/ failed: 404 /.test(err instanceof Error ? err.message : "")) return null;
+      throw err;
+    }
+    const hex = (c: unknown) => (typeof c === "string" && /^#[0-9a-f]{6}$/i.test(c.trim()) ? c.trim().toLowerCase() : undefined);
+    const roles = kit.color_roles ?? {};
+    const colors = [...new Set([roles.primary, roles.secondary, roles.tertiary, roles.accent, ...(kit.colors ?? [])].map(hex).filter((c): c is string => !!c))].slice(0, MAX_AGENT_KIT_COLORS);
+    const logos = (kit.logos ?? []).filter((l) => httpsOnly(l.url));
+    const logo = logos.find((l) => l.logo_id && l.logo_id === kit.logo_roles?.primary) ?? logos[0];
+    const fontName = (id: string | null | undefined) => (id ? (kit.fonts ?? []).find((f) => f.font_id === id)?.name?.trim() : undefined);
+    const roleFont = (r: { font_id?: string | null } | string | null | undefined) => fontName(typeof r === "string" ? r : r?.font_id);
+    const fonts = [...new Set([roleFont(kit.font_roles?.title_text), roleFont(kit.font_roles?.body_text), ...(kit.fonts ?? []).map((f) => f.name?.trim())].filter((f): f is string => !!f))].slice(0, 4);
+    const status = kit.status === "completed" || kit.status === "error" ? kit.status : "loading";
+    return stripEmpty({ status, name: kit.name?.trim() || undefined, colors, logoUrl: httpsOnly(logo?.url), fonts }) as AgentKitDetails;
+  }
+
+  /** Deletes a brand kit at HeyGen (`DELETE /v3/brand-kits/{id}`); one HeyGen no longer has is already gone. */
+  async deleteBrandKit(kitId: string): Promise<void> {
+    try {
+      await this.client.deleteBrandKit(kitId);
+    } catch (err) {
+      if (/ failed: 404 /.test(err instanceof Error ? err.message : "")) return;
+      throw err;
+    }
   }
 
   /**

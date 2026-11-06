@@ -10,6 +10,7 @@ export * from "./leads";
 export * from "./scripts";
 export * from "./agents";
 export * from "./video-agent";
+export * from "./agent-brand";
 export * from "./account";
 export * from "./videos";
 export * from "./usage";

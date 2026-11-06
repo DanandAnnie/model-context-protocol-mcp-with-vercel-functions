@@ -1171,6 +1171,7 @@ export default function VideoDetailPage() {
                       <Row label="Presenter">{video.directed.avatarName ?? "Chosen by HeyGen"}</Row>
                       <Row label="Voice">{video.directed.voiceName ?? "Chosen by HeyGen"}</Row>
                       <Row label="Style">{video.directed.styleName ?? "Chosen by HeyGen"}</Row>
+                      {video.directed.brandKitName && <Row label="HeyGen brand kit">{video.directed.brandKitName}</Row>}
                       {video.directed.editOf && (
                         <Row label="Edited from">
                           <Link href={`/videos/${video.directed.editOf.videoId}`} className="text-brand-700 hover:underline [overflow-wrap:anywhere]">

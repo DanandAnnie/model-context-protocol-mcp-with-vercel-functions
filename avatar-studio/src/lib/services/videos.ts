@@ -32,6 +32,7 @@ import { bumpViewsByDay } from "../insights";
 
 import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
+import { agentKitFor } from "./agent-brand";
 import { pronunciationsFor, spokenCopy } from "../pronounce";
 import { clearComments, commentCounts } from "./comments";
 import { clearVideoLeads } from "./leads";
@@ -1772,7 +1773,9 @@ async function createDirectedVideo(req: VideoRequest & { directed: NonNullable<V
   // language with no code its rules can name is refused rather than sent without them.
   const said = provider.directedPronunciations ? pronunciationsFor((await getBrandKit(ownerId))?.pronunciations, req.directed.language) : [];
   if (said.length && !baseLanguageCode(req.directed.language)) throw new ValidationError(`Your brand kit's pronunciations cannot be given to HeyGen's Video Agent in ${req.directed.language}; choose a language such as English, Spanish, or French`);
-  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name, media: given?.media, pronunciations: said.length ? said : undefined }) };
+  // The account's own HeyGen brand kit as it is now (never one a request names), for the agent to dress the video in.
+  const kit = provider.importBrandKit ? await agentKitFor(ownerId) : null;
+  req = { ...req, directed: stripUndefined({ ...req.directed, avatarName: avatar?.name, voiceName: voice?.name, media: given?.media, pronunciations: said.length ? said : undefined, brandKitId: kit?.kitId, brandKitName: kit?.name }) };
   const base: Video = {
     ...req,
     ...stripUndefined(extras),

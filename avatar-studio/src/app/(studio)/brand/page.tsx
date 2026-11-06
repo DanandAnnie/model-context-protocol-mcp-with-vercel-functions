@@ -5,6 +5,7 @@ import { Button, Card, ErrorBanner, Field, SectionTitle, inputClass } from "@/co
 import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { AgentBrandKitCard } from "@/components/AgentBrandKitCard";
 import { BackdropPicker } from "@/components/BackdropPicker";
 import { CaptionStyleFields } from "@/components/CaptionStyleFields";
 import { CAPTION_FONT_STACKS, restoredCaptionStyle } from "@/lib/caption-style";
@@ -13,7 +14,7 @@ import { MAX_PRONUNCIATIONS, formatPronunciations, parsePronunciations } from "@
 import { MAX_FORCED_TRANSLATIONS, MAX_FORCED_TRANSLATION_LENGTH, MAX_GLOSSARY_TERMS, MAX_GLOSSARY_TERM_LENGTH, MIN_GLOSSARY_TERM_LENGTH, formatForcedTranslations, parseForcedTranslations, parseGlossary } from "@/lib/glossary";
 import { LOGO_TYPES, logoDataUrlValid, logoFileType } from "@/lib/logo-types";
 import type { BrandSuggestion } from "@/lib/brand-import";
-import { DEFAULT_CAPTION_STYLE, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, backdropIdOf, isDefaultCaptionStyle, type CaptionStyle, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
+import { DEFAULT_CAPTION_STYLE, MAX_CLOSING_SCRIPT, MAX_SCENE_TEXT, MAX_WRITING_STYLE, backdropIdOf, isDefaultCaptionStyle, type CaptionStyle, footageIdOf, footageLength, footagePath, type FootageJob, type AspectRatio, type Avatar, type Backdrop, type BrandKit, type ProviderStatus, type Resolution, type Voice, type WatermarkCorner } from "@/lib/types";
 
 const DEFAULT_PRIMARY = "#4f46e5";
 
@@ -27,6 +28,7 @@ export default function BrandPage() {
   const { data: brandData, loading } = useApi<{ brand: BrandKit | null }>("/api/brand");
   const { data: avatarData } = useApi<{ avatars: Avatar[] }>("/api/avatars");
   const { data: voiceData } = useApi<{ voices: Voice[] }>("/api/voices");
+  const { data: status } = useApi<ProviderStatus>("/api/status");
 
   const [name, setName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
@@ -753,6 +755,7 @@ export default function BrandPage() {
             </ul>
             <p className="mt-3 text-xs text-slate-500">Templates keep their own aspect ratio; copies keep every setting of the original.</p>
           </Card>
+          {status?.agentBrandKits && <AgentBrandKitCard canEdit={canEdit !== false} />}
         </div>
       </div>
     </>

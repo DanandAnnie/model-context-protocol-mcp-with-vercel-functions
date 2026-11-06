@@ -10952,6 +10952,52 @@ test("HeyGen's Video Agent directs a whole video from a brief, and is asked agai
   expect((await square.json()).error).toMatch(/landscape or portrait/);
 });
 
+test("HeyGen reads a website into the account's own brand kit, which its Video Agent dresses directed videos in", async ({ page }) => {
+  await page.request.delete("/api/brand/heygen");
+  await page.goto("/brand");
+  const card = page.getByTestId("agent-brand-kit");
+  await expect(card.getByRole("heading", { name: "HeyGen brand kit" })).toBeVisible();
+  const site = card.getByLabel("Website for HeyGen to read");
+  const importButton = card.getByRole("button", { name: "Import", exact: true });
+  // An address HeyGen could not reach is refused here, said in place.
+  await site.fill("http://10.0.0.1");
+  await importButton.click();
+  await expect(card.getByTestId("agent-brand-note")).toHaveText("Enter a public website address like https://example.com");
+  await site.fill("acme-dental.com");
+  await importButton.click();
+  await expect(card.getByTestId("agent-brand-note")).toContainText("HeyGen is reading the page");
+  await expect(card).toContainText("https://acme-dental.com/");
+  // The card checks back while HeyGen reads, then shows what it read.
+  await expect(card.getByTestId("agent-brand-status")).toHaveText("Ready", { timeout: 15_000 });
+  await expect(card.getByRole("list", { name: "Colours HeyGen read" }).getByRole("listitem")).toHaveText(["#1d4ed8", "#f59e0b", "#0f172a"]);
+  await expect(card).toContainText("Fonts: Inter, Merriweather");
+  await expect(card).toContainText("Acme-dental");
+  await expect(card.getByRole("button", { name: "Import again" })).toBeVisible();
+  // The Video Agent page says the video will be dressed in it.
+  await page.goto("/agent");
+  await page.getByLabel(/^HeyGen's Video Agent/).check();
+  const note = page.getByTestId("agent-brand-kit-note");
+  await expect(note).toContainText("Dressed in your HeyGen brand kit, Acme-dental: its colours, fonts, and logo.");
+  await page.getByLabel("What should the video be?").fill("A short welcome tour of our dental clinic for new patients");
+  await page.getByRole("button", { name: "Generate with HeyGen" }).click();
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = new URL(page.url()).pathname.split("/").at(-1)!;
+  await expect(page.getByText("HeyGen brand kit", { exact: true })).toBeVisible();
+  await expect(page.getByText("Acme-dental", { exact: true })).toBeVisible();
+  const video = (await (await page.request.get(`/api/videos/${id}`)).json()).video as { directed: { brandKitId?: string } };
+  expect(video.directed.brandKitId).toMatch(/^mockkit_/);
+  // Removed, new directed videos are no longer dressed in it, and the agent page says where to import one.
+  await page.goto("/brand");
+  page.once("dialog", (d) => void d.accept());
+  await card.getByRole("button", { name: "Remove" }).click();
+  await expect(card.getByTestId("agent-brand-note")).toHaveText("Removed; new directed videos are no longer dressed in a HeyGen brand kit.");
+  await expect(card.getByTestId("agent-brand-status")).toHaveCount(0);
+  expect((await (await page.request.get("/api/brand/heygen")).json()).kit).toBeNull();
+  await page.goto("/agent");
+  await page.getByLabel(/^HeyGen's Video Agent/).check();
+  await expect(note.getByRole("link", { name: "Import them on the Brand page" })).toBeVisible();
+});
+
 test("HeyGen's Video Agent composes a video in a curated style chosen from its groups, kept when asked again", async ({ page }) => {
   await page.goto("/agent");
   // The styles are HeyGen's agent's: none are offered for this studio's own.

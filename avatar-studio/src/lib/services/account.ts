@@ -13,8 +13,10 @@ import type { InstantVoice, MusicJob, TwinJob, VoiceChange, WebhookDelivery } fr
 import { publicDelivery } from "../notifications";
 import { dropMusicRender } from "./music";
 import { dropInstantVoice, wordsRowId } from "./voice-changer";
+import { dropAgentBrand } from "./agent-brand";
+import type { AgentBrandKit } from "../types";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot", "agentbrand"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -148,6 +150,10 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         if (kind === "music") await dropMusicRender(item as MusicJob);
         // An instant voice is a real person's voice in the renderer's shared account: deleted there, or the account is kept.
         if (kind === "instantvoice") await dropInstantVoice(item as InstantVoice);
+        // A HeyGen brand kit sits in the studio's shared HeyGen workspace: deleted there, or kept here (its id would be lost).
+        if (kind === "agentbrand" && !(await dropAgentBrand(item as AgentBrandKit))) {
+          throw new ConflictError("The renderer would not delete your HeyGen brand kit just now, so the account was kept (anything removed before it stays removed); try again in a moment, or ask the operator if this repeats");
+        }
         await getStore().remove(kind, item.id);
         removed.add(item.id);
       }

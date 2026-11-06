@@ -53,6 +53,15 @@ export interface AvatarJobStatus {
 
 /** Avatars and voices referenced by a request's scenes, keyed by id. */
 /** A file handed to the renderer's Video Agent with a brief: by a link it fetches, or an asset it already holds. */
+/** A renderer's brand kit as read back: whether its import finished, and the colours (hex), primary logo (https), and fonts it found. */
+export interface AgentKitDetails {
+  status: "loading" | "completed" | "error";
+  name?: string;
+  colors: string[];
+  logoUrl?: string;
+  fonts: string[];
+}
+
 export type AgentFile = { type: "url"; url: string } | { type: "asset_id"; assetId: string };
 
 export interface RenderCast {
@@ -100,6 +109,14 @@ export interface AvatarProvider {
    * Absent when the renderer cannot.
    */
   startDirected?(req: VideoRequest, avatar: Avatar | null, voice: Voice | null, videoId: string, files?: AgentFile[]): Promise<{ providerJobId: string; agentSessionId?: string }>;
+  /**
+   * Brand kits for the agent (HeyGen's `/v3/brand-kits`): one imported from a public web page (its id usable at once,
+   * `key` making a retry the same kit), read back (null for one the renderer no longer has), and deleted (one already
+   * gone is not an error). Absent when the renderer has none.
+   */
+  importBrandKit?(input: { url: string; name?: string }, key: string): Promise<{ kitId: string }>;
+  brandKitDetails?(kitId: string): Promise<AgentKitDetails | null>;
+  deleteBrandKit?(kitId: string): Promise<void>;
   /** The conversation with the agent of a directed video under review, oldest first, and whether it waits for an answer. */
   agentConversation?(sessionId: string): Promise<{ waiting: boolean; progress?: number; messages: AgentMessage[] }>;
   /** An answer to the agent of a directed video under review: feedback, or the go-ahead to render. */

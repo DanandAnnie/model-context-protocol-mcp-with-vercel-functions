@@ -932,6 +932,12 @@ export interface DirectedVideo {
    * language), as the kit had them when the video last started; HeyGen writes the script, so they cannot be spelled in.
    */
   pronunciations?: Pronunciation[];
+  /**
+   * The account's HeyGen brand kit the agent dressed it in (`brand_kit_id`: colours, fonts, logo), by name as it was
+   * then; read from the account's kit each time the video starts, never from the request.
+   */
+  brandKitId?: string;
+  brandKitName?: string;
   /** The directed video this cut revised, scene by scene, and what each changed scene (numbered from 1) was asked to become. */
   editOf?: { videoId: string; title: string; edits: Array<{ scene: number; text: string }> };
 }
@@ -1347,6 +1353,51 @@ export interface BrandKit {
   updatedAt: string;
 }
 
+/**
+ * A brand kit HeyGen imported from the account's website (`POST /v3/brand-kits`), which HeyGen's Video Agent dresses the
+ * account's directed videos in. One per account, kept apart from the Brand page's kit (saving or removing that leaves
+ * this alone, and a brand kit file never carries it): the id names a kit in the studio's HeyGen workspace, so only the
+ * account that imported it sends it.
+ */
+export interface AgentBrandKit {
+  /** `agentbrand_…`, one row per kit HeyGen made for the account. */
+  id: string;
+  ownerId: string;
+  /**
+   * The account's kit in use. A kit it replaced (imported again, or removed) is kept, unused, while a video it dressed
+   * names it, since HeyGen's session for that video still uses it; then it is deleted at HeyGen.
+   */
+  current?: true;
+  /** The renderer that made it (its own name for it), asked about and deleted there; a kit of another renderer is not used. */
+  provider: string;
+  /** When the account stopped using it; it is not deleted at the renderer for a while after, so a video starting then keeps it. */
+  retiredAt?: string;
+  /** When a kit no longer used was last found still named by one of the account's videos. */
+  sweptAt?: string;
+  /** The page HeyGen read, as sent. */
+  url: string;
+  /** HeyGen's `brand_kit_id`. */
+  kitId: string;
+  /** HeyGen's import: still reading the page (the id already works), done, or failed. */
+  status: "loading" | "completed" | "error";
+  /** Why it stopped short, as said to the account. */
+  error?: string;
+  /** HeyGen no longer has it (deleted there): it is not sent. */
+  missing?: true;
+  /** What HeyGen read, once it has: the kit's name, colours (hex, by role first), primary logo (https), and fonts. */
+  name?: string;
+  colors?: string[];
+  logoUrl?: string;
+  fonts?: string[];
+  /** When HeyGen was last asked about it. */
+  checkedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The most colours of a HeyGen brand kit kept to show. */
+export const MAX_AGENT_KIT_COLORS = 8;
+
 /** The most a brand kit's opening or closing scene says; a scene of a video holds more, but a greeting or a closing line is short. */
 export const MAX_CLOSING_SCRIPT = 1000;
 
@@ -1733,6 +1784,8 @@ export interface ProviderStatus {
   cinematicShots: boolean;
   /** Whether the renderer directs whole videos from a brief (HeyGen's Video Agent). */
   directedVideos: boolean;
+  /** HeyGen imports a brand kit from the account's website for its Video Agent to dress directed videos in. */
+  agentBrandKits: boolean;
   /** Whether the TTS provider can design a voice from a description. */
   voiceDesign: boolean;
   /** Present when the request carried an owner (signed in, or open/password mode). */

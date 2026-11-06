@@ -4,7 +4,7 @@ import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
 import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, SpokenWord, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
-import type { AgentFile, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
+import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
 import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
@@ -24,6 +24,8 @@ const DEMO_SESSIONS = new Map<string, { turnAt: number; approvedAt?: number; fil
 const MAX_DEMO_SESSIONS = 200;
 /** How long the demo agent "works" on each turn before it answers. */
 const DEMO_TURN_MS = 2500;
+/** How long a demo brand kit import reads the page before it is done. */
+const DEMO_KIT_MS = 1500;
 /** Words that approve the storyboard: a go-ahead said outright, or a bare "render" / "make it" / "generate it". */
 const DEMO_APPROVAL = /\b(?:go[- ]ahead|(?:make|generate|render) the video|render it|lgtm|looks (?:good|great|perfect)|approved?|proceed)\b|^\s*(?:(?:yes|ok(?:ay)?)[,!.]?\s*)?(?:render|generate it|make it)[.!]*\s*$/i;
 /** Words that ask for something first, so an answer with them is feedback even beside an approval ("approved, but add a scene"). */
@@ -386,6 +388,28 @@ export class MockAvatarProvider implements AvatarProvider {
     }
     return { providerJobId: `mockagent_${key}`, agentSessionId: `mocksess_${key}` };
   }
+
+  /**
+   * A demo stand-in for HeyGen's brand kit import: the kit's id carries when it was made and the page's host, so it reads
+   * back the same on any server instance. It is "loading" for its first moments, then done with a fixed palette and
+   * fonts (no logo); a host starting with "broken." stops early, as HeyGen's can.
+   */
+  async importBrandKit(input: { url: string; name?: string }): Promise<{ kitId: string }> {
+    const host = new URL(input.url).hostname.toLowerCase();
+    return { kitId: `mockkit_${Date.now()}_${Buffer.from(host).toString("base64url")}` };
+  }
+
+  async brandKitDetails(kitId: string): Promise<AgentKitDetails | null> {
+    const m = /^mockkit_(\d+)_([A-Za-z0-9_-]+)$/.exec(kitId);
+    if (!m) return null;
+    const host = Buffer.from(m[2], "base64url").toString().replace(/^www\./, "");
+    const name = host.split(".")[0].replace(/^./, (c) => c.toUpperCase());
+    if (Date.now() - Number(m[1]) < DEMO_KIT_MS) return { status: "loading", name, colors: [], fonts: [] };
+    if (host.startsWith("broken.")) return { status: "error", name, colors: ["#334155"], fonts: [] };
+    return { status: "completed", name, colors: ["#1d4ed8", "#f59e0b", "#0f172a"], fonts: ["Inter", "Merriweather"] };
+  }
+
+  async deleteBrandKit(): Promise<void> {}
 
   async agentConversation(sessionId: string): Promise<{ waiting: boolean; messages: AgentMessage[] }> {
     const session = DEMO_SESSIONS.get(sessionId);

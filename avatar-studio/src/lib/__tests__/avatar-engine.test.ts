@@ -16,10 +16,11 @@ beforeEach(() => {
 const base = { title: "Tour", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, script: "Welcome in." };
 
 describe("avatar engine", () => {
-  it("keeps only Avatar V, HeyGen's default being Avatar IV", () => {
+  it("keeps Avatar V and Avatar III, HeyGen's default being Avatar IV", () => {
     assert.equal(videoRequestSchema.parse({ ...base, avatarEngine: "avatar_v" }).avatarEngine, "avatar_v");
+    assert.equal(videoRequestSchema.parse({ ...base, avatarEngine: "avatar_iii" }).avatarEngine, "avatar_iii");
     assert.equal(videoRequestSchema.parse({ ...base, avatarEngine: "avatar_iv" }).avatarEngine, undefined, "the default is stored as absent");
-    assert.equal(videoRequestSchema.safeParse({ ...base, avatarEngine: "avatar_iii" }).success, false);
+    assert.equal(videoRequestSchema.safeParse({ ...base, avatarEngine: "avatar_vi" }).success, false);
   });
 
   it("is stored with the video and kept by templates, retries, other sizes, and batch rows", async () => {

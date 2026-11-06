@@ -11,7 +11,7 @@ import { ApiError, BATCH_NOTHING_TO_SEND, api, formatDate } from "@/lib/client";
 import type { BatchSummary } from "@/lib/services/batches";
 import { decodeScript, legacyEncodingFor } from "@/lib/script-import";
 import { restoredCaptionStyle } from "@/lib/caption-style";
-import { MAX_RETRY_AT_ONCE, TRASH_RETENTION_DAYS, VOICE_EMOTIONS, isDefaultCaptionStyle, renders4k, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
+import { MAX_RETRY_AT_ONCE, TRASH_RETENTION_DAYS, VOICE_EMOTIONS, isDefaultCaptionStyle, renders4k, rendersOnAvatarIII, rendersOnAvatarV, type AspectRatio, type Avatar, type Background, type BrandKit, type CaptionStyle, type PhotoExpressiveness, type VoiceAccent, type AvatarEngine, type Resolution, type Voice, type VideoTemplate, type VoiceEmotion } from "@/lib/types";
 
 const MAX_BATCH_SCRIPT = 5000;
 
@@ -442,21 +442,27 @@ export default function BatchPage() {
                 </button>
               </p>
             )}
-            {carried.avatarEngine === "avatar_v" && (
+            {(carried.avatarEngine === "avatar_v" || carried.avatarEngine === "avatar_iii") && (
               // Like a transparent template's, a template's engine is shown and can be dropped, its blinking with it.
               <p data-testid="batch-engine" className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
                 <span>
-                  Avatar V{carried.moreBlinking ? " with more blinking" : ""}, from the template:{" "}
-                  {!chosenAvatar || rendersOnAvatarV(chosenAvatar, carried)
-                    ? "HeyGen's higher-quality engine, for this presenter's look."
-                    : "not used, as this presenter renders on Avatar IV (its look does not support Avatar V, or it is a photo avatar given expressiveness or gestures)."}
+                  {carried.avatarEngine === "avatar_iii" ? "Avatar III" : `Avatar V${carried.moreBlinking ? " with more blinking" : ""}`}, from the template:{" "}
+                  {resolution === "4k"
+                    ? "not sent, as a 4K batch renders on Avatar III whatever the template chose."
+                    : carried.avatarEngine === "avatar_iii"
+                      ? !chosenAvatar || rendersOnAvatarIII(chosenAvatar, carried)
+                        ? "HeyGen's re-engineered photo-to-video engine, for this presenter."
+                        : "not used, as this presenter renders on Avatar IV (its look does not support Avatar III, or it is a photo avatar given expressiveness or gestures)."
+                      : !chosenAvatar || rendersOnAvatarV(chosenAvatar, carried)
+                        ? "HeyGen's higher-quality engine, for this presenter's look."
+                        : "not used, as this presenter renders on Avatar IV (its look does not support Avatar V, or it is a photo avatar given expressiveness or gestures)."}
                 </span>
                 <button
                   type="button"
                   className="shrink-0 font-medium text-brand-700 hover:underline"
                   onClick={() => {
                     setCarried(({ avatarEngine: _e, moreBlinking: _b, ...rest }) => rest);
-                    setCarriedNote("Each video now uses Avatar IV.");
+                    setCarriedNote(resolution === "4k" ? "The template's engine is dropped; a 4K batch renders on Avatar III." : "Each video now uses Avatar IV.");
                     templateSelect.current?.focus();
                   }}
                 >

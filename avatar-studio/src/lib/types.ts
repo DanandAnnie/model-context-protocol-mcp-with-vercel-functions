@@ -677,7 +677,18 @@ export const rendersOnAvatarV = (a: { source?: string; tags?: string[]; avatarV?
  * look (kept as a custom presenter, so not a photo avatar for this); a photo avatar, or an uploaded portrait, tops out at 1080p.
  */
 export const renders4k = (a: { source?: string; tags?: string[]; avatarIII?: true }) =>
-  !!a.tags?.includes("digital twin") || (!!a.avatarIII && !isPhotoAvatar(a));
+  isTrainedTwin(a) || (!!a.avatarIII && !isPhotoAvatar(a));
+/**
+ * Whether a scene's presenter renders on Avatar III when the video asks for it: its look supports the engine (photo
+ * avatars included, at up to 1080p), or it is a digital twin trained here, and it is not a photo avatar given
+ * expressiveness or gestures, which Avatar III takes neither of, so those stay on Avatar IV.
+ */
+export const rendersOnAvatarIII = (a: { source?: string; tags?: string[]; avatarIII?: true }, req: { expressiveness?: string; motionPrompt?: string }) =>
+  (!!a.avatarIII || isTrainedTwin(a)) && !(movesAsPhoto(a) && (req.expressiveness || req.motionPrompt));
+/** A digital twin trained here: kept as a custom presenter, but a HeyGen digital_twin look, a video avatar. */
+export const isTrainedTwin = (a: { tags?: string[] }) => !!a.tags?.includes("digital twin");
+/** Whether a presenter takes photo avatar motion (expressiveness, and gestures on Avatar IV): a photo avatar that is not a trained twin. */
+export const movesAsPhoto = (a: { source?: string; tags?: string[] }) => isPhotoAvatar(a) && !isTrainedTwin(a);
 /** Why a 4K video cannot use Avatar V: HeyGen renders 4K on Avatar III only. */
 export const FOUR_K_ENGINE = "4K renders on HeyGen's Avatar III engine; set Avatar engine to Avatar IV, or choose 1080p for Avatar V";
 /** Why a 4K video takes no motion settings: Avatar III supports neither expressiveness nor a motion prompt. */
@@ -854,7 +865,8 @@ export interface VideoRequest {
   accent?: VoiceAccent;
   /**
    * HeyGen's avatar engine: "avatar_v" asks for its higher-quality Avatar V on every scene whose presenter's look
-   * supports it (`avatarV`); absent is HeyGen's default, Avatar IV. Other renderers ignore it.
+   * supports it (`avatarV`), "avatar_iii" for its re-engineered photo-to-video Avatar III on every scene whose
+   * presenter renders on it (`rendersOnAvatarIII`); absent is HeyGen's default, Avatar IV. Other renderers ignore it.
    */
   avatarEngine?: AvatarEngine;
   /**
@@ -1025,7 +1037,7 @@ export interface StudioTemplateUse {
 }
 
 /** HeyGen's avatar engines a video can choose; "avatar_iv" is its default and is stored as absent. */
-export const AVATAR_ENGINES = ["avatar_iv", "avatar_v"] as const;
+export const AVATAR_ENGINES = ["avatar_iv", "avatar_v", "avatar_iii"] as const;
 export type AvatarEngine = (typeof AVATAR_ENGINES)[number];
 
 /** The accents a video can ask a voice for, as BCP 47 tags; each voice is offered those of its own language. */

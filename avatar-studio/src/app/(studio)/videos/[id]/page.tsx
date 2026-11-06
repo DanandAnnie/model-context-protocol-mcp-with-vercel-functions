@@ -1233,6 +1233,20 @@ export default function VideoDetailPage() {
                       {video.provider !== "heygen" ? " (not applied by this renderer)" : " (where the voice offers it)"}
                     </Row>
                   ) : null}
+                  {video.avatarEngine === "avatar_iii" && video.resolution !== "4k" ? (
+                    <Row label="Avatar engine">
+                      {`Avatar III${
+                        video.provider !== "heygen"
+                          ? " (not applied by this renderer)"
+                          : video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter)
+                            ? " (not applied: no scene shows the presenter)"
+                            : " (asked for; HeyGen uses it where the presenter renders on it, except photo avatars given expressiveness or gestures)"
+                      }`}
+                    </Row>
+                  ) : null}
+                  {video.resolution === "4k" ? (
+                    <Row label="Avatar engine">{`Avatar III, for 4K${video.provider !== "heygen" ? " (not applied by this renderer)" : video.scenes?.length && video.scenes.every((sc) => sc.hidePresenter) ? " (not applied: no scene shows the presenter)" : ""}`}</Row>
+                  ) : null}
                   {video.avatarEngine === "avatar_v" ? (
                     <Row label="Avatar engine">
                       {`Avatar V${video.moreBlinking ? ", more blinking" : ""}${

@@ -11972,6 +11972,51 @@ test("a video is made in 4K on Avatar III for a presenter whose look supports it
   }
 });
 
+test("Avatar III is chosen for presenters that render on it, kept with the video, and shown on a batch from its template", async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.goto("/create");
+  await page.locator("input[placeholder='Video title']").fill("Photo-to-video tour");
+  await page.locator("textarea").fill("Welcome to the open house.");
+  await expect(page.getByText(/ · 16:9 · 1 scene · /)).not.toContainText("No voice");
+  // Daniel Okafor's look supports neither Avatar V nor Avatar III, so the engine stays on Avatar IV.
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Daniel Okafor Daniel Okafor" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  const engine = page.getByLabel("Avatar engine", { exact: true });
+  await expect(engine).toBeDisabled();
+  // Sofia Reyes's look supports Avatar III but not Avatar V.
+  await page.getByRole("button", { name: "Avatar", exact: true }).click();
+  await page.getByRole("button", { name: "Sofia Reyes Sofia Reyes" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(engine).toBeEnabled();
+  await expect(engine.locator("option[value='avatar_v']")).toHaveText("Avatar V (not sent: no presenter here renders on it)");
+  await expect(engine.locator("option[value='avatar_iii']")).toHaveText("Avatar III (photo-to-video)");
+  await engine.selectOption("avatar_iii");
+  await expect(page.locator("#avatar-engine-hint")).toContainText("Avatar III is HeyGen's re-engineered photo-to-video engine");
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/videos") && r.method() === "POST");
+  await page.getByRole("button", { name: "Generate video" }).click();
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  expect([body.avatarEngine, "moreBlinking" in body]).toEqual(["avatar_iii", false]);
+  await page.waitForURL(/\/videos\/vid_/);
+  const id = page.url().split("/").pop()!;
+  expect((await (await page.request.get(`/api/videos/${id}`)).json()).video.avatarEngine).toBe("avatar_iii");
+  await expect(page.getByText("Avatar III (not applied by this renderer)")).toBeVisible();
+  // A copy keeps it; a batch from a template of it says so, and can go back to Avatar IV.
+  await page.goto(`/create?from=${id}`);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(engine).toHaveValue("avatar_iii");
+  const tpl = (await (await page.request.post("/api/templates", { data: { fromVideoId: id } })).json()).template;
+  try {
+    await page.goto("/batch");
+    await page.getByLabel("Start from a saved template").selectOption(tpl.id);
+    await expect(page.getByTestId("batch-engine")).toContainText("Avatar III, from the template: HeyGen's re-engineered photo-to-video engine, for this presenter.");
+    await page.getByRole("button", { name: "Use Avatar IV" }).click();
+    await expect(page.getByTestId("batch-engine")).toHaveCount(0);
+  } finally {
+    await page.request.delete(`/api/templates/${tpl.id}`);
+  }
+});
+
 test("the Shared presenters list is searched and sorted, and the sort is remembered", async ({ page }) => {
   const tag = Date.now().toString(36);
   const ids: string[] = [];

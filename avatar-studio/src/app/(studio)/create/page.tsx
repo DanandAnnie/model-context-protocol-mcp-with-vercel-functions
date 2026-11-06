@@ -38,7 +38,7 @@ import { amendLast, emptyHistory, record, redo, undo, type History, type History
 import { graphemes, withSuffix } from "@/lib/text";
 import { takeAgentDraft, type AgentDraft } from "@/lib/agent-draft";
 import { draftKeyFor, restorableScenes } from "@/lib/editor-draft";
-import { ASPECT_NAMES, ASPECT_RATIOS, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, RESOLUTION_LABELS, renders4k, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
+import { ASPECT_NAMES, ASPECT_RATIOS, DEFAULT_CAPTION_STYLE, DEFAULT_LAYOUT, MAX_SCENES, MAX_SCENE_TEXT, PRESENTER_FRAMINGS, RESOLUTIONS, RESOLUTION_LABELS, renders4k, SCENE_TEXT_POSITIONS, SCENE_TEXT_SCALE, SCENE_TEXT_SIZES, SCENE_TEXT_Y, sceneTextFits, isDefaultCaptionStyle as isDefaultCaptionStyleFn, MAX_BACKDROPS, backdropIdOf, backdropPath, footageIdOf, footageLength, footagePath, type FootageJob, framingFor, isDefaultLayout, isPhotoAvatar, rendersOnAvatarIII, rendersOnAvatarV, type PresenterFraming, type AspectRatio, type AudioClip, type Avatar, type Backdrop, type Background, type BrandKit, type CaptionLook, type CaptionStyle, type Resolution, type Scene, type SceneLayout, type SceneText, type Video, type VideoTemplate, type Voice, type VoiceEmotion, VOICE_EMOTIONS, MAX_MOTION_PROMPT, PHOTO_EXPRESSIVENESS, type PhotoExpressiveness, VOICE_ACCENTS, type VoiceAccent, AVATAR_ENGINES, type AvatarEngine } from "@/lib/types";
 
 const BG_PRESETS = ["#f1f5f9", "#ffffff", "#0f172a", "#1e3a8a", "#4f46e5", "#065f46", "#7c2d12", "#be123c"];
 const DEFAULT_BG: Background = { type: "color", value: "#f1f5f9" };
@@ -992,8 +992,16 @@ function CreateInner() {
     const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
     return !!a && rendersOnAvatarV(a, { ...(expressiveness !== "low" ? { expressiveness } : {}), motionPrompt: motionPrompt.trim() });
   });
+  // ...and on Avatar III (photo avatars included, unless given motion settings).
+  const avatarIIIInUse = scenes.some((sc) => {
+    if (sc.hidePresenter) return false;
+    const a = (sc.avatarId && avatarData?.avatars.find((x) => x.id === sc.avatarId)) || avatar;
+    return !!a && rendersOnAvatarIII(a, { ...(expressiveness !== "low" ? { expressiveness } : {}), motionPrompt: motionPrompt.trim() });
+  });
   const [accent, setAccent] = useState<VoiceAccent | "">("");
   const [avatarEngine, setAvatarEngine] = useState<AvatarEngine>("avatar_iv");
+  // Whether the chosen engine reaches any scene, and so is sent.
+  const engineInUse = avatarEngine === "avatar_v" ? avatarVInUse : avatarEngine === "avatar_iii" ? avatarIIIInUse : false;
   // More natural blinking is an Avatar V setting: kept while another engine is chosen, sent only with Avatar V.
   const [moreBlinking, setMoreBlinking] = useState(false);
   const [transparent, setTransparent] = useState(false);
@@ -1636,7 +1644,7 @@ function CreateInner() {
       const { video } = await api<{ video: Video }>("/api/videos", {
         method: "POST",
         // A 4K video renders on Avatar III, which takes neither the engine choice nor motion settings, so neither is sent.
-        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(in4k ? {} : motion), ...(sentAccent ? { accent: sentAccent } : {}), ...(!in4k && avatarEngine !== "avatar_iv" && avatarVInUse ? { avatarEngine, ...(moreBlinking ? { moreBlinking: true } : {}) } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
+        body: JSON.stringify({ title, scenes: scenes.map(sentScene), avatarId: avatar.id, voiceId: voice.id, aspect, resolution, captions, ...(captions && !isDefaultCaptionStyle ? { captionStyle } : {}), speed, ...(pitch ? { pitch } : {}), ...(emotion ? { emotion } : {}), ...(in4k ? {} : motion), ...(sentAccent ? { accent: sentAccent } : {}), ...(!in4k && engineInUse ? { avatarEngine, ...(avatarEngine === "avatar_v" && moreBlinking ? { moreBlinking: true } : {}) } : {}), ...(sentTransparent ? { transparent: true } : {}) }),
       });
       sent.current = true;
       if (editKey) writeDraft(editKey, null);
@@ -2891,15 +2899,20 @@ function CreateInner() {
                   hintId="avatar-engine-hint"
                   hint={
                     in4k
-                      ? "Not used: a 4K video renders on HeyGen's Avatar III engine. Choose 1080p to render on Avatar V."
+                      ? `Not used: a 4K video renders on HeyGen's Avatar III engine.${avatarEngine === "avatar_v" ? " Choose 1080p to render on Avatar V." : ""}`
+                      : avatarEngine === "avatar_iii"
+                        ? !avatarData || avatarIIIInUse
+                          ? "Avatar III is HeyGen's re-engineered photo-to-video engine, at up to 1080p for photo avatars, for looks that support it and digital twins trained here. It takes no expressiveness or gestures, so photo avatars given them stay on Avatar IV, as do other presenters. Other renderers ignore it."
+                          : "No presenter in this video renders on Avatar III (none supports it, or a photo avatar has motion settings), so every scene uses Avatar IV."
                       : !avatarData || avatarVInUse
                       ? "Avatar V is HeyGen's higher-quality engine, for looks that support it; other presenters, and photo avatars given expressiveness or gestures, stay on Avatar IV. Other renderers ignore it."
                       : "No presenter in this video renders on Avatar V (none supports it, or a photo avatar has motion settings), so every scene uses Avatar IV."
                   }
                 >
-                  <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={in4k || (!!avatarData && !avatarVInUse && avatarEngine === "avatar_iv")} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>
+                  <select value={avatarEngine} onChange={(e) => setAvatarEngine(asAvatarEngine(e.target.value))} disabled={in4k || (!!avatarData && !avatarVInUse && !avatarIIIInUse && avatarEngine === "avatar_iv")} aria-label="Avatar engine" aria-describedby="avatar-engine-hint" className={inputClass}>
                     <option value="avatar_iv">Avatar IV (standard)</option>
                     <option value="avatar_v">{!avatarData || avatarVInUse ? "Avatar V (higher quality)" : "Avatar V (not sent: no presenter here renders on it)"}</option>
+                    <option value="avatar_iii">{!avatarData || avatarIIIInUse ? "Avatar III (photo-to-video)" : "Avatar III (not sent: no presenter here renders on it)"}</option>
                   </select>
                 </Field>
                 <label className="flex items-start justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3">
@@ -2910,7 +2923,7 @@ function CreateInner() {
                         ? "Not used: a 4K video renders on HeyGen's Avatar III engine. Choose 1080p and Avatar V to use it."
                         : avatarEngine !== "avatar_v"
                         ? moreBlinking
-                          ? "Not sent on Avatar IV; kept for when you choose Avatar V above."
+                          ? `Not sent on ${avatarEngine === "avatar_iii" ? "Avatar III" : "Avatar IV"}; kept for when you choose Avatar V above.`
                           : "An Avatar V setting, for presenters that blink too little; choose Avatar V above to use it."
                         : avatarData && !avatarVInUse
                           ? "Not sent: no presenter in this video renders on Avatar V."

@@ -1,4 +1,4 @@
-import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, rendersOnAvatarV, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
+import { AGENT_STYLE_TAGS, STUDIO_VARIABLE_TYPES, backdropIdOf, footageIdOf, isPhotoAvatar, movesAsPhoto, rendersOnAvatarIII, rendersOnAvatarV, type AgentMessage, type AgentStyle, type AgentStyleTag, type AudioClip, type DirectedScene, type Avatar, type Backdrop, type Background, type Scene, type StudioTemplate, type StudioTemplateDetail, type StudioVariable, type VideoRequest, type Voice, type MusicTrack, type SpokenWord } from "../../types";
 import { silentSeconds, withBreakTags } from "../../pauses";
 import type { LookPackKey } from "../../look-packs";
 import { heygenBurnsCaptions, isUnspaced } from "../../captions";
@@ -233,16 +233,21 @@ export class HeyGenAvatarProvider implements AvatarProvider {
             ? { type: "image", source, ...(silent && !clip ? { duration: silent } : sound) }
             : { type: "video", source, playback: { mode: "loop", mute: true }, ...sound };
         }
-        // 4K renders on Avatar III, for every presenter (each was checked to support it; see fourKProblem). Otherwise Avatar V
-        // where the look supports it (a photo avatar given motion settings stays on Avatar IV; see rendersOnAvatarV).
-        const onIII = req.resolution === "4k";
+        // 4K renders on Avatar III, for every presenter (each was checked to support it; see fourKProblem). Otherwise the
+        // engine asked for, where the presenter renders on it (a photo avatar given motion settings stays on Avatar IV; see
+        // rendersOnAvatarIII and rendersOnAvatarV).
+        const onIII = req.resolution === "4k" || (req.avatarEngine === "avatar_iii" && rendersOnAvatarIII(sceneAvatarOf(scene), req));
         const onV = !onIII && req.avatarEngine === "avatar_v" && rendersOnAvatarV(sceneAvatarOf(scene), req);
         // More blinking is an Avatar V setting, so it goes only where the scene renders on it.
         const engine = onIII ? { engine: { type: "avatar_iii" } } : onV ? { engine: { type: "avatar_v", ...(req.moreBlinking ? { more_blinking: true } : {}) } } : {};
         // A photo avatar moves as asked (on Avatar IV). A video avatar takes gestures on Avatar V only, as HeyGen refuses a
         // motion prompt for one on Avatar IV; expressiveness is for photo avatars alone.
-        const photo = isPhotoAvatar(sceneAvatarOf(scene));
-        const motion = photo
+        // Avatar III takes neither, so a scene on it gets none (a photo avatar given them stays on Avatar IV).
+        // A digital twin trained here is a video avatar for this, though kept as a custom presenter.
+        const photo = movesAsPhoto(sceneAvatarOf(scene));
+        const motion = onIII
+          ? {}
+          : photo
           ? { ...(req.expressiveness ? { expressiveness: req.expressiveness } : {}), ...(req.motionPrompt ? { motion_prompt: req.motionPrompt } : {}) }
           : onV && req.motionPrompt
             ? { motion_prompt: req.motionPrompt }
@@ -262,6 +267,9 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       const engines = body.scenes.some((sc) => "input" in sc && sc.input && "engine" in sc.input);
       if (err instanceof Error && engines && req.resolution === "4k") {
         throw new Error(`${err.message} (this video asked for 4K on Avatar III; if HeyGen refused it, make a copy at 1080p)`);
+      }
+      if (err instanceof Error && engines && req.avatarEngine === "avatar_iii") {
+        throw new Error(`${err.message} (this video asked for Avatar III; if HeyGen refused it, make a copy with Avatar engine set to Avatar IV)`);
       }
       if (err instanceof Error && engines) {
         const instead = req.moreBlinking ? "with More blinking off, or with Avatar engine set to Avatar IV" : "with Avatar engine set to Avatar IV";

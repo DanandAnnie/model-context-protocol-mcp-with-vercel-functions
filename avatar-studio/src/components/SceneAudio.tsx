@@ -185,7 +185,8 @@ export function SceneAudio({
         {clips.length > 0 && (
           <select
             aria-label="Use a saved clip"
-            className={`${inputClass} w-auto py-1 text-xs`}
+            // As wide as its longest clip's name, but never wider than the panel (a long name would push a phone's page sideways).
+            className={`${inputClass} w-auto min-w-0 max-w-full py-1 text-xs`}
             value=""
             disabled={disabled || busy || recording}
             onChange={(e) => {

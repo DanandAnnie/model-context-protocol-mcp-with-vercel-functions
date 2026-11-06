@@ -6,6 +6,7 @@ import { baseLanguageCode, isSpecialLanguageCode, voiceTakesAccent } from "../..
 import { webhookUrl } from "../../config";
 import { loadImage } from "../image";
 import { glossaryWith } from "../heygen-glossary";
+import { dropTagWords } from "../../audio-tags";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../../errors";
 import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
@@ -869,7 +870,8 @@ export class HeyGenAvatarProvider implements AvatarProvider {
       throw err;
     }
     if (out.status !== "completed") return out;
-    const words = timedWords(answer?.original_words, answer?.original_characters, out.durationSec);
+    // Audio tags direct the delivery: should HeyGen time one as a word, it is not shown in the captions.
+    const words = dropTagWords(timedWords(answer?.original_words, answer?.original_characters, out.durationSec));
     // The language HeyGen spoke in (its Content-Language), kept only when it reads as a language tag.
     const spoken = answer?.content_language?.trim().split(",")[0].trim().toLowerCase();
     const spokenLanguage = spoken && /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(spoken) && !isSpecialLanguageCode(spoken) ? spoken : undefined;

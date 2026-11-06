@@ -24,6 +24,11 @@ export class MockScriptProvider implements ScriptProvider {
     return tone === "formal" ? body.replace("Hi there!", "Hello.") : body;
   }
 
+  /** Demo: a warm opening, unless the text already opens with a tag. */
+  async audioTags({ text }: { text: string }) {
+    return /^\s*\[/.test(text) ? text : `[warm] ${text}`;
+  }
+
   async describe({ script }: { title: string; script: string }) {
     // Demo: the script's opening sentences, as many as fit a short description.
     const sentences = script.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/).filter(Boolean);

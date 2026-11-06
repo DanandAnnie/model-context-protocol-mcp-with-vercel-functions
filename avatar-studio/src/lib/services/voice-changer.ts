@@ -6,7 +6,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
-import { getAvatarProvider, getAvatarProviderByName } from "../providers";
+import { audioTagDraftsOffered, getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { MAX_CLIP_SECONDS, VOICE_RESULT_LINK_MS, type AudioClip, type AudioClipType, type InstantVoice, type PublicVoice, type SpokenWord, type VoiceChange, type VoiceChangeWords } from "../types";
 import { LOCAL_OWNER } from "../owner-id";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../errors";
@@ -22,6 +22,7 @@ import { graphemes, withSuffix } from "../text";
 import { wordCues, type Cue } from "../captions";
 import { pronunciationLanguage } from "../pronounce";
 import { isSpecialLanguageCode } from "../language";
+import { boostIgnoredFor, normalizeAudioTags, scanAudioTags, tagPlacements, withoutAudioTags } from "../audio-tags";
 
 /** Instant voices an account keeps; another needs one deleted first. */
 export const MAX_INSTANT_VOICES = 10;
@@ -77,7 +78,13 @@ export const MAX_SPEECH_CHARS = 2000;
 export const voiceSpeechSchema = z.object({
   /** One of the account's instant voices (`iv_…`) or one of HeyGen's public voices (`pv_…`). */
   voiceId: z.string({ error: "Choose a voice" }).regex(/^(iv|pv)_[A-Za-z0-9_-]{1,64}$/, "Choose one of your instant voices or one of HeyGen's"),
-  text: z.string({ error: "Write the text to speak" }).trim().min(1, "Write the text to speak").max(MAX_SPEECH_CHARS, `Keep the text to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters`),
+  /** What is said, with any of HeyGen Voice's audio tags ("[excited]", "[laughs]") spelled as HeyGen reads them. */
+  text: z
+    .string({ error: "Write the text to speak" })
+    .trim()
+    .min(1, "Write the text to speak")
+    .max(MAX_SPEECH_CHARS, `Keep the text to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters`)
+    .transform(normalizeAudioTags),
   title: z.string().trim().max(120, "Keep the title to 120 characters").optional(),
   /** The renderer's faster, cheaper model; false (or absent) is its standard one, stored as absent. */
   turbo: z.boolean({ error: "turbo is true or false" }).optional(),
@@ -111,6 +118,11 @@ export const voiceSpeechSchema = z.object({
 })
   // Free is Turbo's free tier: asked for alone it turns Turbo on; asked for with Turbo off it is a contradiction.
   .refine((v) => !(v.free && v.turbo === false), { message: "free is Turbo at no charge; leave turbo out or send it as true", path: ["free"] })
+  // HeyGen leaves the boost out of text with an audio tag other than [pause]; asked for, it is refused rather than dropped.
+  .refine((v) => v.expressivenessBoost === undefined || !boostIgnoredFor(v.text), {
+    message: "HeyGen does not apply the expressiveness boost to text with audio tags (other than [pause]); leave the boost out, or take the tags out",
+    path: ["expressivenessBoost"],
+  })
   .transform(({ turbo, free, format, ...rest }) => ({ ...rest, turbo: turbo || free ? (true as const) : undefined, free: free ? (true as const) : undefined, format: format === "mp3" ? ("mp3" as const) : undefined }));
 
 export const instantVoiceIdSchema = z.string().regex(/^iv_[A-Za-z0-9_-]{1,64}$/, "Unknown instant voice");
@@ -214,7 +226,9 @@ export async function keepVoiceChangeAsClip(id: string, ownerId: string = LOCAL_
 async function keepAsClip(change: VoiceChange, ownerId: string, fetchImpl?: FetchLike): Promise<{ clip: AudioClip; existing: boolean }> {
   const kept = change.savedClipId ? await findClip(change.savedClipId, ownerId) : null;
   // A clip kept from spoken text before clips carried their words gets them now.
-  if (kept) return { clip: !kept.transcript && change.text ? await addClipTranscript(kept, change.text) : kept, existing: true };
+  // A clip's words are what is said, without the audio tags that directed the delivery (a video's voice would read them out).
+  const said = change.text !== undefined ? withoutAudioTags(change.text) : undefined;
+  if (kept) return { clip: !kept.transcript && said ? await addClipTranscript(kept, said) : kept, existing: true };
   if (change.status !== "completed" || !change.audioUrl) throw new ValidationError(`“${change.title}” is ${change.status === "failed" ? "a recording that could not be made" : "still being made"}; keep it once it is ready`);
   if (Date.now() - Date.parse(change.checkedAt ?? change.updatedAt) > VOICE_RESULT_LINK_MS) {
     throw new ValidationError(`“${change.title}” was made over an hour ago, and its link from the renderer has expired; make it again in the voice changer`);
@@ -253,7 +267,7 @@ async function keepAsClip(change: VoiceChange, ownerId: string, fetchImpl?: Fetc
   if (seconds === null) throw new ValidationError(`The length of “${change.title}” is not known, so it cannot be kept as a clip`);
   if (seconds > MAX_CLIP_SECONDS) throw new ValidationError(`“${change.title}” is longer than ${MAX_CLIP_SECONDS} seconds, the most a clip holds`);
   // Spoken text keeps its words, so a scene lip-syncing to the clip starts with them as its script (and its captions).
-  const clip = await keepClip({ name: change.title.slice(0, 80), mimeType, bytes, seconds, transcript: change.text }, ownerId);
+  const clip = await keepClip({ name: change.title.slice(0, 80), mimeType, bytes, seconds, transcript: said || undefined }, ownerId);
   // Remembered on the latest row (read again when a rename lands meanwhile), moving its time on so a rename that read
   // the row before this write misses and reads it again rather than dropping the clip (a finished recording's link is
   // dated by `checkedAt`); a recording deleted meanwhile stays deleted.
@@ -531,6 +545,8 @@ async function publicSpeaker(input: z.infer<typeof voiceSpeechSchema>, ownerId: 
   const voice = (await listPublicVoices()).find((v) => v.id === input.voiceId);
   if (!voice) throw new ValidationError("That HeyGen voice is no longer offered; choose another");
   if (voice.mode !== "instant" && (input.turbo || input.expressivenessBoost !== undefined)) throw new ValidationError(`Turbo (free or not) and the expressiveness boost are for instant voices, and ${voice.name} is not one; leave them out for this voice`);
+  // Professional voices do not perform audio tags; sent, the tags would be left unspoken without a word.
+  if (voice.mode !== "instant" && scanAudioTags(input.text).tags.length) throw new ValidationError(`${voice.name} is one of HeyGen's professional voices, which do not perform audio tags such as [excited]; take the tags out, or choose an instant voice`);
   return { id: voice.id, name: voice.name, providerVoiceId: voice.id.slice("pv_".length) };
 }
 
@@ -571,7 +587,8 @@ export async function startVoiceSpeech(input: z.infer<typeof voiceSpeechSchema>,
   const change: VoiceChange = {
     id,
     ownerId,
-    title: input.title || withSuffix(speechTitle(input.text), ` in ${voice.name}`, 120),
+    // Named for what is said, without its audio tags (a text of tags alone by their words, without the brackets).
+    title: input.title || withSuffix(speechTitle(withoutAudioTags(input.text) || input.text.replace(/[[\]]/g, "")), ` in ${voice.name}`, 120),
     voiceId: voice.id,
     voiceName: voice.name,
     text: input.text,
@@ -669,4 +686,56 @@ async function refreshVoiceChange(change: VoiceChange): Promise<VoiceChange> {
   // Built over the latest row (a rename may land while the renderer is asked), and written only over it; one its start
   // finished meanwhile keeps that answer rather than this check's.
   return await writeRefresh<VoiceChange>("voicechange", change, (current) => (current.status === "processing" ? { ...current, ...next } : current));
+}
+
+export const audioTagDraftSchema = z.object({
+  text: z
+    .string({ error: "Write the text to add tags to" })
+    .trim()
+    .min(1, "Write the text to add tags to")
+    .max(MAX_SPEECH_CHARS, `Keep the text to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters`)
+    .transform(normalizeAudioTags),
+});
+
+/** What a text says, for checking a draft kept it: without its audio tags, every run of spaces one space. */
+function saidOf(text: string): string {
+  return withoutAudioTags(text).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The text with HeyGen Voice audio tags added by the script writer (Claude), for the account to read before speaking
+ * it; nothing is spoken or kept. The draft is taken only when what it says is exactly the text's (tags aside, its
+ * spaces tidied), every tag the text had is still there in the same place, no tag sits inside other brackets, and it
+ * fits the limit; a fence or quotes around it (when the text had none) are taken off.
+ */
+export async function draftAudioTags(input: z.infer<typeof audioTagDraftSchema>): Promise<{ text: string; added: number }> {
+  const writer = getScriptProvider();
+  if (!writer.audioTags || !audioTagDraftsOffered()) throw new ValidationError("Adding tags needs Claude, which this studio is not set up with");
+  let out: string;
+  try {
+    out = await writer.audioTags({ text: input.text });
+  } catch (err) {
+    throw new UpstreamError(`${err instanceof Error && err.message ? err.message.replace(/[.\s]+$/, "") : "Claude could not add tags just now"}; try again`);
+  }
+  const unwrapped = out
+    .trim()
+    .replace(/^```[a-z]*\n([\s\S]*?)\n```$/i, "$1")
+    .replace(/^"""\n?([\s\S]*?)\n?"""$/, "$1")
+    .trim();
+  // Quotes around the whole draft, when the text itself was not quoted.
+  const quoted = /^(["“'])([\s\S]*)(["”'])$/.exec(unwrapped);
+  const bare = quoted && !/^["“']/.test(input.text) && (quoted[1] === quoted[3] || (quoted[1] === "“" && quoted[3] === "”")) ? quoted[2].trim() : unwrapped;
+  const text = normalizeAudioTags(bare);
+  if (!text || saidOf(text) !== saidOf(input.text)) throw new UpstreamError("Claude changed the words while adding tags, so the text was left as it was; try again");
+  // Every tag the text had stays, in order and between the same words; none goes inside other brackets.
+  const placed = tagPlacements(text);
+  if (placed.some((p) => p.nested)) throw new UpstreamError("Claude put a tag inside other brackets, so the text was left as it was; try again");
+  let from = 0;
+  for (const mine of tagPlacements(input.text)) {
+    const at = placed.findIndex((p, i) => i >= from && p.tag === mine.tag && p.wordsBefore === mine.wordsBefore);
+    if (at < 0) throw new UpstreamError("Claude changed the tags already in the text, so it was left as it was; try again");
+    from = at + 1;
+  }
+  if (text.length > MAX_SPEECH_CHARS) throw new ValidationError(`With tags added the text would be over ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; shorten it, then add tags`);
+  return { text, added: Math.max(0, scanAudioTags(text).tags.length - scanAudioTags(input.text).tags.length) };
 }

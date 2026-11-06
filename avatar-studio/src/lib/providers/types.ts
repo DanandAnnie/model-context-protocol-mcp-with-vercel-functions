@@ -288,6 +288,11 @@ export interface ScriptProvider {
    */
   brandStyle?(input: { name?: string; text: string; timeoutMs?: number }): Promise<string>;
   /**
+   * The text with HeyGen Voice audio tags ("[warm]", "[laughs]") added where the delivery changes or a sound fits, every
+   * word, number, and mark of it unchanged; the caller checks that. A writer that cannot (the demo one, simply) may add one.
+   */
+  audioTags?(input: { text: string }): Promise<string>;
+  /**
    * The short description shown under a video on its share page and in link previews, from its title and what the
    * presenter says: one to three plain sentences in the script's language, from the script's facts only.
    */

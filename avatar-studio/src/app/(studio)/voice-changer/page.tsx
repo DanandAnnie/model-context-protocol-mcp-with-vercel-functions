@@ -8,6 +8,8 @@ import { useApi } from "@/hooks/useApi";
 import { useCanEdit } from "@/hooks/useCanEdit";
 import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
 import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { AudioTagTools } from "@/components/AudioTagTools";
+import { boostIgnoredFor, scanAudioTags } from "@/lib/audio-tags";
 import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
 import { clipBody } from "@/lib/clip-upload";
 import { languageLabel } from "@/lib/language";
@@ -144,6 +146,9 @@ export default function VoiceChangerPage() {
   const [changing, setChanging] = useState(false);
   const [speechVoiceId, setSpeechVoiceId] = useState("");
   const [speechText, setSpeechText] = useState("");
+  const speechField = useRef<HTMLTextAreaElement>(null);
+  // While Claude adds tags, the text is not edited under it.
+  const [tagging, setTagging] = useState(false);
   const [speechTitle, setSpeechTitle] = useState("");
   // How the text is delivered: HeyGen's Turbo model, and its expressiveness boost in tenths (10, its full boost, is its default).
   const [speechTurbo, setSpeechTurbo] = useState(false);
@@ -288,7 +293,8 @@ export default function VoiceChangerPage() {
     try {
       // A public voice that is not instant speaks without Turbo or the boost, which are kept for the next instant voice.
       const delivery = {
-        ...(deliveryOff ? {} : { ...(speechTurbo ? { turbo: true, ...(speechFree ? { free: true } : {}) } : {}), ...(speechBoost !== 10 ? { expressivenessBoost: speechBoost / 10 } : {}) }),
+        // HeyGen leaves the boost out of text with audio tags (other than [pause]), so none is sent with them.
+        ...(deliveryOff ? {} : { ...(speechTurbo ? { turbo: true, ...(speechFree ? { free: true } : {}) } : {}), ...(speechBoost !== 10 && !boostOff ? { expressivenessBoost: speechBoost / 10 } : {}) }),
         // Any voice can be spoken into an MP3, a professional one included.
         ...(speechFormat === "mp3" ? { format: "mp3" } : {}),
         ...(speechLanguage ? { language: speechLanguage } : {}),
@@ -475,6 +481,9 @@ export default function VoiceChangerPage() {
   const speechPublic = publicVoices.find((v) => v.id === speechVoiceId);
   // Turbo and the boost are HeyGen's settings for instant voices.
   const deliveryOff = !!speechPublic && speechPublic.mode !== "instant";
+  // HeyGen does not apply the boost to text with an audio tag other than [pause].
+  const boostOff = boostIgnoredFor(speechText);
+  const tagsUnperformed = deliveryOff && scanAudioTags(speechText).tags.length > 0;
   const publicHint = publicError ? " HeyGen's voices could not be loaded just now." : "";
   const speechVoiceHint =
     (!publicVoices.length
@@ -485,7 +494,7 @@ export default function VoiceChangerPage() {
           ? "One of HeyGen's voices; yours is being made and is ready in a few seconds."
           : "One of HeyGen's voices, or make your own below.") + publicHint;
   const speechPlaceholder = ready.length || publicVoices.length ? "Choose a voice" : voicePlaceholder;
-  const speechNeeds = !speechVoiceId && !speechText.trim() ? "Choose a voice and write the text to speak it." : !speechVoiceId ? "Choose a voice to speak the text." : !speechText.trim() ? "Write the text to speak." : null;
+  const speechNeeds = !speechVoiceId && !speechText.trim() ? "Choose a voice and write the text to speak it." : !speechVoiceId ? "Choose a voice to speak the text." : !speechText.trim() ? "Write the text to speak." : tagsUnperformed ? `Take the audio tags out, or choose an instant voice: ${speechPublic!.name} does not perform them.` : null;
 
   return (
     <>
@@ -578,8 +587,8 @@ export default function VoiceChangerPage() {
                 </Field>
                 {speechPublic?.previewUrl && <audio key={speechPublic.id} controls preload="none" src={speechPublic.previewUrl} className="h-8 w-full" aria-label={`Sample of the voice ${speechPublic.name}`} data-testid="public-voice-sample" />}
                 <div>
-                  <Field label="Text" hint={`Plain prose, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
-                    <textarea className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable || speaking} aria-describedby="speech-count" onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
+                  <Field label="Text" hint={`Plain prose, with audio tags if you like, up to ${MAX_SPEECH_CHARS.toLocaleString("en-US")} characters; the language is worked out from the text.`}>
+                    <textarea ref={speechField} className={`${inputClass} min-h-28`} value={speechText} maxLength={MAX_SPEECH_CHARS} disabled={!editable || speaking || tagging} aria-describedby="speech-count" onChange={(e) => (setSpeechText(e.target.value), setSpeechKey(newKey()), fail("speech")(null))} placeholder="Welcome to the team. Here is what your first week looks like." />
                   </Field>
                   {/* Read with the field; reaching the limit (where a longer paste is cut) is announced by a region always there. */}
                   <p id="speech-count" className={`mt-1 text-right text-xs ${speechText.length >= MAX_SPEECH_CHARS ? "font-medium text-amber-700" : "text-slate-500"}`}>
@@ -590,6 +599,15 @@ export default function VoiceChangerPage() {
                     {speechText.length >= MAX_SPEECH_CHARS ? `The text is at the ${MAX_SPEECH_CHARS.toLocaleString("en-US")}-character limit; anything longer is cut there.` : ""}
                   </span>
                 </div>
+                <AudioTagTools
+                  text={speechText}
+                  onText={(t) => (setSpeechText(t), setSpeechKey(newKey()), fail("speech")(null))}
+                  field={speechField}
+                  disabled={!editable || speaking}
+                  professional={deliveryOff ? speechPublic!.name : undefined}
+                  max={MAX_SPEECH_CHARS}
+                  onDrafting={setTagging}
+                />
                 {/* Outside the fieldset, so it is read even though the fieldset's controls are skipped while it is disabled. */}
                 {deliveryOff && (
                   <p id="speech-delivery-off" className="text-xs text-slate-600">
@@ -629,6 +647,7 @@ export default function VoiceChangerPage() {
                     <input
                       id="speech-boost"
                       type="range"
+                      disabled={boostOff}
                       min={0}
                       max={10}
                       step={1}
@@ -639,7 +658,9 @@ export default function VoiceChangerPage() {
                       className="mt-1 w-full accent-brand-600"
                     />
                     <p id="speech-boost-hint" className="text-xs text-slate-500">
-                      How much HeyGen livens the delivery: its default is the full boost; lower keeps it closer to the voice&apos;s own delivery.
+                      {boostOff
+                        ? "HeyGen does not apply the boost to text with audio tags (other than [pause]); the tags direct the delivery instead."
+                        : "How much HeyGen livens the delivery: its default is the full boost; lower keeps it closer to the voice\u2019s own delivery."}
                     </p>
                   </div>
                 </fieldset>
@@ -667,7 +688,7 @@ export default function VoiceChangerPage() {
                     {speechNeeds}
                   </p>
                 )}
-                <Button onClick={speakText} loading={speaking} disabled={!editable || speechNeeds !== null} className="w-full" aria-describedby={editable && speechNeeds !== null ? "speech-needs" : undefined}>
+                <Button onClick={speakText} loading={speaking} disabled={!editable || tagging || speechNeeds !== null} className="w-full" aria-describedby={editable && speechNeeds !== null ? "speech-needs" : undefined}>
                   <Type className="h-4 w-4" /> Speak the text
                 </Button>
                 <p className="text-xs text-slate-500">Most texts are ready in a few seconds; one not done within a minute is dropped, to try again.</p>

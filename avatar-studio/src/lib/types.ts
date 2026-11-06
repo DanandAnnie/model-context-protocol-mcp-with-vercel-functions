@@ -1758,6 +1758,8 @@ export interface ProviderStatus {
   voiceCloneOneRecording?: true;
   /** Whether the renderer can mix a background-music track under a finished video. */
   backgroundMusic: boolean;
+  /** Whether tags are drafted for a text to speak: by Claude, or by the demo writer in a studio that is all demo. */
+  audioTagDrafts: boolean;
   /** Whether the renderer makes instant voices and speaks recordings again in them (the voice changer). */
   voiceChanger: boolean;
   /** Whether the renderer can draw a presenter from a description. */

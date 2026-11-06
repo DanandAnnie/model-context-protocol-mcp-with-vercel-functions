@@ -2,6 +2,7 @@ import { spokenWords } from "../../captions";
 import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
 import { demoAssetUrl } from "../../config";
+import { withoutAudioTags } from "../../audio-tags";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
 import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, SpokenWord, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
@@ -308,7 +309,8 @@ export class MockAvatarProvider implements AvatarProvider {
 
   /** Demo text to speech: the same sample recording, its length as the text would take to read aloud, its words evenly timed, in the language asked for. */
   async speakText(input: { text: string; language?: string }): Promise<{ status: "completed"; audioUrl: string; durationSec: number; words: SpokenWord[]; spokenLanguage: string }> {
-    const said = input.text.trim().split(/\s+/).filter(Boolean);
+    // Audio tags direct the delivery and are not words, as HeyGen times them.
+    const said = withoutAudioTags(input.text).split(/\s+/).filter(Boolean);
     const durationSec = Math.max(1, Math.round((said.length / 2.5) * 10) / 10);
     const each = durationSec / Math.max(1, said.length);
     const words = said.map((text, i) => ({ text, startSec: Math.round(i * each * 1000) / 1000, endSec: Math.round((i + 1) * each * 1000) / 1000 }));

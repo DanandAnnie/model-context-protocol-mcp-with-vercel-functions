@@ -2355,6 +2355,78 @@ test("text is spoken in one of HeyGen's public voices, heard first, without the 
   await expect(card).toHaveCount(0);
 });
 
+test("audio tags go in the text from a picker or Claude's draft, are checked against the voice, and stay out of a clip's words", async ({ page }) => {
+  const tag = Date.now().toString(36);
+  await page.goto("/voice-changer");
+  const speakingVoice = page.getByRole("combobox", { name: /^Speaking voice\b/ });
+  await speakingVoice.selectOption({ label: "Atlas · English" });
+  // A boost turned down before any tag is written is not sent once tags are in the text.
+  const boost = page.getByRole("slider", { name: "Expressiveness boost" });
+  await boost.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(boost).toHaveValue("9");
+  const text = page.getByRole("textbox", { name: /^Text\b/ });
+  await text.fill(`Welcome to the team ${tag}.`);
+  // Claude's draft (the demo writer opens warmly) leaves every word, and can be undone.
+  await page.getByRole("button", { name: "Add tags with Claude" }).click();
+  await expect(text).toHaveValue(`[warm] Welcome to the team ${tag}.`);
+  await expect(page.getByTestId("audio-tag-note")).toHaveText(/^Claude added 1 tag, leaving the words as they were/);
+  await page.getByRole("button", { name: "Undo tags" }).click();
+  await expect(text).toHaveValue(`Welcome to the team ${tag}.`);
+  // Undo is offered only while the text is still Claude's draft: an edit after it takes Undo away.
+  await page.getByRole("button", { name: "Add tags with Claude" }).click();
+  await expect(text).toHaveValue(`[warm] Welcome to the team ${tag}.`);
+  await text.press("End");
+  await text.pressSequentially(" Hi");
+  await expect(page.getByRole("button", { name: "Undo tags" })).toHaveCount(0);
+  await expect(page.getByTestId("audio-tag-note")).toBeEmpty();
+  await text.fill(`Welcome to the team ${tag}.`);
+  // A tag from the picker goes at the cursor.
+  await text.focus();
+  await text.press("End");
+  await page.getByRole("combobox", { name: "Audio tag" }).selectOption("laughs");
+  await expect(text).toHaveValue(`Welcome to the team ${tag}. [laughs] `);
+  await expect(text).toBeFocused();
+  // HeyGen leaves the boost out of text with tags, so the slider is off and says why.
+  await expect(boost).toBeDisabled();
+  await expect(boost).toHaveAccessibleDescription(/does not apply the boost to text with audio tags/);
+  // Bracketed text that is no tag, and two tags side by side, are pointed out.
+  await text.fill(`[excited] [laughs] Welcome ${tag}. See [Section 4].`);
+  const warnings = page.getByTestId("audio-tag-warnings");
+  await expect(warnings).toContainText("[Section 4] is not a HeyGen tag, so it will usually not be spoken");
+  await expect(warnings).toContainText("Put one tag at a spot: [excited] [laughs] are side by side.");
+  // A professional voice performs no tags: said, and the text is not spoken in it.
+  await speakingVoice.selectOption({ label: "Nadine · English" });
+  await expect(warnings).toContainText("Nadine is one of HeyGen's professional voices, which do not perform audio tags");
+  await expect(page.getByRole("button", { name: "Speak the text" })).toBeDisabled();
+  await expect(page.getByText("Take the audio tags out, or choose an instant voice: Nadine does not perform them.")).toBeVisible();
+  // Spoken in an instant voice: the tags as HeyGen spells them, no boost sent, and the clip kept from it without them.
+  await speakingVoice.selectOption({ label: "Atlas · English" });
+  await text.fill(`[Excited] Welcome to the team ${tag}! [laughs] Come in.`);
+  await expect(warnings).toHaveCount(0);
+  const sent = page.waitForRequest((r) => r.url().endsWith("/api/voice-changer/speech") && r.method() === "POST");
+  await page.getByRole("button", { name: "Speak the text" }).click();
+  expect((await sent).postDataJSON()).toEqual({ voiceId: "pv_mockpv_atlas", text: `[Excited] Welcome to the team ${tag}! [laughs] Come in.` });
+  const card = page.getByTestId("voice-change").filter({ hasText: tag });
+  await expect(card).toContainText("in Atlas");
+  await expect(card).not.toContainText("[Excited]");
+  const changes = (await (await page.request.get("/api/voice-changer")).json()).changes as Array<{ id: string; text?: string; title: string }>;
+  const spoken = changes.find((c) => c.text?.includes(tag))!;
+  expect(spoken.text).toBe(`[excited] Welcome to the team ${tag}! [laughs] Come in.`);
+  const kept = await page.request.post(`/api/voice-changer/changes/${spoken.id}/clip`);
+  expect((await kept.json()).clip.transcript).toBe(`Welcome to the team ${tag}! Come in.`);
+  // Through the API: the boost beside a tag, and tags for a professional voice, are refused with the reason.
+  const boosted = await page.request.post("/api/voice-changer/speech", { data: { voiceId: "pv_mockpv_atlas", text: "[calm] Breathe.", expressivenessBoost: 0.5 } });
+  expect(boosted.status()).toBe(400);
+  expect((await boosted.json()).issues[0].message).toMatch(/does not apply the expressiveness boost to text with audio tags/);
+  const pro = await page.request.post("/api/voice-changer/speech", { data: { voiceId: "pv_mockpv_nadine", text: "[calm] Breathe." } });
+  expect(pro.status()).toBe(400);
+  expect((await pro.json()).error).toMatch(/Nadine is one of HeyGen's professional voices, which do not perform audio tags/);
+  page.once("dialog", (d) => d.accept());
+  await card.getByRole("button", { name: /^Delete / }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test("an instant voice is made from a recording with the speaker's agreement, and a recording is spoken again in it", async ({ page }) => {
   // A picture of the speaker's setting, from the account's uploaded pictures.
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]).toString("base64");

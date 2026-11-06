@@ -54,6 +54,15 @@ export function getAvatarProviderByName(name: string): AvatarProvider {
   throw new Error(`Provider "${name}" is not configured (missing API key)`);
 }
 
+/**
+ * Whether tags are drafted for a text to speak: by Claude, or by the demo writer only while the whole studio is the demo
+ * (its renderer too), so a studio speaking with HeyGen never offers the demo's stand-in as Claude's.
+ */
+export function audioTagDraftsOffered(): boolean {
+  const writer = getScriptProvider();
+  return typeof writer.audioTags === "function" && (writer.name !== "mock" || getAvatarProvider().name === "mock");
+}
+
 let scriptOverride: ScriptProvider | undefined;
 /** Swaps in a script provider (tests); `undefined` goes back to the configured one. */
 export function setScriptProvider(p: ScriptProvider | undefined) {
@@ -103,6 +112,7 @@ export function providerStatus(): ProviderStatus {
     photoShoots: typeof getAvatarProvider().startShoot === "function",
     backgroundMusic: typeof getAvatarProvider().startMusicMix === "function",
     voiceChanger: typeof getAvatarProvider().changeVoice === "function",
+    audioTagDrafts: audioTagDraftsOffered(),
     lipsync: typeof getAvatarProvider().startLipsync === "function",
     lookPacks: typeof getAvatarProvider().startLookPack === "function",
     describedLooks: typeof getAvatarProvider().startDescribedLook === "function",

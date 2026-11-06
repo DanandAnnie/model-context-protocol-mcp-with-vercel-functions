@@ -167,13 +167,34 @@ export class HeyGenClient {
   }
 
   /**
+   * Begins a direct upload (`POST /v3/assets/direct-uploads`): the asset's id and a presigned link the file's bytes are
+   * PUT to, with the headers that PUT must carry. The size is signed into the link, so a larger file is refused there.
+   */
+  async createDirectUpload(input: { filename: string; contentType: string; sizeBytes: number }, key: string): Promise<{ assetId: string; uploadUrl: string; uploadHeaders: Record<string, string>; expiresInSec: number }> {
+    const out = await this.request<{ asset_id?: string; upload_url?: string; upload_headers?: Record<string, string> | null; expires_in_seconds?: number }>(`${V3}/assets/direct-uploads`, {
+      method: "POST",
+      body: JSON.stringify({ filename: input.filename, content_type: input.contentType, size_bytes: input.sizeBytes }),
+      headers: { "Idempotency-Key": key },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!out?.asset_id || !out.upload_url) throw new Error("HeyGen returned no asset or upload link for the upload");
+    return { assetId: out.asset_id, uploadUrl: out.upload_url, uploadHeaders: out.upload_headers ?? {}, expiresInSec: out.expires_in_seconds ?? 3600 };
+  }
+
+  /** Finishes a direct upload once its PUT is done (`POST /v3/assets/{asset_id}/complete`; asking again is harmless). */
+  async completeUpload(assetId: string): Promise<void> {
+    await this.request(`${V3}/assets/${encodeURIComponent(assetId)}/complete`, { method: "POST", body: JSON.stringify({}), signal: AbortSignal.timeout(15_000) });
+  }
+
+  /**
    * A digital twin trained from footage (`POST /v3/avatars`, `type: "digital_twin"`): its look, the new character it
    * belongs to, and the voice cloned from the footage. `key` makes a retried start replay the first answer.
    */
-  async createDigitalTwin(name: string, footageUrl: string, key: string): Promise<{ lookId: string; groupId: string; voiceId?: string }> {
+  async createDigitalTwin(name: string, footage: { url: string } | { assetId: string }, key: string): Promise<{ lookId: string; groupId: string; voiceId?: string }> {
+    const file = "url" in footage ? { type: "url", url: footage.url } : { type: "asset_id", asset_id: footage.assetId };
     const out = await this.request<{ avatar_item?: { id?: string; default_voice_id?: string | null }; avatar_group?: { id?: string } }>(`${V3}/avatars`, {
       method: "POST",
-      body: JSON.stringify({ type: "digital_twin", name, file: { type: "url", url: footageUrl } }),
+      body: JSON.stringify({ type: "digital_twin", name, file }),
       headers: { "Idempotency-Key": key },
       signal: AbortSignal.timeout(25_000),
     });

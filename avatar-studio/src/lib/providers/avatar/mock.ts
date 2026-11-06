@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spokenWords } from "../../captions";
 import { pauseSeconds, stripPauses } from "../../pauses";
 import { SAMPLE_PREVIEW_VIDEO, STOCK_AVATARS, portraitSvg } from "../../stock";
@@ -6,7 +7,7 @@ import { withoutAudioTags } from "../../audio-tags";
 import { ConflictError, NotFoundError, ValidationError } from "../../errors";
 import type { AgentMessage, AgentStyle, AudioClip, Avatar, DirectedScene, MusicTrack, SpokenWord, StudioTemplate, StudioTemplateDetail, VideoRequest } from "../../types";
 import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageStatus, HighlightInput, HighlightStatus, LipsyncStatus, ShootStatus } from "../types";
-import { SHOOT_ASPECTS, type ShootAspect } from "../../types";
+import { DEMO_UPLOAD_URL, SHOOT_ASPECTS, type ShootAspect } from "../../types";
 
 /** Labeled, self-hosted stand-in; no avatar synthesis or paid operation occurs. */
 const SAMPLE_VIDEO = SAMPLE_PREVIEW_VIDEO;
@@ -233,6 +234,17 @@ export class MockAvatarProvider implements AvatarProvider {
     const look = `mockportrait_${hash % 1000}_${Buffer.from(Array.from(name).slice(0, 40).join("")).toString("base64url")}`;
     return { lookId: look, groupId: `mockgroup_${Date.now()}`, voiceId: `twinvoice_${hash % 1000}_${Date.now()}` };
   }
+
+  /**
+   * Demo mode: the link is the demo's own, which the page knows not to send the file to (nothing is kept or trained),
+   * so it takes the same steps it takes with HeyGen however large the file.
+   */
+  async startTwinUpload({ contentType, key }: { fileName: string; contentType: string; sizeBytes: number; key: string }) {
+    const assetId = `mockasset_${createHash("sha256").update(key).digest("hex").slice(0, 24)}`;
+    return { assetId, uploadUrl: DEMO_UPLOAD_URL, uploadHeaders: { "Content-Type": contentType }, expiresInSec: 24 * 60 * 60 };
+  }
+
+  async finishTwinUpload() {}
 
   async requestTwinConsent() {
     return { url: "/demo-consent", consent: "pending" as const };

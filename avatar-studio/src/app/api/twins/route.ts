@@ -1,7 +1,7 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { requireEditor, requireOwner } from "@/lib/owner";
 import { rateLimit, rateLimitPair } from "@/lib/rate-limit";
-import { LimitError, listTwins, publicTwin, startTwin, twinKeySchema, twinRequestSchema, twinsAvailable } from "@/lib/services";
+import { LimitError, listTwins, publicTwin, startTwin, twinKeySchema, twinRequestSchema, twinUploadsAvailable, twinsAvailable } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -14,6 +14,8 @@ const PER_OWNER = 5;
 const PER_INSTANCE = 20;
 /** Listings an account may make per hour: the page asks every ten seconds while a twin is trained or waits for consent. */
 const LISTS_PER_OWNER = 1500;
+/** Uploads an account may ask the renderer to finish per hour (each start from an upload asks once). */
+const FINISHES_PER_OWNER = 30;
 const WINDOW_MS = 60 * 60 * 1000;
 
 /** The account's digital twins, newest first; one still being trained or consented to is checked on the way. */
@@ -28,13 +30,13 @@ export async function GET() {
       () => false,
     );
     const now = Date.now();
-    return json({ twins: (await listTwins(owner)).map((t) => publicTwin(t, now, canEdit)), available: twinsAvailable() });
+    return json({ twins: (await listTwins(owner)).map((t) => publicTwin(t, now, canEdit)), available: twinsAvailable(), uploads: twinUploadsAvailable() });
   } catch (err) {
     return errorResponse(err);
   }
 }
 
-/** Train a digital twin: `{ name, footageUrl, gender?, agreed: true }`. */
+/** Train a digital twin: `{ name, footageUrl | upload, gender?, agreed: true }` (`upload` is a token from `POST /api/twins/uploads`). */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();
@@ -47,7 +49,12 @@ export async function POST(req: Request) {
       const limit = rateLimitPair(`twin:${owner}`, PER_OWNER, "twin:*", PER_INSTANCE, WINDOW_MS);
       if (!limit.allowed) throw new LimitError(`Too many digital twins for now; try again in ${Math.ceil(limit.retryAfterSec / 60)} minutes`);
     };
-    return json({ twin: publicTwin(await startTwin(input, owner, { key, admit })) }, { status: 202 });
+    // Finishing an upload asks the renderer before the start is counted, so it has a limit of its own.
+    const finish = () => {
+      const limit = rateLimit(`twinfinish:${owner}`, FINISHES_PER_OWNER, WINDOW_MS);
+      if (!limit.allowed) throw new LimitError(`Too many tries for now; try again in ${Math.ceil(limit.retryAfterSec / 60)} minutes`);
+    };
+    return json({ twin: publicTwin(await startTwin(input, owner, { key, admit, finish })) }, { status: 202 });
   } catch (err) {
     return errorResponse(err);
   }

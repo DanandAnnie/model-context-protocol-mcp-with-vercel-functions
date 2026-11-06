@@ -89,6 +89,7 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER, { inviteAdd
         delete copy.voiceId;
         delete copy.imageUrl;
         delete copy.consentUrl;
+        delete copy.footageAssetId;
       }
       if (kind === "sharelock") {
         delete copy.hash;

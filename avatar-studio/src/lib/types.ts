@@ -336,13 +336,22 @@ export interface LookPackJob {
  * A digital twin being trained from footage of a real person (HeyGen digital twin): the renderer trains a look from the
  * footage, and the person in it must record their consent on the renderer's page before the twin may render.
  */
+/**
+ * The upload link the demo renderer hands out for twin footage: not a place to send the file, so the page skips the
+ * transfer (and stands in for its progress); nothing is kept or trained in demo mode. HeyGen's links are https.
+ */
+export const DEMO_UPLOAD_URL = "demo:discard";
+
 export interface TwinJob {
   id: string;
   ownerId: string;
   name: string;
   gender?: "female" | "male";
-  /** The footage: a public https link to a video of the person speaking to camera. */
-  footageUrl: string;
+  /** The footage: a public https link to a video of the person speaking to camera, or a file uploaded to the renderer. */
+  footageUrl?: string;
+  /** The uploaded file at the renderer (never shown to the account), and its name and size, which are. */
+  footageAssetId?: string;
+  footageFile?: { name: string; sizeBytes: number };
   /**
    * Renderer training it, its look and character there, and the voice it cloned from the footage, never shown to the
    * account. The look and character are empty while the start is being sent (the row is kept first, so a lost answer

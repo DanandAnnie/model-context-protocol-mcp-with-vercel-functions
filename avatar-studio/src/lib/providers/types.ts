@@ -75,6 +75,9 @@ export interface RenderCast {
   footage?: Record<string, { videoUrl: string }>;
 }
 
+/** A twin's footage: a public link the renderer downloads, or a file uploaded to it (`startTwinUpload`). */
+export type TwinFootage = { url: string } | { assetId: string };
+
 export interface AvatarProvider {
   readonly name: string;
   /** Where this renderer keeps the ids of the clips and background images it was given (`providerAssetIds`); its name when absent. */
@@ -246,7 +249,15 @@ export interface AvatarProvider {
    * return the same twin (for a day). Its look is followed with `portraitStatus`, and its consent with
    * `twinConsentStatus`. `voiceId` is the voice the renderer cloned from the footage, when it made one.
    */
-  startTwin?(input: { name: string; footageUrl: string; key: string }): Promise<{ lookId: string; groupId: string; voiceId?: string }>;
+  startTwin?(input: { name: string; footage: TwinFootage; key: string }): Promise<{ lookId: string; groupId: string; voiceId?: string }>;
+  /**
+   * Begins an upload of twin footage straight from the browser to the renderer's storage (HeyGen direct upload): the
+   * browser PUTs the file to `uploadUrl` with `uploadHeaders`, and the twin is started from `assetId` once
+   * `finishTwinUpload` has finished it. `key` makes a retried call return the same upload.
+   */
+  startTwinUpload?(input: { fileName: string; contentType: string; sizeBytes: number; key: string }): Promise<{ assetId: string; uploadUrl: string; uploadHeaders: Record<string, string>; expiresInSec: number }>;
+  /** Finishes an upload begun with `startTwinUpload`, once the browser's PUT is done (asking again is harmless). */
+  finishTwinUpload?(assetId: string): Promise<void>;
   /** A page for the person in the footage to record their consent on (valid for a day), and where consent stands. */
   requestTwinConsent?(groupId: string, key: string): Promise<{ url?: string; consent: "pending" | "accepted" | "rejected" }>;
   /**

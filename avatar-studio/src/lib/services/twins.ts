@@ -2,7 +2,7 @@
 // the footage; the person in it records their consent on the renderer's page; once both are done, the twin is kept as a
 // photo avatar of the account. Used by API routes only.
 import { z } from "zod";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getStore } from "../store";
 import { getAvatarProvider, getAvatarProviderByName, getTtsProvider } from "../providers";
@@ -18,6 +18,8 @@ import { MAX_PORTRAIT_BYTES, rememberMadeLooks } from "./avatars";
 import { jobChecker } from "./job-checks";
 import { rememberMadeVoices } from "./voices";
 import { withSuffix } from "../text";
+import { config } from "../config";
+import type { TwinFootage } from "../providers/types";
 
 /** Digital twins an account keeps (each one becomes a presenter); another needs one forgotten first. */
 export const MAX_TWINS = 10;
@@ -31,14 +33,107 @@ export const TWIN_REPLAY_MS = 24 * 60 * 60 * 1000;
 export const TWIN_RESEND_MS = 5 * 60 * 1000;
 const STILL_SENDING = "This twin is still being sent to the renderer; try again in a moment";
 
-export const twinRequestSchema = z.object({
-  name: z.string().trim().min(1, "Give the twin a name").max(80),
-  /** A public https link to the footage: one person speaking to camera, 15 seconds to 10 minutes. */
-  footageUrl: z.string().trim().max(2000, "The link is too long"),
-  gender: z.enum(["female", "male"]).optional(),
-  /** The account says the person in the footage agreed to be made into a twin (they also record consent at the renderer). */
-  agreed: z.literal(true, { message: "Confirm that the person in the footage agreed to be made into a digital twin" }),
+export const twinRequestSchema = z
+  .object({
+    name: z.string().trim().min(1, "Give the twin a name").max(80),
+    /** A public https link to the footage: one person speaking to camera, 15 seconds to 10 minutes. */
+    footageUrl: z.string().trim().max(2000, "The link is too long").optional(),
+    /** Or the `token` of footage uploaded from the browser (`POST /api/twins/uploads`), once its file is sent. */
+    upload: z.string().max(4000, "Unknown upload").optional(),
+    gender: z.enum(["female", "male"]).optional(),
+    /** The account says the person in the footage agreed to be made into a twin (they also record consent at the renderer). */
+    agreed: z.literal(true, { message: "Confirm that the person in the footage agreed to be made into a digital twin" }),
+  })
+  .refine((v) => (v.footageUrl === undefined) !== (v.upload === undefined), { message: "Paste a public https link to the footage, or upload a video file (one of them)" });
+
+/** Footage a browser may upload straight to the renderer: HeyGen's direct upload takes video up to 200 MiB. */
+export const MAX_TWIN_UPLOAD_BYTES = 200 * 1024 * 1024;
+export const TWIN_UPLOAD_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
+/** An upload's token is good for this long to start a new twin (a retried start of the same twin takes it later too). */
+export const TWIN_UPLOAD_MS = 24 * 60 * 60 * 1000;
+
+export const twinUploadRequestSchema = z.object({
+  fileName: z.string().trim().min(1, "Choose a video file").max(200, "The file name is too long"),
+  contentType: z.enum(TWIN_UPLOAD_TYPES, { message: "Choose an MP4, MOV, or WebM video" }),
+  sizeBytes: z.number().int().min(1, "The file is empty").max(MAX_TWIN_UPLOAD_BYTES, "The file is over 200 MB; trim or compress it first"),
 });
+
+/** What an upload's token vouches for: the account, the renderer, its asset there, the file's name and size, and until when. */
+type UploadClaim = { o: string; p: string; a: string; n: string; s: number; e: number };
+
+/** Signs tokens where no server secret is set (demo mode): this instance's own, so no one else can sign them. */
+const PROCESS_SECRET = randomBytes(32).toString("hex");
+
+/**
+ * The key upload tokens are signed with, from a server secret (the renderer's key, else the database's), so tokens
+ * cannot be made outside the server. Deployments sharing that secret accept each other's tokens for the same account.
+ */
+function uploadKey(): Buffer {
+  const secret = config.heygenApiKey ?? process.env.SUPABASE_SERVICE_ROLE_KEY ?? PROCESS_SECRET;
+  return createHash("sha256").update(`avatar-studio twin upload\0${secret}`).digest();
+}
+
+function signUpload(claim: UploadClaim): string {
+  const body = Buffer.from(JSON.stringify(claim)).toString("base64url");
+  return `${body}.${createHmac("sha256", uploadKey()).update(body).digest("base64url")}`;
+}
+
+/** Refuses an upload's token past its time (checked only for a new start, so a retried one still finds its twin). */
+function assertFresh(claim: UploadClaim, now = Date.now()): void {
+  if (!(claim.e > now)) throw new ValidationError("That upload is not this account's, or it expired; upload the file again");
+}
+
+/** The upload a token names, if it was signed here for this account and renderer (its time is checked by `assertFresh`). */
+function readUpload(token: string, ownerId: string, providerName: string): UploadClaim {
+  const refused = new ValidationError("That upload is not this account's, or it expired; upload the file again");
+  const [body, mac, extra] = token.split(".");
+  if (!body || !mac || extra !== undefined) throw refused;
+  const expected = createHmac("sha256", uploadKey()).update(body).digest();
+  const given = Buffer.from(mac, "base64url");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) throw refused;
+  let claim: UploadClaim;
+  try {
+    claim = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as UploadClaim;
+  } catch {
+    throw refused;
+  }
+  if (claim.o !== ownerId || claim.p !== providerName || typeof claim.a !== "string" || !claim.a || typeof claim.e !== "number") throw refused;
+  return claim;
+}
+
+/** Whether footage can be uploaded from the browser with the renderer in use (else it is pasted as a link). */
+export function twinUploadsAvailable(): boolean {
+  const provider = getAvatarProvider();
+  return typeof provider.startTwinUpload === "function" && typeof provider.finishTwinUpload === "function";
+}
+
+/**
+ * Begins uploading footage for a twin: the renderer's link the browser sends the file to (with the headers it must
+ * carry), and a token that names the upload to `startTwin`. The file never passes through this server. With a client
+ * `key`, a retried call returns the same upload. `admit` runs once the request is checked (the hourly limit).
+ */
+export async function startTwinUpload(
+  input: z.infer<typeof twinUploadRequestSchema>,
+  ownerId: string = LOCAL_OWNER,
+  opts: { key?: string; admit?: () => void } = {},
+): Promise<{ token: string; url: string; headers: Record<string, string>; expiresAt: string }> {
+  const provider = getAvatarProvider();
+  if (!provider.startTwinUpload || !provider.finishTwinUpload) throw new ValidationError(`Uploading footage is not available with the ${provider.name} renderer; paste a link to it instead`);
+  // Refused before a large file is sent for nothing.
+  if ((await getStore().list<TwinJob>("twin", ownerId)).length >= MAX_TWINS) throw new ConflictError(`An account keeps at most ${MAX_TWINS} digital twins; forget one to train another`);
+  opts.admit?.();
+  const key = `twu_${createHash("sha256").update(`${ownerId}\0${opts.key ?? newId("k")}`).digest("base64url").slice(0, 40)}`;
+  const out = await provider.startTwinUpload({ fileName: input.fileName, contentType: input.contentType, sizeBytes: input.sizeBytes, key });
+  // The token outlives the upload link: once the file is sent, the asset is the renderer's until it is deleted.
+  const expires = Date.now() + TWIN_UPLOAD_MS;
+  const token = signUpload({ o: ownerId, p: provider.name, a: out.assetId, n: input.fileName, s: input.sizeBytes, e: expires });
+  return { token, url: out.uploadUrl, headers: out.uploadHeaders, expiresAt: new Date(expires).toISOString() };
+}
+
+/** The footage a twin was started from, as the renderer is sent it. */
+function footageOf(job: TwinJob): TwinFootage {
+  return job.footageAssetId ? { assetId: job.footageAssetId } : { url: job.footageUrl ?? "" };
+}
 
 export const twinIdSchema = z.string().regex(/^tw_[A-Za-z0-9_-]{1,64}$/, "Unknown digital twin");
 
@@ -50,13 +145,14 @@ export function twinsAvailable(): boolean {
 }
 
 /** What the account sees of a twin: never the renderer, its look, or its character, which stay on the server. */
-export type PublicTwin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "voiceId" | "imageUrl"> & { consentLinkExpired?: true };
+export type PublicTwin = Omit<TwinJob, "ownerId" | "provider" | "lookId" | "groupId" | "voiceId" | "imageUrl" | "footageAssetId"> & { consentLinkExpired?: true };
 /**
  * What the account sees of a twin. The consent link is the person's to record consent with, so only an account that
  * may edit sees it (`canEdit` false hides it from viewers of a workspace).
  */
 export function publicTwin(job: TwinJob, now = Date.now(), canEdit = true): PublicTwin {
-  const { ownerId: _o, provider: _p, lookId: _l, groupId: _g, voiceId: _v, imageUrl: _i, ...rest } = job;
+  const { ownerId: _o, provider: _p, lookId: _l, groupId: _g, voiceId: _v, imageUrl: _i, footageAssetId: _a, ...rest } = job;
+  void _a;
   void _o;
   void _p;
   void _l;
@@ -105,34 +201,47 @@ export async function checkTwinsInBackground(max = BACKGROUND_TWIN_CHECKS, now =
 }
 
 /**
- * Starts training a twin from a public link to the footage. With a client `key`, the twin's id is derived from the
+ * Starts training a twin from a public link to the footage, or from a file uploaded to the renderer (the upload's
+ * token, once the browser has sent the file; it is finished at the renderer first, `finish` counting each time).
+ * With a client `key`, the twin's id is derived from the
  * account and the key, so a retried start returns the twin already stored. The row is kept before the renderer is asked
  * (with the twin's id as its key), so an answer lost on the way back is asked for again, from a retry or a later check,
  * and the look and voice it made are never left unknown. `admit` runs once the request is checked (the hourly limit).
  */
-export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void } = {}): Promise<TwinJob> {
+export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerId: string = LOCAL_OWNER, opts: { key?: string; admit?: () => void; finish?: () => void } = {}): Promise<TwinJob> {
   const id = opts.key ? `tw_${createHash("sha256").update(`${ownerId}\0${opts.key}`).digest("base64url").slice(0, 32)}` : newId("tw");
+  const provider = getAvatarProvider();
+  const upload = input.upload !== undefined ? readUpload(input.upload, ownerId, provider.name) : undefined;
   const existing = opts.key ? await getStore().get<TwinJob>("twin", id) : null;
   if (existing && existing.ownerId === ownerId) {
-    if (existing.footageUrl !== input.footageUrl || existing.name !== input.name) throw new ConflictError("This Idempotency-Key was already used for another twin; send a new key");
+    if (existing.footageUrl !== input.footageUrl || existing.footageAssetId !== upload?.a || existing.name !== input.name) throw new ConflictError("This Idempotency-Key was already used for another twin; send a new key");
     if (existing.lookId || existing.status !== "processing") return existing;
     if (!dueForResend(existing)) throw new ConflictError(STILL_SENDING);
     return (await resend(existing)) ?? existing;
   }
-  const provider = getAvatarProvider();
   if (!provider.startTwin) throw new ValidationError(`Digital twins are not available with the ${provider.name} renderer`);
+  if (upload) assertFresh(upload);
   const url = input.footageUrl;
-  // The renderer downloads the footage itself, so it must be a public https address (not this network's, say).
-  if (!/^https:\/\/[^\s]+$/i.test(url) || !URL.canParse(url)) throw new ValidationError("Paste a public https link to the footage");
-  // A name and password in the link would be kept with the twin and shown back; a public link needs none.
-  if (new URL(url).username || new URL(url).password) throw new ValidationError("Paste the link to the footage without a name or password in it");
-  try {
-    await assertPublicHttpUrl(url, "The link to the footage");
-  } catch (err) {
-    throw new ValidationError(err instanceof Error ? err.message : "Paste a public https link to the footage");
+  if (url !== undefined) {
+    // The renderer downloads the footage itself, so it must be a public https address (not this network's, say).
+    if (!/^https:\/\/[^\s]+$/i.test(url) || !URL.canParse(url)) throw new ValidationError("Paste a public https link to the footage");
+    // A name and password in the link would be kept with the twin and shown back; a public link needs none.
+    if (new URL(url).username || new URL(url).password) throw new ValidationError("Paste the link to the footage without a name or password in it");
+    try {
+      await assertPublicHttpUrl(url, "The link to the footage");
+    } catch (err) {
+      throw new ValidationError(err instanceof Error ? err.message : "Paste a public https link to the footage");
+    }
   }
   // Read then written: two starts at the same moment can between them pass the cap.
   if ((await getStore().list<TwinJob>("twin", ownerId)).length >= MAX_TWINS) throw new ConflictError(`An account keeps at most ${MAX_TWINS} digital twins; forget one to train another`);
+  // An uploaded file becomes usable once finished at the renderer; one it never received is refused here, uncounted.
+  if (upload) {
+    if (!provider.finishTwinUpload) throw new ValidationError(`Uploading footage is not available with the ${provider.name} renderer; paste a link to it instead`);
+    // Its own limit: a finish refused afterwards (a file not yet received) asks the renderer all the same.
+    opts.finish?.();
+    await provider.finishTwinUpload(upload.a);
+  }
   opts.admit?.();
   const now = nowIso();
   const job: TwinJob = {
@@ -140,7 +249,7 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
     ownerId,
     name: input.name,
     ...(input.gender ? { gender: input.gender } : {}),
-    footageUrl: url,
+    ...(upload ? { footageAssetId: upload.a, footageFile: { name: upload.n, sizeBytes: upload.s } } : { footageUrl: url }),
     provider: provider.name,
     lookId: "",
     groupId: "",
@@ -154,7 +263,7 @@ export async function startTwin(input: z.infer<typeof twinRequestSchema>, ownerI
   if (!(await getStore().insert("twin", job))) throw new ConflictError(STILL_SENDING);
   let out: Awaited<ReturnType<NonNullable<typeof provider.startTwin>>>;
   try {
-    out = await provider.startTwin({ name: input.name, footageUrl: url, key: id });
+    out = await provider.startTwin({ name: input.name, footage: footageOf(job), key: id });
   } catch (err) {
     // A refusal made nothing; any other failure may have been an answer lost, asked for again later.
     if (err instanceof ValidationError) await getStore().remove("twin", id);
@@ -200,7 +309,7 @@ async function resend(job: TwinJob): Promise<TwinJob | null> {
   const provider = getAvatarProviderByName(job.provider);
   if (!provider.startTwin) return null;
   try {
-    return await keepStart(job, await provider.startTwin({ name: job.name, footageUrl: job.footageUrl, key: job.id }));
+    return await keepStart(job, await provider.startTwin({ name: job.name, footage: footageOf(job), key: job.id }));
   } catch (err) {
     if (!(err instanceof ValidationError)) {
       const at = nowIso();
@@ -222,7 +331,7 @@ async function settle(job: TwinJob): Promise<TwinJob> {
   if (job.lookId || job.status !== "processing" || Date.now() - Date.parse(job.createdAt) > TWIN_REPLAY_MS) return job;
   const provider = getAvatarProviderByName(job.provider);
   try {
-    const out = await provider.startTwin?.({ name: job.name, footageUrl: job.footageUrl, key: job.id });
+    const out = await provider.startTwin?.({ name: job.name, footage: footageOf(job), key: job.id });
     if (!out) return job;
     await Promise.all([rememberMadeLooks([out.lookId]), rememberMadeVoices([out.voiceId])]);
     return { ...job, lookId: out.lookId, groupId: out.groupId, ...(out.voiceId ? { voiceId: out.voiceId } : {}) };

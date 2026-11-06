@@ -3484,6 +3484,62 @@ test("a digital twin is trained from footage, waits for the person's consent, th
   expect((await page.request.delete(`/api/voices/${voice.id}`)).status()).toBe(204);
 });
 
+test("a digital twin is trained from a video file uploaded from this computer", async ({ page }) => {
+  const name = `Upload twin ${Date.now().toString(36)}`;
+  await page.goto("/avatars");
+  await page.getByTestId("digital-twins").getByRole("button", { name: "New digital twin" }).click();
+  const panel = page.getByTestId("twin-panel");
+  await panel.getByLabel("Name").fill(name);
+  await panel.getByLabel("A file from this computer").check();
+  const input = panel.getByLabel("Footage file", { exact: true });
+  await expect(input).toHaveAccessibleDescription(/MP4, MOV, or WebM video .* up to 200 MB\. It goes straight to HeyGen/);
+  await panel.getByLabel(/agreed to be made into a digital twin/).check();
+  const train = panel.getByRole("button", { name: "Upload and train the twin" });
+  // Nothing chosen yet, then a file that is not a video HeyGen takes: refused here, with the reason beside the button.
+  await expect(train).toBeDisabled();
+  await expect(train).toHaveAccessibleDescription("Choose a video file of the footage to train it.");
+  await input.setInputFiles({ name: "footage.avi", mimeType: "video/x-msvideo", buffer: Buffer.alloc(2048, 1) });
+  await expect(train).toHaveAccessibleDescription("Choose an MP4, MOV, or WebM video.");
+  // A MOV the browser gives no type for is known by its extension.
+  await input.setInputFiles({ name: "dana-footage.mov", mimeType: "", buffer: Buffer.alloc(300 * 1024, 1) });
+  await expect(panel.getByTestId("twin-file")).toHaveText("dana-footage.mov · 300 KB");
+  // An upload can be stopped: nothing is started, the form stays as it was, and the keyboard is on the button.
+  const starts: string[] = [];
+  page.on("request", (r) => r.url().endsWith("/api/twins") && r.method() === "POST" && starts.push(r.url()));
+  const first = page.waitForRequest((r) => r.url().endsWith("/api/twins/uploads") && r.method() === "POST");
+  await expect(train).toBeEnabled();
+  await train.click();
+  expect((await first).postDataJSON()).toEqual({ fileName: "dana-footage.mov", contentType: "video/quicktime", sizeBytes: 300 * 1024 });
+  const firstKey = (await first).headers()["idempotency-key"];
+  expect(firstKey).toMatch(/^[A-Za-z0-9_-]{8,100}$/);
+  await expect(panel.getByRole("progressbar", { name: "Uploading the footage" })).toBeVisible();
+  // The rest of the form waits while the file is sent, so what is started is what was on screen.
+  await expect(panel.getByLabel(/agreed to be made into a digital twin/)).toBeDisabled();
+  await panel.getByRole("button", { name: "Stop upload" }).click();
+  await expect(panel.getByRole("progressbar")).toHaveCount(0);
+  await expect(train).toBeFocused();
+  expect(starts).toEqual([]);
+  // Uploaded again, under a new key, and the twin is started from it.
+  const begun = page.waitForRequest((r) => r.url().endsWith("/api/twins/uploads") && r.method() === "POST");
+  const started = page.waitForRequest((r) => r.url().endsWith("/api/twins") && r.method() === "POST");
+  await train.click();
+  expect((await begun).headers()["idempotency-key"]).not.toBe(firstKey);
+  const body = (await started).postDataJSON() as Record<string, unknown>;
+  expect(Object.keys(body).sort()).toEqual(["agreed", "name", "upload"]);
+  expect(body.upload).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  const twin = page.getByTestId("twin").filter({ hasText: name });
+  await expect(twin).toBeFocused();
+  await expect(twin.getByTestId("twin-step")).toContainText("consent not asked for yet");
+  const listed = ((await (await page.request.get("/api/twins")).json()).twins as Array<Record<string, unknown>>).find((t) => t.name === name)!;
+  expect(listed.footageFile).toEqual({ name: "dana-footage.mov", sizeBytes: 300 * 1024 });
+  expect(Object.keys(listed)).not.toContain("footageAssetId");
+  // The token is checked: a changed one is refused (another account's is refused in the unit tests).
+  const forged = await page.request.post("/api/twins", { data: { name: `${name} again`, upload: `${String(body.upload)}x`, agreed: true } });
+  expect(forged.status()).toBe(400);
+  expect((await forged.json()).error).toContain("upload the file again");
+  expect((await page.request.delete(`/api/twins/${String(listed.id)}`)).ok()).toBe(true);
+});
+
 test("a HeyGen Studio template is filled in and rendered as a library video", async ({ page }) => {
   await page.goto("/templates");
   const section = page.getByTestId("studio-templates");

@@ -9,7 +9,7 @@ import { glossaryWith } from "../heygen-glossary";
 import { dropTagWords } from "../../audio-tags";
 import { HeyGenClient, inlineAsset } from "../heygen-client";
 import { ConflictError, LimitError, NotFoundError, UpstreamError, ValidationError } from "../../errors";
-import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus } from "../types";
+import type { AgentFile, AgentKitDetails, AvatarJobStatus, AvatarProvider, CleanupStatus, FootageInput, FootageStatus, HighlightInput, HighlightStatus, LipsyncInput, LipsyncStatus, MusicMixInput, RenderCast, ShootInput, ShootStatus, TwinFootage } from "../types";
 import { musicComposition } from "../../music-mix";
 import { strToU8, zipSync } from "fflate";
 import { createHash } from "node:crypto";
@@ -661,14 +661,47 @@ export class HeyGenAvatarProvider implements AvatarProvider {
   }
 
   /** A digital twin trained from footage of a person (v3), its look followed like any, with the voice cloned from it. */
-  async startTwin({ name, footageUrl, key }: { name: string; footageUrl: string; key: string }) {
+  async startTwin({ name, footage, key }: { name: string; footage: TwinFootage; key: string }) {
     try {
-      return await this.client.createDigitalTwin(name.slice(0, 80), footageUrl, key);
+      return await this.client.createDigitalTwin(name.slice(0, 80), footage, key);
     } catch (err) {
       const message = err instanceof Error ? err.message : "";
       if (/ failed: 409 /.test(message)) throw new ConflictError(STILL_SENDING);
       // Footage HeyGen will not train (too short or long, more than one person, no speech, or past the plan) is the account's to change.
       if (/ failed: (400|402|403|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not train a twin from that footage: ${heygenReason(message, "use 15 seconds to 10 minutes of one person speaking to camera")}`);
+      throw err;
+    }
+  }
+
+  /** Twin footage uploaded from the browser straight to HeyGen's storage (direct upload), never through this server. */
+  async startTwinUpload({ fileName, contentType, sizeBytes, key }: { fileName: string; contentType: string; sizeBytes: number; key: string }) {
+    try {
+      const out = await this.client.createDirectUpload({ filename: fileName, contentType, sizeBytes }, key);
+      // The browser is sent to this link, so it must be HeyGen's https storage, not anything a reply could name.
+      if (!/^https:\/\//i.test(out.uploadUrl) || !URL.canParse(out.uploadUrl)) throw new Error("HeyGen returned an upload link that is not https");
+      return out;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      // HeyGen answers a key reused with another file with `conflict`; any other 409 is the first call still running.
+      if (/ failed: 409 /.test(message) && heygenCode(message) !== "conflict") throw new ConflictError("This upload is still being prepared; try again in a moment");
+      if (/ failed: 409 /.test(message)) throw new ValidationError("This upload was already begun for another file; start the upload again");
+      if (/ failed: 429 /.test(message)) throw new LimitError("HeyGen is taking too many uploads just now; try again in a minute");
+      // The studio's key may not upload (its permissions or plan): the operator's to fix, not the account's.
+      if (/ failed: (401|403) /.test(message)) throw new ValidationError("HeyGen refused uploads for the studio's key; paste a link to the footage instead, or ask the studio's operator");
+      if (/ failed: (400|402|413|415|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen will not take that file: ${heygenReason(message, "use an MP4, MOV, or WebM video up to 200 MB")}`);
+      throw err;
+    }
+  }
+
+  async finishTwinUpload(assetId: string) {
+    try {
+      await this.client.completeUpload(assetId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      // HeyGen has not seen the file yet: the upload did not finish, or is still arriving.
+      if (/ failed: 409 /.test(message)) throw new ValidationError("The footage has not finished uploading; upload the file again");
+      if (/ failed: 404 /.test(message)) throw new ValidationError("HeyGen no longer has that upload; upload the file again");
+      if (/ failed: (400|422) /.test(message) || message.startsWith("HeyGen error:")) throw new ValidationError(`HeyGen could not take the uploaded footage: ${heygenReason(message, "upload an MP4, MOV, or WebM video")}`);
       throw err;
     }
   }

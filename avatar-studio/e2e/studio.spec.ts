@@ -2197,6 +2197,66 @@ test("a lip sync takes part of the video and HeyGen's options, said on its card,
   await expect(page.getByTestId("lipsync").filter({ hasText: title })).toHaveCount(0);
 });
 
+test("a video is lip-synced to several audio clips at once, one take each, and a take whose answer was lost is tried again alone, as it was", async ({ page }) => {
+  const stamp = Date.now().toString(36);
+  const title = `Lip sync takes ${stamp}`;
+  const v = await createVideoViaApi(page, title);
+  const names = ["A", "B", "C", "D", "E", "F"].map((n) => `Take ${n} ${stamp}`);
+  const clips: Array<{ id: string; name: string }> = [];
+  for (const name of names) {
+    const res = await page.request.post("/api/clips", { data: { name, audio: `data:audio/wav;base64,${toneWav(1).toString("base64")}` } });
+    expect(res.status()).toBe(201);
+    clips.push((await res.json()).clip);
+  }
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto("/lipsync");
+  await page.getByRole("combobox", { name: /^Library video\b/ }).selectOption(v.id);
+  await page.getByRole("combobox", { name: /^Audio clip\b/ }).selectOption(clips[0].id);
+  // Up to four more takes; a fifth is not offered once four are chosen.
+  const takes = page.getByRole("group", { name: "Also sync to other clips" });
+  for (const c of clips.slice(1, 5)) await takes.getByLabel(new RegExp(`^${c.name}`)).check();
+  await expect(takes.getByLabel(new RegExp(`^${clips[5].name}`))).toBeDisabled();
+  await expect(takes).toContainText("5 takes in all.");
+  for (const c of clips.slice(3, 5)) await takes.getByLabel(new RegExp(`^${c.name}`)).uncheck();
+  await expect(takes.getByLabel(new RegExp(`^${clips[5].name}`))).toBeEnabled();
+  // The last take's answer is lost once; the first two stay started, and it stays chosen.
+  let lost = false;
+  await page.route("**/api/lipsyncs", async (route) => {
+    const body = route.request().postDataJSON() as { clipId?: string };
+    if (route.request().method() === "POST" && body.clipId === clips[2].id && !lost) {
+      lost = true;
+      return route.fulfill({ status: 504, contentType: "application/json", body: JSON.stringify({ error: "The server took too long; try again" }) });
+    }
+    return route.fallback();
+  });
+  const sent: Array<{ body: Record<string, unknown>; key: string }> = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/lipsyncs") && r.method() === "POST") sent.push({ body: r.postDataJSON(), key: r.headers()["idempotency-key"] });
+  });
+  await page.getByRole("button", { name: "Lip-sync video" }).click();
+  await expect(page.getByText(`Started 2 of 3 takes; “${clips[2].name}” was not: The server took too long; try again`)).toBeVisible();
+  await expect(page.getByRole("combobox", { name: /^Audio clip\b/ })).toHaveValue(clips[2].id);
+  await expect(takes.getByLabel(new RegExp(`^${clips[0].name}`))).not.toBeChecked();
+  await expect(takes.getByLabel(new RegExp(`^${clips[1].name}`))).not.toBeChecked();
+  // Choosing another take and changing one's mind keeps the lost take's key: it may have gone through.
+  await takes.getByLabel(new RegExp(`^${clips[3].name}`)).check();
+  await takes.getByLabel(new RegExp(`^${clips[3].name}`)).uncheck();
+  await page.unroute("**/api/lipsyncs");
+  await page.getByRole("button", { name: "Lip-sync video" }).click();
+  await expect(page.getByText(`Lip-syncing ${title} (lip-synced) – ${clips[2].name}; it appears here when it is ready.`)).toBeVisible();
+  // Each take is its own start: the same footage, its own clip and key, and a title naming its clip, kept when tried again alone.
+  expect(sent.map((s) => s.body.clipId)).toEqual([clips[0].id, clips[1].id, clips[2].id, clips[2].id]);
+  expect(sent.map((s) => s.body.title)).toEqual([0, 1, 2, 2].map((i) => `${title} (lip-synced) – ${clips[i].name}`));
+  expect(sent.every((s) => s.body.videoId === v.id && s.body.mode === "speed")).toBe(true);
+  expect(sent[3].key).toBe(sent[2].key);
+  expect(new Set([sent[0].key, sent[1].key, sent[2].key]).size).toBe(3);
+  const mine = ((await (await page.request.get("/api/lipsyncs")).json()).lipsyncs as Array<{ id: string; title: string; clipId?: string }>).filter((l) => l.title.startsWith(`${title} (lip-synced)`));
+  expect(mine.map((l) => l.clipId).sort()).toEqual([clips[0].id, clips[1].id, clips[2].id].sort());
+  for (const l of mine) await expect(page.locator(`[data-lipsync="${l.id}"]`)).toContainText(l.title);
+  for (const l of mine) expect((await page.request.delete(`/api/lipsyncs/${l.id}`)).status()).toBe(200);
+  for (const c of clips) await page.request.delete(`/api/clips/${c.id}`);
+});
+
 test("a video is lip-synced to an uploaded clip or a linked track, at the chosen quality, and deleted", async ({ page }) => {
   const v = await createVideoViaApi(page, `Lip sync source ${Date.now().toString(36)}`);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");

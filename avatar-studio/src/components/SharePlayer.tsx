@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { chaptersPlayed, type PlayMark } from "@/lib/chapter-play";
 import { SHARE_PLAYER_ID, shareTrackId } from "@/lib/share-player";
 import { wellFormed } from "@/lib/text";
@@ -25,6 +25,7 @@ export function SharePlayer({
   autoplay = false,
   loop = false,
   start,
+  end,
   tracks = [],
   chapters = [],
 }: {
@@ -41,12 +42,23 @@ export function SharePlayer({
   loop?: boolean;
   /** Seconds to start at (a share link's `?t=`), once the clip's length is known; ignored past its end. */
   start?: number;
+  /**
+   * Seconds to stop at (a share link's `?end=`), so the link plays a section: playback crossing it pauses there and the
+   * player says the section is over, with Keep watching and Watch it again; looping, the section repeats instead.
+   */
+  end?: number;
   /** Translated subtitle tracks the video carries, offered in the CC menu. */
   tracks?: Array<{ language: string; code?: string }>;
   /** Where each chapter starts and the scene it opens, in order. */
   chapters?: Array<{ startMs: number; scene: number }>;
 }) {
   const reported = useRef<WatchQuarter | 0>(0);
+  /** Where the section stops, until the viewer chooses to keep watching past it. */
+  const [stopAt, setStopAt] = useState(end);
+  const [sectionOver, setSectionOver] = useState(false);
+  /** The playhead at the last time update (paused or not); a seek clears it, so only playing across the end stops there. */
+  const lastPlayed = useRef<number | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const queue = useRef<Promise<void>>(Promise.resolve());
   const played = useRef(new Set<number>());
   const started = useRef(false);
@@ -90,20 +102,43 @@ export function SharePlayer({
       send({ scene });
     }
   };
+  /** Stops at the section's end when playback crosses it (a seek past it, then play, plays on). */
+  const holdSection = (el: HTMLVideoElement) => {
+    const before = lastPlayed.current;
+    lastPlayed.current = el.currentTime;
+    if (stopAt === undefined || el.paused || before === null || before >= stopAt || el.currentTime < stopAt) return;
+    // Seeking (back to the start, or to the end itself) clears the mark, through onSeeking.
+    if (loop) {
+      el.currentTime = start ?? 0;
+      return;
+    }
+    el.pause();
+    // Played a moment past the end before this update came; the player is put back on it.
+    el.currentTime = stopAt;
+    setSectionOver(true);
+    // Fullscreen shows the picture alone, without the note and its buttons, so the player leaves it.
+    if (typeof document !== "undefined" && document.fullscreenElement === el) void document.exitFullscreen().catch(() => undefined);
+    const webkit = el as HTMLVideoElement & { webkitDisplayingFullscreen?: boolean; webkitExitFullscreen?: () => void };
+    if (webkit.webkitDisplayingFullscreen) webkit.webkitExitFullscreen?.();
+  };
   return (
+    <>
     <video
+      ref={videoRef}
       src={src}
       poster={poster}
       controls
       autoPlay={autoplay}
       muted={autoplay}
-      loop={loop}
+      // A section loops itself (from its start); the native loop would restart the whole video at its end.
+      loop={loop && stopAt === undefined}
       playsInline
       id={SHARE_PLAYER_ID}
       className={`h-full w-full cue-${captionSize} cue-look-${captionLook} cue-font-${captionFont}`}
       data-testid="share-player"
       onTimeUpdate={(e) => {
         const el = e.currentTarget;
+        holdSection(el);
         reportChapter(el);
         // Only playback reaches a point: a link's start time, or a seek while paused, moves the playhead without it.
         if (el.paused || !Number.isFinite(el.duration) || el.duration <= 0) return;
@@ -116,8 +151,18 @@ export function SharePlayer({
       onDurationChange={(e) => startAt(e.currentTarget)}
       onSeeking={() => {
         last.current = null;
+        lastPlayed.current = null;
       }}
-      onEnded={() => report(100)}
+      onPlay={() => setSectionOver(false)}
+      onEnded={(e) => {
+        report(100);
+        // A section that runs to the video's own end loops from the section's start.
+        if (loop && stopAt !== undefined) {
+          const el = e.currentTarget;
+          el.currentTime = start ?? 0;
+          void el.play().catch(() => undefined);
+        }
+      }}
     >
       {/* `default` switches the track on without a trip to the CC menu; it stays off when the file already carries captions. */}
       {captions && <track default={trackDefault} kind="subtitles" srcLang="en" label="Captions" src={`/api/videos/${videoId}/captions?format=vtt`} />}
@@ -129,5 +174,40 @@ export function SharePlayer({
         <track key={t.language} id={shareTrackId(t.language)} kind="subtitles" srcLang={t.code ?? "und"} label={t.language} src={`/api/videos/${videoId}/captions?format=vtt&lang=${encodeURIComponent(wellFormed(t.language))}`} />
       ))}
     </video>
+    {/* Kept in the page from the start, so the announcement is heard when the section ends. */}
+    {end !== undefined && (
+      <p role="status" className="sr-only">
+        {sectionOver ? "End of the shared section. Watch it again, or keep watching." : ""}
+      </p>
+    )}
+    {sectionOver && (
+      <div className="absolute inset-x-0 bottom-16 z-20 mx-auto flex w-fit max-w-[90%] flex-wrap items-center justify-center gap-2 rounded-lg bg-black/80 px-3 py-2 text-sm text-white" data-testid="share-section-over">
+        <span>End of the shared section.</span>
+        <button
+          type="button"
+          className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-slate-900 hover:bg-slate-200"
+          onClick={() => {
+            const el = videoRef.current;
+            if (!el) return;
+            el.currentTime = start ?? 0;
+            void el.play().catch(() => undefined);
+          }}
+        >
+          Watch it again
+        </button>
+        <button
+          type="button"
+          className="rounded-md border border-white/60 px-2.5 py-1 text-xs font-medium text-white hover:bg-white/10"
+          onClick={() => {
+            setStopAt(undefined);
+            setSectionOver(false);
+            void videoRef.current?.play().catch(() => undefined);
+          }}
+        >
+          Keep watching
+        </button>
+      </div>
+    )}
+    </>
   );
 }

@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseStartTime, shareLinkAt } from "../share-time";
+import { clockTime, parseEndTime, parseStartTime, parseTimeInput, shareLinkAt, shareSectionLink } from "../share-time";
 
 describe("parseStartTime", () => {
   it("reads seconds (to the millisecond), units, and clock times", () => {
@@ -17,6 +17,7 @@ describe("parseStartTime", () => {
     assert.equal(parseStartTime("1:30"), 90);
     assert.equal(parseStartTime("01:02:03"), 3723);
     assert.equal(parseStartTime(" 45 "), 45);
+    assert.equal(parseStartTime("1:05.5"), 65.5, "a clock to the tenth, as the section fields write it");
   });
 
   it("is no start for anything else: zero, a day or more, a repeated t, or a malformed clock", () => {
@@ -40,5 +41,39 @@ describe("shareLinkAt", () => {
   it("keeps the millisecond when rounding would reach the next chapter, and joins a base that has a query", () => {
     assert.equal(shareLinkAt(base, 12_950, 13_000), `${base}?t=12.95`);
     assert.equal(shareLinkAt(`${base}?embed=1`, 5_000), `${base}?embed=1&t=5`);
+  });
+});
+
+describe("share links that play a section", () => {
+  const base = "https://studio.test/share/vid_1";
+  it("reads an end at least a second after the start, in the same forms", () => {
+    assert.equal(parseEndTime("1:30"), 90);
+    assert.equal(parseEndTime("90", 60), 90);
+    assert.equal(parseEndTime("61", 60), 61);
+    assert.equal(parseEndTime("1m", undefined), 60);
+    for (const [raw, start] of [["60.5", 60], ["60", 60], ["30", 60], ["abc", undefined], ["0", undefined], [["90", "91"], undefined], ["0.5", undefined]] as const) {
+      assert.equal(parseEndTime(raw, start), undefined, JSON.stringify([raw, start]));
+    }
+  });
+
+  it("writes the section link: start and end to the millisecond at most, a start of 0 left out, a non-end left off", () => {
+    assert.equal(shareSectionLink(base, 65, 90), `${base}?t=65&end=90`);
+    assert.equal(shareSectionLink(base, 0, 30), `${base}?end=30`);
+    assert.equal(shareSectionLink(base, 12.4567, 20.25), `${base}?t=12.457&end=20.25`);
+    assert.equal(shareSectionLink(base, 65), `${base}?t=65`);
+    assert.equal(shareSectionLink(base, 65, 65.5), `${base}?t=65`, "an end under a second after the start is no end");
+    assert.equal(shareSectionLink(base, 0), base);
+    assert.equal(shareSectionLink(`${base}?x=1`, 5, 10), `${base}?x=1&t=5&end=10`);
+    // What it writes, the share page reads back.
+    const url = new URL(shareSectionLink(base, 65.5, 92.3));
+    const start = parseStartTime(url.searchParams.get("t"));
+    assert.deepEqual([start, parseEndTime(url.searchParams.get("end"), start)], [65.5, 92.3]);
+  });
+
+  it("shows times as a clock to the tenth, and reads typed times with zero as the beginning", () => {
+    assert.deepEqual([clockTime(0), clockTime(5), clockTime(65), clockTime(65.46), clockTime(3723), clockTime(59.96)], ["0:00", "0:05", "1:05", "1:05.5", "1:02:03", "1:00"]);
+    assert.deepEqual(["0", "0:00", "00:00", "0s", "0.0", "1:05", "65", "1m5s", "1:05.5"].map(parseTimeInput), [0, 0, 0, 0, 0, 65, 65, 65, 65.5]);
+    for (const t of [0, 5, 65, 65.4, 3723]) assert.equal(parseTimeInput(clockTime(t)), t, `round trip ${t}`);
+    assert.equal(parseTimeInput("soon"), undefined);
   });
 });

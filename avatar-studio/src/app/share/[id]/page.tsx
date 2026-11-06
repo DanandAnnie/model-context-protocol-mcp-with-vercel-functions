@@ -20,7 +20,7 @@ import { ShareUnlock } from "@/components/ShareUnlock";
 import { shareCookieName, shareGateCookieName, shareGatePassed, shareUnlocked } from "@/lib/share-lock";
 import { ShareLeadGate } from "@/components/ShareLeadGate";
 import { ShareWatch } from "@/components/ShareWatch";
-import { parseStartTime } from "@/lib/share-time";
+import { parseEndTime, parseStartTime, shareSectionLink } from "@/lib/share-time";
 import { isWebm, shareBodyFor } from "@/lib/share-body";
 
 export const dynamic = "force-dynamic";
@@ -31,10 +31,12 @@ export async function generateMetadata({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ t?: string | string[] }>;
+  searchParams: Promise<{ t?: string | string[]; end?: string | string[] }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const start = parseStartTime((await searchParams).t);
+  const asked = await searchParams;
+  const start = parseStartTime(asked.t);
+  const end = parseEndTime(asked.end, start);
   let video;
   try {
     video = await getVideo(id, PUBLIC_ACCESS, false);
@@ -49,8 +51,8 @@ export async function generateMetadata({
   const brand = await getBrandKit(video.ownerId ?? LOCAL_OWNER);
   const siteName = brand?.name || "Avatar Studio";
   const base = config.appUrl.replace(/\/$/, "");
-  // Editors and chat apps that read oEmbed find the embed player from the link alone, starting where the link does.
-  const shared = `${base}/share/${video.id}${start !== undefined ? `?t=${start}` : ""}`;
+  // Editors and chat apps that read oEmbed find the embed player from the link alone, playing the part the link does.
+  const shared = shareSectionLink(`${base}/share/${video.id}`, start ?? 0, end);
   const alternates = { types: { "application/json+oembed": `${base}/api/oembed?url=${encodeURIComponent(shared)}&format=json` } };
   // A protected link previews with its title only: no excerpt, thumbnail, or video for the unfurler.
   if (video.shareLocked) {
@@ -107,7 +109,8 @@ export async function generateMetadata({
 /**
  * Public, sidebar-free player page for sharing a finished video. `?autoplay=1` starts it muted and `?loop=1` repeats it;
  * `?t=90` (or `1m30s`, `1:30`) starts it at that time, as a link to a chapter does (a time past the end, or not a
- * time, plays from the start);
+ * time, plays from the start); `?end=` (the same forms, at least a second after the start) pauses it there, so the
+ * link plays a section, with a way to keep watching;
  * `?embed=1` is the page an embed's iframe loads: the player alone, filling the frame (the password and email forms
  * still come first where the owner set them).
  */
@@ -117,7 +120,7 @@ export default async function SharePage({
 }: {
   params: Promise<{ id: string }>;
   // A parameter given twice arrives as a list.
-  searchParams: Promise<{ autoplay?: string | string[]; loop?: string | string[]; embed?: string | string[]; t?: string | string[] }>;
+  searchParams: Promise<{ autoplay?: string | string[]; loop?: string | string[]; embed?: string | string[]; t?: string | string[]; end?: string | string[] }>;
 }) {
   const { id } = await params;
   const query = await searchParams;
@@ -125,6 +128,7 @@ export default async function SharePage({
   const loop = query.loop === "1";
   const embed = query.embed === "1";
   const start = parseStartTime(query.t);
+  const end = parseEndTime(query.end, start);
   let video;
   try {
     video = await getVideo(id, PUBLIC_ACCESS);
@@ -154,10 +158,10 @@ export default async function SharePage({
           </div>
         ) : gated ? (
           <div className="max-h-full w-full max-w-md overflow-y-auto p-4">
-            <ShareLeadGate videoId={video.id} brandName={brand?.name} autoplay={autoplay} loop={loop} start={start} embed />
+            <ShareLeadGate videoId={video.id} brandName={brand?.name} autoplay={autoplay} loop={loop} start={start} end={end} embed />
           </div>
         ) : (
-          <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} start={start} embed />
+          <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} start={start} end={end} embed />
         )}
       </main>
     );
@@ -210,9 +214,9 @@ export default async function SharePage({
           // the gate's answer once an email is in, so the page source holds none of them, and an embed whose
           // browser drops third-party cookies still plays without a reload. The cookie spares a returning viewer the form.
           gated ? (
-            <ShareLeadGate videoId={video.id} brandName={brand?.name} autoplay={autoplay} loop={loop} start={start} />
+            <ShareLeadGate videoId={video.id} brandName={brand?.name} autoplay={autoplay} loop={loop} start={start} end={end} />
           ) : (
-            <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} start={start} />
+            <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} start={start} end={end} />
           )
         )}
         {brand && (brand.name || brand.logoUrl) && (

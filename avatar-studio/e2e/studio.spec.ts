@@ -10465,6 +10465,70 @@ test("a multi-scene video has chapters: the share page jumps to a scene and the 
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test("a share link plays only a section: made on the video page, it pauses at its end on the share page", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Section ${Date.now().toString(36)}`);
+  await expect.poll(async () => ((await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(`/videos/${v.id}`);
+  const card = page.getByTestId("share-section-card");
+  await expect(card.getByRole("heading", { name: "Share a section" })).toBeVisible();
+  const start = card.getByRole("textbox", { name: "Section start" });
+  const end = card.getByRole("textbox", { name: "Section end" });
+  await expect(end).toHaveAccessibleDescription("Choose where the section ends.");
+  await expect(card.getByTestId("share-section-link")).toHaveCount(0);
+  // Times are checked as they are typed: not a time, an end before the start, an end past the video's own.
+  await start.fill("soon");
+  await expect(start).toHaveAccessibleDescription("Write the start as a time, like 1:05 or 65.");
+  await expect(start).toHaveAttribute("aria-invalid", "true");
+  await expect(end).not.toHaveAttribute("aria-invalid", "true");
+  await start.fill("0:02");
+  await end.fill("0:01");
+  await expect(end).toHaveAccessibleDescription("End the section at least a second after it starts.");
+  await end.fill("2:00:00");
+  await expect(end).toHaveAccessibleDescription(/^The video is \d+:\d\d long; end the section by then\.$/);
+  // The player's time fills a field: here the start, from where the page's player stands.
+  await page.locator("video").first().evaluate((el: HTMLVideoElement) => (el.currentTime = 1));
+  await card.getByRole("button", { name: "Use the player's time for the section start" }).click();
+  await expect(start).toHaveValue("0:01");
+  await end.fill("0:03");
+  await expect(end).toHaveAccessibleDescription("Plays 0:01 to 0:03.");
+  const link = card.getByRole("textbox", { name: "Section link" });
+  await expect(link).toHaveValue(new RegExp(`/share/${v.id}\\?t=1&end=3$`));
+  await card.getByRole("button", { name: "Copy link" }).click();
+  await expect(card.getByRole("status")).toHaveText("Section link copied.");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await link.inputValue());
+  // On the share page the link starts at its start and pauses at its end, saying so, with the ways on.
+  const url = new URL(await link.inputValue());
+  await page.goto(`${url.pathname}${url.search}`);
+  const player = page.getByTestId("share-player");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(0.99);
+  await player.evaluate(async (el: HTMLVideoElement) => { el.muted = true; await el.play(); });
+  const over = page.getByTestId("share-section-over");
+  await expect(over).toContainText("End of the shared section.", { timeout: 10_000 });
+  expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(true);
+  // Put back on the section's end, not left a moment past it.
+  expect(await player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeCloseTo(3, 1);
+  await expect(page.getByRole("status").filter({ hasText: "End of the shared section" })).toHaveCount(1);
+  // Watch it again goes back to the section's start; Keep watching plays on past its end.
+  await over.getByRole("button", { name: "Watch it again" }).click();
+  await expect(over).toHaveCount(0);
+  await expect(over).toBeVisible({ timeout: 10_000 });
+  await over.getByRole("button", { name: "Keep watching" }).click();
+  await expect(over).toHaveCount(0);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime), { timeout: 10_000 }).toBeGreaterThan(3.8);
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  // The embed plays the section too, and so does the oEmbed iframe for the section link; an end that is not after the
+  // start is no end.
+  const oembed = (await (await page.request.get(`/api/oembed?url=${encodeURIComponent(await (async () => url.href)())}`)).json()) as { html: string };
+  expect(oembed.html).toContain(`/share/${v.id}?embed=1&amp;t=1&amp;end=3`);
+  await page.goto(`/share/${v.id}?embed=1&t=1&end=0:01`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(0.99);
+  await player.evaluate(async (el: HTMLVideoElement) => { el.muted = true; await el.play(); });
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime), { timeout: 10_000 }).toBeGreaterThan(2.5);
+  await expect(page.getByTestId("share-section-over")).toHaveCount(0);
+  expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+});
+
 test("share-page viewers who play a chapter are counted under it on the video page", async ({ page }) => {
   const bg = { type: "color", value: "#0f172a" };
   const v = await createVideoViaApi(page, `Reach ${Date.now().toString(36)}`, {

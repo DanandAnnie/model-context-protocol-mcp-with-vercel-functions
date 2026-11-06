@@ -13,6 +13,7 @@ import { SubtitleLanguages } from "@/components/SubtitleLanguages";
 import { CaptionEditor } from "@/components/CaptionEditor";
 import { ViewerEmails } from "@/components/ViewerEmails";
 import { VideoChapters } from "@/components/VideoChapters";
+import { ShareSection } from "@/components/ShareSection";
 import { ShareQrCode } from "@/components/ShareQrCode";
 import { OtherSizes } from "@/components/OtherSizes";
 import { HighlightClips } from "@/components/HighlightClips";
@@ -1380,6 +1381,16 @@ export default function VideoDetailPage() {
                       </p>
                       <ShareQrCode url={`${shareOrigin}/share/${video.id}`} title={video.title} />
                     </>
+                  )}
+                </Card>
+              )}
+              {video.status === "completed" && (
+                <Card className="p-4" data-testid="share-section-card">
+                  <h3 className="text-sm font-semibold text-slate-900">Share a section</h3>
+                  {video.deletedAt || !shareLive || shareExpired(video) ? (
+                    <p className="mt-1 text-xs text-slate-500">{video.deletedAt ? "Restore the video from the trash first." : shareLive ? "Link expired: set a later expiry first." : "Turn the share link on first."}</p>
+                  ) : !shareOrigin ? null : (
+                    <ShareSection url={`${shareOrigin}/share/${video.id}`} durationSec={video.durationSec} player={player} locked={!!video.shareLocked} />
                   )}
                 </Card>
               )}

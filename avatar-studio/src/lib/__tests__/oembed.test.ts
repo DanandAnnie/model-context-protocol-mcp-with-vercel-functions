@@ -31,6 +31,9 @@ describe("shareLinkTarget", () => {
   it("names the video of a share link on this studio, with its start time", () => {
     assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1`, [BASE]), { id: "vid_1" });
     assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1/?t=1m5s`, [BASE]), { id: "vid_1", start: 65 });
+    assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1?t=65&end=90`, [BASE]), { id: "vid_1", start: 65, end: 90 });
+    assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1?t=65&end=60`, [BASE]), { id: "vid_1", start: 65 }, "an end before the start is no end");
+    assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1?end=30&end=40`, [BASE]), { id: "vid_1" }, "an end given twice is no end");
     assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1?autoplay=1&t=12.4`, ["http://localhost:3000", BASE]), { id: "vid_1", start: 12.4 });
     assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1?t=soon`, [BASE]), { id: "vid_1" }, "not a time");
     assert.deepEqual(shareLinkTarget(`${BASE}/share/vid_1?t=5&t=6`, [BASE]), { id: "vid_1" }, "a time given twice");
@@ -83,6 +86,8 @@ describe("oembedFor", () => {
   it("starts the player at the link's time and prefers a custom cover, at the cover's own size", () => {
     const answer = oembedFor({ ...video, cover: { updatedAt: "2026-10-01T00:00:00.000Z", width: 800, height: 600 } }, { base: BASE, siteName: "Studio", start: 65 });
     assert.match(String(answer.html), /src="https:\/\/studio\.example\.com\/share\/vid_1\?embed=1&amp;t=65"/);
+    const section = oembedFor(video, { base: BASE, siteName: "Studio", start: 65, end: 90 });
+    assert.match(String(section.html), /src="https:\/\/studio\.example\.com\/share\/vid_1\?embed=1&amp;t=65&amp;end=90"/, "a section link embeds the section");
     assert.equal(answer.thumbnail_url, `${BASE}/api/videos/vid_1/cover?v=${Date.parse("2026-10-01T00:00:00.000Z")}`);
     assert.equal(answer.thumbnail_width, 800);
     assert.equal(answer.thumbnail_height, 600);

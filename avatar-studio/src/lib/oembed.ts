@@ -1,5 +1,5 @@
 import { escapeHtml, posterUrl } from "./client";
-import { parseStartTime } from "./share-time";
+import { parseEndTime, parseStartTime } from "./share-time";
 import { dimensionsFor, type AspectRatio, type Resolution } from "./types";
 
 /** The player's size in an oEmbed answer, as the video page's Embed snippet sizes it, before a consumer's limits. */
@@ -32,7 +32,7 @@ export function sizeLimit(raw: string | null): number | undefined {
  * The video a share link names, when it is a link to this studio's share page (`/share/:id`, on one of `origins`), with
  * the time it starts at (`?t=`, as the share page reads it); anything else, another site's or another page's, is null.
  */
-export function shareLinkTarget(raw: string, origins: string[]): { id: string; start?: number } | null {
+export function shareLinkTarget(raw: string, origins: string[]): { id: string; start?: number; end?: number } | null {
   let url: URL;
   try {
     url = new URL(raw);
@@ -51,7 +51,9 @@ export function shareLinkTarget(raw: string, origins: string[]): { id: string; s
   const times = url.searchParams.getAll("t");
   // A time given twice is no time, as on the share page.
   const start = times.length === 1 ? parseStartTime(times[0]) : undefined;
-  return { id, ...(start !== undefined ? { start } : {}) };
+  const ends = url.searchParams.getAll("end");
+  const end = ends.length === 1 ? parseEndTime(ends[0], start) : undefined;
+  return { id, ...(start !== undefined ? { start } : {}), ...(end !== undefined ? { end } : {}) };
 }
 
 function sameOrigin(origin: string, url: URL): boolean {
@@ -81,10 +83,10 @@ export interface OembedVideo {
  */
 export function oembedFor(
   video: OembedVideo,
-  opts: { base: string; siteName: string; maxWidth?: number; maxHeight?: number; start?: number },
+  opts: { base: string; siteName: string; maxWidth?: number; maxHeight?: number; start?: number; end?: number },
 ): Record<string, string | number> {
   const { width, height } = embedSize(video.aspect, opts.maxWidth, opts.maxHeight);
-  const query = ["embed=1", opts.start !== undefined ? `t=${opts.start}` : ""].filter(Boolean).join("&");
+  const query = ["embed=1", opts.start !== undefined ? `t=${opts.start}` : "", opts.end !== undefined ? `end=${opts.end}` : ""].filter(Boolean).join("&");
   const src = `${opts.base}/share/${encodeURIComponent(video.id)}?${query}`;
   const html = `<iframe src="${escapeHtml(src)}" width="${width}" height="${height}" style="border:0;max-width:100%" allow="fullscreen; picture-in-picture" allowfullscreen title="${escapeHtml(video.title)}"></iframe>`;
   const answer: Record<string, string | number> = {

@@ -34,6 +34,7 @@ export async function GET(req: Request) {
       maxWidth: sizeLimit(params.get("maxwidth")),
       maxHeight: sizeLimit(params.get("maxheight")),
       start: target.start,
+      end: target.end,
     });
     // Cached for five minutes at most, and never past the link's expiry, as the email preview is.
     const left = video.shareExpiresAt ? Math.floor((Date.parse(video.shareExpiresAt) - Date.now()) / 1000) : CACHE_SEC;

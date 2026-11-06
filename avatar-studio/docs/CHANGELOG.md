@@ -1903,3 +1903,20 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
 
     Escape that ends an IME composition in Safari no longer asks to discard.
   - **Tests.** The e2e tests check the Escape confirmation, the ready announcement, and the upload's description.
+- Share links that play a section (`95a70ce`). A share link with `?end=` as well as `?t=` plays only the part between the two times: the one minute that matters, sent without making a new video.
+  - **The share page.** The player starts at `t` and pauses when playback reaches `end`. It says "End of the shared section." and offers Watch it again (back to the start) and Keep watching (on past the end).
+    - A seek past the end and then play plays on; only playing across the end stops there.
+    - With `?loop=1` the section repeats.
+    - `end` takes the same forms as `t` (`90`, `1m30s`, `1:30`). It must be at least a second after the start; anything else is no end, and the link plays on to the video's own end.
+    - The embed, the email gate, the link preview's oEmbed discovery, and `/api/oembed`'s iframe keep the section too.
+  - **The video page.** A Share a section card takes a start and an end, each typed or taken from the page's player, and writes the link with Copy link.
+    - It checks the times as they are typed: not a time, an end before or within a second of the start, or past the video's length. It says what the section plays ("Plays 0:01 to 0:03.").
+    - It is offered while the share link is live, as the QR code is.
+  - **Review.** An independent review found no blocking issues. It raised one should-fix and four minor points, plus timing-sensitive e2e steps; all fixed:
+    - A play resumed just before the end could miss the stop. The playhead is now followed while paused too.
+    - A moment past the end played before the pause. The player is now put back on the end.
+    - Fullscreen showed neither the note nor its buttons. The player now leaves fullscreen when it stops.
+    - A looped section ending at the video's own end restarted the whole video. It now loops from the section's start.
+    - The card checked an end past the video's length before trimming it to the length. It now checks the section as it will play.
+    - Each time field now has its own message beside it and is marked invalid when wrong, rather than sharing one live message.
+  - **Tests.** Unit tests cover the end time, the section link, and the clock times (the share page reads back what the card writes), and oEmbed's section embed. An e2e test makes a section link on the video page, plays it to its end on the share page, uses both buttons, and checks the oEmbed iframe and an end that is no end.

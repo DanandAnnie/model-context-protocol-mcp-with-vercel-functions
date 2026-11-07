@@ -2142,3 +2142,28 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - that an embed has no mini player.
 
     All 44 share-page, embed, and video-shape tests pass with the new frame.
+- Audience retention on the video page (`6309f07`). The owner can now see where share-page viewers stop watching, not just how many reached each quarter.
+  - **The chart.** A Retention row on a finished video's page shows ten thin bars, one per tenth of the video. Each bar is the share of the viewers who started playing who reached that tenth.
+    - Each bar names its point, share, and viewers on hover. The bars never rise from one tenth to the next.
+    - Under them: "4 started · 25% to the end", and where most left, such as "Most left between 30% and 40% (20 points)", from the start and up to the end.
+    - A "Retention table" disclosure gives the same figures as a table (started, then each tenth to the end, with viewers and share), and the picture has a name that says how many started and how many reached the end.
+    - Before anyone has played the video on its share page, the row says so.
+  - **What is counted.** The share player reports the furthest point a viewer reaches: started, each tenth, and the end. A looping video's last moment counts as the end.
+    - The server counts every point up to that one, once per viewer per 10 minutes and at most 600 per point per video, as the quarters are. It counts only for a finished video, and for a locked link only with its unlock.
+    - The counts sit on the video as `retention`, eleven numbers. Owner edits and late renderer updates never roll them back.
+    - The beacon is `POST /api/videos/:id/watch` with `{ "point": 0–10 }`.
+  - **Who is counted.** Only viewers who play from the start, since the chart is about where people leave. A link with a start time, Resume, or a seek before playing reports nothing for that visit. So does a muted autoplay until the sound comes on, and so does a scrub to the end while paused. A section link's last tenth still counts when the player pauses at its end.
+  - **Review.** An independent review found four ways the chart could show more viewers than watched, and a mismatch in the table's numbers, all fixed:
+    - Silent autoplay counted.
+    - A scrub to the end counted.
+    - Links with a start time counted the part before it.
+    - A section's last tenth was lost.
+    - The counts shown now always match their shares.
+  - **Tests.** Unit tests cover:
+    - the point a playhead has reached, the end only at the end;
+    - reading stored counts whole;
+    - shares that never rise and are capped at the starts;
+    - the biggest drop, from the start and between equal falls;
+    - the service counting each point once per viewer, a jump counting every point to it, concurrent beacons all landing, owner edits keeping the counts, locked links, and offline links.
+
+    The e2e test checks that a link with a start time, a silent autoplay embed, and a paused scrub to the end count nothing. It then plays a video from the start to the end, adds three viewers by address, and checks a repeat and an out-of-range point. On the video page it checks the bars, the summary, the picture's name, the biggest drop, and the table.

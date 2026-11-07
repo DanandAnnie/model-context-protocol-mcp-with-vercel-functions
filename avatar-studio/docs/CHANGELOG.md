@@ -2167,3 +2167,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - the service counting each point once per viewer, a jump counting every point to it, concurrent beacons all landing, owner edits keeping the counts, locked links, and offline links.
 
     The e2e test checks that a link with a start time, a silent autoplay embed, and a paused scrub to the end count nothing. It then plays a video from the start to the end, adds three viewers by address, and checks a repeat and an out-of-range point. On the video page it checks the bars, the summary, the picture's name, the biggest drop, and the table.
+- Retention in the library's analytics file (`ba99cd5`). The Download analytics spreadsheet now carries the figures the video page's retention chart shows, so retention can be sorted and compared across videos.
+  - **New columns**, added after `embed_views` so the earlier columns keep their places:
+    - `retention_started`: viewers who started playing from the beginning (0 before anyone has).
+    - `reached_10_pct` … `reached_100_pct`: the whole percent of them who reached each tenth, never rising from one tenth to the next.
+    - `most_left_between` (such as `40%-50%`, `0%` being the start) and `most_left_points`: where the share fell furthest, and by how many percentage points.
+    - The share and drop cells are empty before anyone has started, as `finish_rate` is before any view, and the drop cells are also empty when nobody left.
+  - The figures come from the same functions as the chart, so the file and the video page always agree. Both Download analytics links now mention retention in their tooltips, and `docs/API.md` lists the columns.
+  - **Review.** An independent review found no defects. Its two optional notes, a fuller description of the empty drop cells and the tooltips, were applied.
+  - **Tests.** A unit test checks the columns for stored counts, a video nobody left, a drop from the start, and a video nobody started, both as values and in the CSV file. The retention e2e test downloads the library's file and checks the started count, three tenths, and where most left against the chart. The test that lists the file's columns includes the new ones.

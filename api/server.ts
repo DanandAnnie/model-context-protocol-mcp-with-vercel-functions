@@ -1,10 +1,10 @@
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import type { ZodRawShape } from "zod";
-import * as prApi from "./services/property-radar-api.js";
-import * as publicApi from "./services/public-data-api.js";
-import { ghlFetch, GHL_LOC } from "./services/ghl-api.js";
-import { verifyToken } from "./services/auth.js";
+import * as prApi from "./_services/property-radar-api.js";
+import * as publicApi from "./_services/public-data-api.js";
+import { ghlFetch, GHL_LOC } from "./_services/ghl-api.js";
+import { verifyToken } from "./_services/auth.js";
 
 type ToolContent = { type: "text"; text: string };
 type ToolResult = { content: ToolContent[] };

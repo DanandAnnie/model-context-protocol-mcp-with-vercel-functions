@@ -1,0 +1,746 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { AudioLines, Download, Pencil, Trash2, Upload } from "lucide-react";
+import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
+import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { ApiError, api, formatDate, formatSeconds, isRefusal } from "@/lib/client";
+import { clipBody as clipFrom } from "@/lib/clip-upload";
+import { withSuffix } from "@/lib/text";
+import { LIPSYNC_FRAME_RATES, MAX_LIPSYNC_SEC, VOICE_RESULT_LINK_MS, type AudioClip, type LipsyncFrameRate, type LipsyncJob, type LipsyncMode, type Video, type VoiceChange } from "@/lib/types";
+
+/** A recording or text spoken in one of the account's instant voices (text in one of HeyGen's too), as the voice changer lists it. */
+type Voiced = Pick<VoiceChange, "id" | "title" | "status" | "audioUrl" | "durationSec" | "updatedAt" | "checkedAt">;
+/** A lip sync as the server lists it: never the renderer or its job id. */
+type Lipsync = Omit<LipsyncJob, "ownerId" | "provider" | "providerJobId">;
+/** A fresh key for one start (a UUID where the browser has one, as it does over https and on localhost). */
+const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
+/** Lip-synced videos' links are renewed by the server once this old; a page left open asks again when it is looked at. */
+const RELINK_MS = 30 * 60 * 1000;
+const MODE_LABEL: Record<LipsyncMode, string> = { speed: "Fast", precision: "Precise" };
+/** Audio clips one start can sync the same footage to, each its own lip sync (a take). */
+const MAX_TAKES = 5;
+/** The longest title the server takes, counted as it counts (UTF-16 code units). */
+const MAX_TITLE = 120;
+/** `base` and `suffix` within the server's title limit: the base is shortened, a character at a time, so the suffix survives. */
+function fitTitle(base: string, suffix: string): string {
+  let kept = Array.from(withSuffix(base, suffix, MAX_TITLE).slice(0, -suffix.length || undefined));
+  while (kept.length && kept.join("").length + suffix.length > MAX_TITLE) kept = kept.slice(0, -1);
+  return (kept.join("").trimEnd() + suffix).slice(0, MAX_TITLE);
+}
+
+/** A moment typed as seconds ("12.5") or minutes and seconds ("1:05"), in seconds; blank is none, anything else NaN. */
+function momentOf(text: string): number | undefined {
+  // A comma decimal ("1,5") is read as a point, as many keyboards type it.
+  const t = text.trim().replace(",", ".");
+  if (!t) return undefined;
+  const m = /^(?:(\d+):)?(\d+(?:\.\d+)?)$/.exec(t);
+  if (!m || (m[1] !== undefined && Number(m[2]) >= 60)) return NaN;
+  // To a tenth, as the server keeps it, so the checks below see the moment it will.
+  return Math.round(((m[1] ? Number(m[1]) * 60 : 0) + Number(m[2])) * 10) / 10;
+}
+
+/** A moment as shown on a card: "0:12", "1:05.5". */
+function momentSaid(sec: number): string {
+  const whole = Math.floor(sec);
+  const tenth = Math.round((sec - whole) * 10);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}${tenth ? `.${tenth}` : ""}`;
+}
+
+/** What else a lip sync was asked to do, for its card: its part of the video, and the options turned on. */
+/** Each frame rate as offered and as said on a card. */
+const FRAME_RATE_LABEL: Record<LipsyncFrameRate, { option: string; said: string }> = {
+  constant: { option: "Constant (for editing software)", said: "constant frame rate" },
+  variable: { option: "Variable", said: "variable frame rate" },
+  source: { option: "Same as the footage", said: "footage's frame rate" },
+};
+
+function optionsSaid(l: Pick<Lipsync, "startSec" | "endSec" | "removeMusic" | "enhanceSpeech" | "keepLength" | "keepFormat" | "frameRate">): string[] {
+  const out: string[] = [];
+  if (l.startSec !== undefined || l.endSec !== undefined) out.push(`${momentSaid(l.startSec ?? 0)} to ${l.endSec !== undefined ? momentSaid(l.endSec) : "the end"}`);
+  if (l.removeMusic) out.push("music taken out");
+  if (l.enhanceSpeech) out.push("speech cleaned up");
+  if (l.keepLength) out.push("length kept");
+  if (l.keepFormat) out.push("format kept");
+  if (l.frameRate) out.push(FRAME_RATE_LABEL[l.frameRate].said);
+  return out;
+}
+/**
+ * "Lip sync": a video given a new audio track, the speaker's mouth redrawn to match (HeyGen lip sync). For a line
+ * re-recorded after the shoot, a voice-over replaced, or a dub of one's own. The footage is a video of the library or a
+ * link; the audio is a saved audio clip (uploaded here or recorded for a scene), a recording or text spoken in one of the
+ * account's instant voices or, for text, one of HeyGen's (`?voiceChange=` chooses one, from the voice changer), or a link.
+ */
+export default function LipsyncPage() {
+  const canEdit = useCanEdit();
+  const { data, error, setData, refetch } = useApi<{ lipsyncs: Lipsync[]; available: boolean }>("/api/lipsyncs");
+  // While a lip sync runs the list is asked again, only while the tab is visible, and a failed check does not stop the next one.
+  const running = (data?.lipsyncs ?? []).some((l) => l.status === "processing");
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void refetch();
+    }, 10_000);
+    return () => clearInterval(timer);
+  }, [running, refetch]);
+  const { data: library } = useApi<{ videos: Video[]; hasMore?: boolean }>("/api/videos?status=completed&limit=200");
+  const videos = (library?.videos ?? []).filter((v) => v.videoUrl && !v.deletedAt);
+  const { data: clipData, setData: setClipData, refetch: refetchClips } = useApi<{ clips: AudioClip[] }>("/api/clips");
+  const clips = clipData?.clips ?? [];
+  // Drawn again each minute, so a recording leaves the choices once it is over an hour old.
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((m) => m + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const { data: voiceData, error: voiceError, refetch: refetchVoices } = useApi<{ changes: Voiced[] }>("/api/voice-changer");
+  // Ready ones whose link from the renderer is still good (the server refuses the others).
+  const voiced = (voiceData?.changes ?? []).filter((c) => c.status === "completed" && c.audioUrl && Date.now() - Date.parse(c.checkedAt ?? c.updatedAt) <= VOICE_RESULT_LINK_MS);
+  const [from, setFrom] = useState<"link" | "library">("library");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [videoId, setVideoId] = useState("");
+  const [audioFrom, setAudioFrom] = useState<"clip" | "link" | "voice">("clip");
+  const [voiceChangeId, setVoiceChangeId] = useState("");
+  // Why a recording chosen by the link, or chosen before, is no longer chosen; shown under the choice.
+  const [voiceGone, setVoiceGone] = useState<string | null>(null);
+  // Sent here from the voice changer with one of its recordings chosen.
+  useEffect(() => {
+    const chosen = new URLSearchParams(window.location.search).get("voiceChange");
+    if (chosen && /^vc_[A-Za-z0-9_-]{1,64}$/.test(chosen)) {
+      setAudioFrom("voice");
+      setVoiceChangeId(chosen);
+    }
+    // Read once: a reload after a start does not choose it again (the rest of the address is kept).
+    if (chosen) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("voiceChange");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
+  // A chosen recording not on offer (deleted, another account's, or too old to send) is not chosen, and the page says so.
+  useEffect(() => {
+    if (audioFrom !== "voice" || !voiceData || !voiceChangeId || voiced.some((c) => c.id === voiceChangeId)) return;
+    const why = "That recording is no longer available, or was made over an hour ago; make it again in the voice changer.";
+    setVoiceChangeId("");
+    setVoiceGone(why);
+    // Announced too: the note under the choice is only read with the choice.
+    setNote(why);
+  }, [audioFrom, voiceData, voiceChangeId, voiced]);
+  const [clipId, setClipId] = useState("");
+  /** Further clips to sync the same footage to, one lip sync each, in the order chosen. */
+  const [moreTakes, setMoreTakes] = useState<string[]>([]);
+  /**
+   * The title each take of a start of several was sent with, kept until the start is done or changed, so a take tried
+   * again alone goes out as it first did (its key promises the same lip sync).
+   */
+  const [takeTitles, setTakeTitles] = useState<Record<string, string>>({});
+  const [audioUrl, setAudioUrl] = useState("");
+  const [mode, setMode] = useState<LipsyncMode>("speed");
+  // HeyGen's options: only part of the video, its music taken out, the speech cleaned up, its length or format kept.
+  const [partOnly, setPartOnly] = useState(false);
+  const [partFrom, setPartFrom] = useState("");
+  const [partTo, setPartTo] = useState("");
+  const [removeMusic, setRemoveMusic] = useState(false);
+  const [enhanceSpeech, setEnhanceSpeech] = useState(false);
+  const [keepLength, setKeepLength] = useState(false);
+  const [keepFormat, setKeepFormat] = useState(false);
+  const [frameRate, setFrameRate] = useState<LipsyncFrameRate | "">("");
+  /** The lip sync whose captions are being fetched, and in which format. */
+  const [captionsBusy, setCaptionsBusy] = useState<string | null>(null);
+  /** A caption download that failed, said on its own card (where the button pressed is) rather than at the top. */
+  const [captionErr, setCaptionErr] = useState<{ id: string; message: string } | null>(null);
+  const [title, setTitle] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  // One key per start: a retry of the same start (after a timeout, say) sends it again and gets the same lip sync back.
+  const [requestKey, setRequestKey] = useState(() => newKey());
+  const fileRef = useRef<HTMLInputElement>(null);
+  const firstInput = useRef<HTMLSelectElement & HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const focusAfterRender = useFocusAfterRender();
+  // A lip sync that finishes or fails while the page is open is announced.
+  const seen = useRef<Map<string, { status: Lipsync["status"]; title: string }>>(new Map());
+  useEffect(() => {
+    if (!data) return;
+    const parts: string[] = [];
+    for (const l of data.lipsyncs) {
+      const before = seen.current.get(l.id)?.status;
+      if (before === "processing" && l.status !== "processing") parts.push(l.status === "completed" ? `${l.title} is ready.` : `${l.title} could not be lip-synced: ${l.error ?? "the renderer failed"}.`);
+      seen.current.set(l.id, { status: l.status, title: l.title });
+    }
+    // One that leaves the list without being deleted here went with its video (deleted for good), or was deleted elsewhere.
+    const listed = new Set(data.lipsyncs.map((l) => l.id));
+    for (const [id, was] of seen.current) {
+      if (listed.has(id)) continue;
+      parts.push(`${was.title} is no longer listed; it went with its video, or was deleted elsewhere.`);
+      seen.current.delete(id);
+    }
+    if (parts.length) setNote(parts.join(" "));
+  }, [data]);
+  // A page left open past the links' lifetime asks again when it is looked at, so the players and links still work.
+  const loadedAt = useRef(Date.now());
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && Date.now() - loadedAt.current > RELINK_MS) {
+        loadedAt.current = Date.now();
+        void refetch();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refetch]);
+
+  const items = data?.lipsyncs ?? [];
+  const search = useListSearch();
+  const shown = items.filter((l) => search.matches(l.id, l.title, l.audioName));
+  // Any change to what would be synced is a different start: its own key, and an error about the last one no longer applies.
+  function changed() {
+    setErr(null);
+    setRequestKey(newKey());
+    setTakeTitles({});
+  }
+  const videoReady = from === "link" ? /^https:\/\/\S+$/i.test(sourceUrl.trim()) : !!videoId;
+  const audioReady = audioFrom === "link" ? /^https:\/\/\S+$/i.test(audioUrl.trim()) : audioFrom === "voice" ? voiced.some((c) => c.id === voiceChangeId) : !!clipId;
+  const canStart = canEdit !== false && data?.available !== false;
+
+  async function upload(file: File) {
+    setUploading(true);
+    setErr(null);
+    try {
+      const name = file.name.replace(/\.[^.]+$/, "").slice(0, 80) || "Uploaded audio";
+      const { clip } = await api<{ clip: AudioClip }>("/api/clips", { method: "POST", body: JSON.stringify(await clipFrom(file, name, "the new audio", "trim it, or paste a link to the full track")) });
+      setClipData((prev) => ({ clips: [clip, ...(prev?.clips ?? []).filter((c) => c.id !== clip.id)] }));
+      // A first listing still on its way would land without the new clip; asking again retires it.
+      void refetchClips();
+      setClipId(clip.id);
+      changed();
+      setNote(`Uploaded ${clip.name}.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "The audio could not be uploaded");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // The part of the video, as typed: a moment that does not read is said under the fields and keeps the button off.
+  const fromSec = momentOf(partFrom);
+  const toSec = momentOf(partTo);
+  const partProblem = !partOnly
+    ? null
+    : Number.isNaN(fromSec) || Number.isNaN(toSec)
+      ? "Write each moment as seconds (12.5) or minutes and seconds (1:05)."
+      : fromSec === undefined && toSec === undefined
+        ? "Write where the part starts, where it ends, or both."
+        : (fromSec ?? 0) > MAX_LIPSYNC_SEC || (toSec ?? 0) > MAX_LIPSYNC_SEC
+          ? "Keep the part within the first 4 hours of the video."
+          : toSec !== undefined && toSec - (fromSec ?? 0) < 1
+            ? "End the part at least a second after it starts."
+            : partPastEnd(fromSec, toSec);
+
+  /** Why Lip-sync video cannot be pressed yet, said under it (null when it can). */
+  const startBlocked = !canStart
+    ? null
+    : !videoReady
+      ? from === "link"
+        ? "Paste an https link to the footage first."
+        : "Choose the video to lip-sync first."
+      : uploading
+        ? "Waiting for the audio to finish uploading."
+        : !audioReady
+          ? audioFrom === "link" && audioUrl.trim()
+            ? "Paste an https link to the new audio first."
+            : "Choose the new audio first."
+          : partProblem !== null
+            ? "Fix the part of the video above first."
+            : null;
+
+  /** For a library video whose length is known, a part that starts or ends past it (the server's own rule). */
+  function partPastEnd(start: number | undefined, end: number | undefined): string | null {
+    const length = from === "library" ? videos.find((v) => v.id === videoId)?.durationSec : undefined;
+    if (typeof length !== "number" || !(length > 0)) return null;
+    const said = (sec: number) => momentSaid(Math.round(sec));
+    if (start !== undefined && start >= length - 1) return `The video is ${said(length)} long; start the part before ${said(Math.floor(Math.max(0, length - 1)))}.`;
+    if (end !== undefined && end > length + 0.5) return `The video is ${said(length)} long; end the part by then, or leave the end blank.`;
+    return null;
+  }
+
+  /** Save a finished lip sync's captions, read from the renderer; a failure is said on the page rather than saved as a file. */
+  async function saveCaptions(l: Lipsync, format: "srt" | "vtt") {
+    if (captionsBusy) return;
+    setCaptionsBusy(`${l.id}:${format}`);
+    setCaptionErr(null);
+    try {
+      const res = await fetch(`/api/lipsyncs/${encodeURIComponent(l.id)}/captions${format === "vtt" ? "?format=vtt" : ""}`).catch(() => {
+        throw new Error("Could not reach the server to get the captions");
+      });
+      if (!res.ok) throw new Error(((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? "Could not get the captions");
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? `captions.${format}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setCaptionErr({ id: l.id, message: e instanceof Error && e.message !== "Could not get the captions" ? e.message : "Could not get the captions; try again in a moment" });
+    } finally {
+      setCaptionsBusy(null);
+    }
+  }
+
+  async function submit() {
+    setBusy(true);
+    setErr(null);
+    setNote(null);
+    // One lip sync per take: the chosen clip and any more takes, or the one recording or link.
+    const takes = audioFrom === "clip" ? [clipId, ...liveTakes] : [""];
+    // A start of several stays one, take titles and all, when a take is tried again alone after the others started.
+    const several = audioFrom === "clip" && (takes.length > 1 || takes.some((t) => t in takeTitles));
+    // Several takes are told apart by their clip's name; one keeps the title asked for, or the server's own.
+    const baseTitle = title.trim() || (from === "library" ? withSuffix(videos.find((v) => v.id === videoId)?.title ?? "Lip-synced video", " (lip-synced)", 120) : "Lip-synced video");
+    const titles: Record<string, string> = { ...takeTitles };
+    if (several) for (const t of takes) titles[t] ??= fitTitle(baseTitle, ` – ${clipName(t) ?? "take"}`);
+    setTakeTitles(several ? titles : {});
+    const started: Lipsync[] = [];
+    try {
+      for (const take of takes) {
+        const body = {
+          ...(from === "link" ? { sourceUrl: sourceUrl.trim() } : { videoId }),
+          ...(audioFrom === "link" ? { audioUrl: audioUrl.trim() } : audioFrom === "voice" ? { voiceChangeId } : { clipId: take }),
+          mode,
+          ...(partOnly && fromSec !== undefined ? { startSec: fromSec } : {}),
+          ...(partOnly && toSec !== undefined ? { endSec: toSec } : {}),
+          ...(removeMusic ? { removeMusic: true } : {}),
+          ...(enhanceSpeech ? { enhanceSpeech: true } : {}),
+          ...(keepLength ? { keepLength: true } : {}),
+          ...(keepFormat ? { keepFormat: true } : {}),
+          ...(frameRate ? { frameRate } : {}),
+          ...(several ? { title: titles[take] } : title.trim() ? { title: title.trim() } : {}),
+        };
+        // Each clip has its own key from this start's, so a retry after a partial start never syncs a take twice.
+        const key = audioFrom === "clip" ? `${requestKey}-${take}` : requestKey;
+        const { lipsync } = await api<{ lipsync: Lipsync }>("/api/lipsyncs", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": key } });
+        started.push(lipsync);
+        setData((prev) => ({ available: prev?.available ?? true, lipsyncs: [lipsync, ...(prev?.lipsyncs ?? []).filter((l) => l.id !== lipsync.id)] }));
+        // Shown even when a search is typed that it does not match.
+        search.pin(lipsync.id);
+      }
+      // A check that left before these lip syncs were started would answer without them; asking again retires it.
+      void refetch();
+      setRequestKey(newKey());
+      setSourceUrl("");
+      setVideoId("");
+      setAudioUrl("");
+      setClipId("");
+      setMoreTakes([]);
+      setTakeTitles({});
+      setVoiceChangeId("");
+      setVoiceGone(null);
+      setTitle("");
+      const first = started[0];
+      // A start tried again returns the lip sync it already made, under the title it was made with (or renamed to since):
+      // said, so a title typed meanwhile is not thought lost; it is renamed from its card, never behind the account's back.
+      const askedTitle = title.trim();
+      setNote(
+        started.length > 1
+          ? `Lip-syncing ${started.length} takes; each appears here when it is ready.`
+          : !several && askedTitle && first.title !== askedTitle
+            ? `This start had already gone through as ${first.title}; rename it from its card to call it ${askedTitle}.`
+            : `Lip-syncing ${first.title}; it appears here when it is ready.`,
+      );
+      // Focus goes to the new lip sync, rather than being lost with the cleared form.
+      focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(`[data-lipsync="${first.id}"]`) ?? firstInput.current);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "The video could not be lip-synced";
+      if (started.length) {
+        // The takes that started stay listed; the one that did not, and those after it, stay chosen to try again.
+        const left = takes.slice(started.length);
+        void refetch();
+        setClipId(left[0]);
+        setMoreTakes(left.slice(1));
+        setErr(`Started ${started.length} of ${takes.length} takes; “${clipName(left[0]) ?? "the next clip"}” was not: ${message}`);
+      } else {
+        setErr(message);
+      }
+      // A clip deleted meanwhile leaves the list and the choice, so a retry is not refused the same way.
+      if (e instanceof Error && /audio clip is no longer available/.test(e.message)) {
+        const gone = takes[started.length];
+        const left = takes.slice(started.length).filter((id) => id !== gone);
+        setClipId(left[0] ?? "");
+        setMoreTakes(left.slice(1));
+        void refetchClips();
+      }
+      // A recording gone or too old to send is no longer chosen; the list is asked again so it leaves the choices too.
+      if (e instanceof Error && /^That recording in another voice is no longer available|^“.*” was made (?:by another renderer|over an hour ago)/.test(e.message)) {
+        setVoiceChangeId("");
+        void refetchVoices();
+      }
+      // A refusal is an answer: trying again (after topping up, say) is a new start. A lost answer, or one HeyGen is still
+      // working on, keeps its key, so a retry returns the start that may have gone through. Takes already started are no
+      // longer chosen, so a new key never starts one of them again.
+      if (isRefusal(e)) setRequestKey(newKey());
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rename(l: Lipsync) {
+    const answer = window.prompt("Lip sync name", l.title);
+    const name = answer?.trim();
+    if (!name || name === l.title) return;
+    setErr(null);
+    setNote(null);
+    try {
+      const { lipsync: saved } = await api<{ lipsync: Lipsync }>(`/api/lipsyncs/${l.id}`, { method: "PATCH", body: JSON.stringify({ title: name }) });
+      setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.map((x) => (x.id === saved.id ? saved : x)) } : prev));
+      // A list check that left before the rename would answer with the old name; asking again retires it.
+      void refetch();
+      search.pin(saved.id);
+      setNote(`Renamed the lip sync to “${saved.title}”.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        // Forgotten here, so the next check does not announce it as deleted elsewhere as well.
+        seen.current.delete(l.id);
+        setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.filter((x) => x.id !== l.id) } : prev));
+        setNote(`The lip sync “${l.title}” is no longer available.`);
+        focusAfterRender(() => headingRef.current);
+      } else setErr(e instanceof Error ? e.message : "The lip sync could not be renamed");
+    }
+  }
+
+  async function remove(l: Lipsync) {
+    if (!window.confirm(`Delete “${l.title}”? Making it again uses another job.`)) return;
+    setErr(null);
+    setNote(null);
+    const next = shown[shown.indexOf(l) + 1] ?? shown[shown.indexOf(l) - 1];
+    // Kept in view while the delete is sent, so a search typed meanwhile cannot hide where the focus goes.
+    if (next) search.pin(next.id);
+    try {
+      // Forgotten before the request, so a check landing meanwhile does not announce it as deleted elsewhere.
+      seen.current.delete(l.id);
+      await api(`/api/lipsyncs/${l.id}`, { method: "DELETE" });
+      setData((prev) => (prev ? { ...prev, lipsyncs: prev.lipsyncs.filter((x) => x.id !== l.id) } : prev));
+      void refetch();
+      setNote(`Deleted ${l.title}.`);
+      // Focus moves to the next lip sync, or to the list's heading, rather than being lost with the button.
+      focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-lipsync="${next.id}"]`) : headingRef.current));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "The lip sync could not be deleted");
+    }
+  }
+
+  const clipName = (id?: string) => clips.find((c) => c.id === id)?.name;
+  /** The further takes still among the account's clips (one deleted elsewhere drops out). */
+  const liveTakes = moreTakes.filter((id) => id !== clipId && clips.some((c) => c.id === id));
+
+  return (
+    <>
+      <SectionTitle title="Lip sync" subtitle="Put new audio on a video, a line re-recorded or a voice-over replaced, and the speaker's mouth is redrawn to match." />
+      {canEdit === false && <ViewOnlyNotice what="lip-sync videos" />}
+      {/* A failed list load and a refused start are both shown; neither hides the other. */}
+      <ErrorBanner message={error} />
+      <ErrorBanner message={err} />
+      <p role="status" className="sr-only">
+        {note ?? ""}
+      </p>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <Card className="min-w-0 p-5">
+          {data?.available === false ? (
+            <p className="text-sm text-slate-600">Lip sync needs the HeyGen renderer; the current renderer has no such feature.</p>
+          ) : (
+            <div className="space-y-4">
+              <fieldset>
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Video</legend>
+                <div className="flex flex-wrap gap-4 text-sm text-slate-700">
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="lipsync-from" className="accent-brand-600" checked={from === "library"} disabled={canEdit === false} onChange={() => (setFrom("library"), changed())} />
+                    One of my videos
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="lipsync-from" className="accent-brand-600" checked={from === "link"} disabled={canEdit === false} onChange={() => (setFrom("link"), changed())} />
+                    A link
+                  </label>
+                </div>
+              </fieldset>
+              {from === "link" ? (
+                <Field label="Video URL" hint="A public https link to a video of one person speaking, face to camera.">
+                  <input ref={firstInput} type="url" inputMode="url" className={inputClass} value={sourceUrl} disabled={canEdit === false} onChange={(e) => (setSourceUrl(e.target.value), changed())} placeholder="https://…/interview.mp4" />
+                </Field>
+              ) : (
+                <Field label="Library video" hint={!library ? "Loading your videos…" : videos.length ? (library.hasMore ? "Your 200 newest finished videos." : "A finished video of your library.") : "No finished videos yet."}>
+                  <select ref={firstInput} className={inputClass} value={videoId} disabled={canEdit === false} onChange={(e) => (setVideoId(e.target.value), changed())}>
+                    <option value="">Choose a video</option>
+                    {videos.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.title}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <fieldset>
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">New audio</legend>
+                <div className="flex flex-wrap gap-4 text-sm text-slate-700">
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "clip"} disabled={canEdit === false} onChange={() => (setAudioFrom("clip"), changed())} />
+                    An audio clip
+                  </label>
+                  {(voiced.length > 0 || audioFrom === "voice") && (
+                    <label className="flex items-center gap-2">
+                      <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "voice"} disabled={canEdit === false} onChange={() => (setAudioFrom("voice"), setVoiceGone(null), changed())} />
+                      In one of my voices
+                    </label>
+                  )}
+                  <label className="flex items-center gap-2">
+                    <input type="radio" name="lipsync-audio" className="accent-brand-600" checked={audioFrom === "link"} disabled={canEdit === false} onChange={() => (setAudioFrom("link"), changed())} />
+                    A link
+                  </label>
+                </div>
+              </fieldset>
+              {audioFrom === "voice" ? (
+                <div>
+                  <Field label="Recording in your voice" hint={voiced.length ? "A recording or text spoken in one of your instant voices (or text in one of HeyGen's) within the last hour, from the voice changer." : voiceData ? "None made within the last hour is ready; make one in the voice changer." : voiceError ? "Your recordings could not be loaded." : "Loading your recordings…"}>
+                    <select className={inputClass} value={voiceChangeId} disabled={canEdit === false} aria-describedby={voiceGone ? "voice-gone" : undefined} onChange={(e) => (setVoiceChangeId(e.target.value), setVoiceGone(null), changed())}>
+                      <option value="">{voiced.length ? "Choose a recording" : "No recordings yet"}</option>
+                      {voiced.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.title}
+                          {typeof c.durationSec === "number" && c.durationSec > 0 ? ` (${formatSeconds(Math.max(1, Math.round(c.durationSec)))})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {voiceGone && (
+                    <p id="voice-gone" className="mt-1 text-xs text-amber-700">
+                      {voiceGone}
+                    </p>
+                  )}
+                </div>
+              ) : audioFrom === "link" ? (
+                <Field label="Audio URL" hint="A public https link to an MP3 or WAV file with the new speech.">
+                  <input type="url" inputMode="url" className={inputClass} value={audioUrl} disabled={canEdit === false} onChange={(e) => (setAudioUrl(e.target.value), changed())} placeholder="https://…/new-voice-over.mp3" />
+                </Field>
+              ) : (
+                <div>
+                  <Field label="Audio clip" hint={clips.length ? "Your saved clips, including those recorded for a scene; or upload one (up to 90 seconds). An MP3 is kept as it is; other files are saved as 16 kHz mono WAV." : "Upload an audio file (up to 90 seconds); it is saved with your audio clips. An MP3 is kept as it is; other files are saved as 16 kHz mono WAV."}>
+                    <select className={inputClass} value={clipId} disabled={canEdit === false || uploading} onChange={(e) => (setClipId(e.target.value), setMoreTakes((t) => t.filter((id) => id !== e.target.value)), setErr(null))}>
+                      <option value="">{clips.length ? "Choose a clip" : "No clips yet"}</option>
+                      {clips.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({formatSeconds(Math.max(1, Math.round(c.durationSec)))})
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {/* Busy, not disabled, while uploading, so the focus stays on it for a keyboard user. */}
+                    <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => !uploading && fileRef.current?.click()} disabled={canEdit === false} loading={uploading}>
+                      <Upload className="h-3.5 w-3.5" /> Upload audio
+                    </Button>
+                    <input
+                      ref={fileRef}
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      aria-label="Upload the new audio"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) void upload(file);
+                      }}
+                    />
+                    {clipId && <audio controls preload="none" src={`/api/clips/${clipId}`} className="h-8 min-w-0 flex-1" aria-label={`Play ${clipName(clipId) ?? "the clip"}`} />}
+                  </div>
+                  {clipId && clips.length > 1 && (
+                    <fieldset className="mt-3 space-y-1.5" aria-describedby="lipsync-takes-hint">
+                      <legend className="text-sm font-medium text-slate-700">Also sync to other clips</legend>
+                      <p id="lipsync-takes-hint" className="text-xs text-slate-500">
+                        Up to {MAX_TAKES - 1} more takes of the same footage, one lip sync each, named after its clip.
+                        {liveTakes.length ? ` ${liveTakes.length + 1} takes in all.` : ""}
+                      </p>
+                      {clips
+                        .filter((c) => c.id !== clipId)
+                        .map((c) => {
+                          const on = liveTakes.includes(c.id);
+                          return (
+                            <label key={c.id} className="flex items-center gap-2 text-sm text-slate-700">
+                              <input
+                                type="checkbox"
+                                className="accent-brand-600"
+                                checked={on}
+                                disabled={canEdit === false || (!on && liveTakes.length >= MAX_TAKES - 1)}
+                                onChange={(e) => (setMoreTakes((t) => (e.target.checked ? [...t, c.id] : t.filter((id) => id !== c.id))), setErr(null))}
+                              />
+                              <span className="min-w-0 break-words">
+                                {c.name} <span className="text-slate-500">({formatSeconds(Math.max(1, Math.round(c.durationSec)))})</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </fieldset>
+                  )}
+                </div>
+              )}
+              <fieldset>
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Quality</legend>
+                <div className="space-y-1.5 text-sm text-slate-700">
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="lipsync-mode" className="mt-0.5 accent-brand-600" checked={mode === "speed"} disabled={canEdit === false} onChange={() => (setMode("speed"), changed())} />
+                    <span>
+                      Fast <span className="text-xs text-slate-500">· a quick resync, good for drafts</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2">
+                    <input type="radio" name="lipsync-mode" className="mt-0.5 accent-brand-600" checked={mode === "precision"} disabled={canEdit === false} onChange={() => (setMode("precision"), changed())} />
+                    <span>
+                      Precise <span className="text-xs text-slate-500">· slower, truer mouth movements for the final cut</span>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+              <fieldset className="space-y-2">
+                <legend className="mb-1.5 block text-sm font-medium text-slate-700">Options</legend>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="mt-0.5 accent-brand-600" checked={partOnly} disabled={canEdit === false} onChange={(e) => (setPartOnly(e.target.checked), changed())} />
+                  <span>
+                    Only part of the video
+                    <span className="block text-xs text-slate-500">Sync the new audio to one stretch of it; the rest plays as it was.</span>
+                  </span>
+                </label>
+                {partOnly && (
+                  <div className="ml-6 space-y-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label="From">
+                        <input className={inputClass} value={partFrom} inputMode="text" autoComplete="off" placeholder="0:00" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartFrom(e.target.value), changed())} />
+                      </Field>
+                      <Field label="To">
+                        <input className={inputClass} value={partTo} inputMode="text" autoComplete="off" placeholder="the end" disabled={canEdit === false} aria-describedby="lipsync-part-hint" onChange={(e) => (setPartTo(e.target.value), changed())} />
+                      </Field>
+                    </div>
+                    <p id="lipsync-part-hint" role="status" className={`text-xs ${partProblem ? "text-amber-700" : "text-slate-500"}`}>
+                      {partProblem ?? "Seconds (12.5) or minutes and seconds (1:05); leave one blank for the start or the end."}
+                    </p>
+                  </div>
+                )}
+                {(
+                  [
+                    ["Take out the background music", "The footage's music is left out under the new audio.", removeMusic, setRemoveMusic],
+                    ["Clean up the speech", "HeyGen enhances the new speech in the result.", enhanceSpeech, setEnhanceSpeech],
+                    ["Keep the video's length", "The video stays as long as it is, rather than stretching to the new audio.", keepLength, setKeepLength],
+                    ["Keep the video's resolution and bitrate", "The result matches the footage's format.", keepFormat, setKeepFormat],
+                  ] as const
+                ).map(([label, hint, on, set]) => (
+                  <label key={label} className="flex items-start gap-2 text-sm text-slate-700">
+                    <input type="checkbox" className="mt-0.5 accent-brand-600" checked={on} disabled={canEdit === false} onChange={(e) => (set(e.target.checked), changed())} />
+                    <span>
+                      {label}
+                      <span className="block text-xs text-slate-500">{hint}</span>
+                    </span>
+                  </label>
+                ))}
+                <Field label="Frame rate" hint="Constant suits most editing software; HeyGen chooses when left as it is.">
+                  <select className={inputClass} value={frameRate} disabled={canEdit === false} onChange={(e) => (setFrameRate(e.target.value as LipsyncFrameRate | ""), changed())}>
+                    <option value="">HeyGen&apos;s choice</option>
+                    {LIPSYNC_FRAME_RATES.map((r) => (
+                      <option key={r} value={r}>
+                        {FRAME_RATE_LABEL[r].option}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </fieldset>
+              <Field label="Title (optional)">
+                <input className={inputClass} value={title} maxLength={120} disabled={canEdit === false} onChange={(e) => setTitle(e.target.value)} placeholder={from === "library" ? "The video's title, marked lip-synced" : "Lip-synced video"} />
+              </Field>
+              <Button onClick={submit} loading={busy} disabled={!canStart || startBlocked !== null} aria-describedby={startBlocked ? "lipsync-start-why" : undefined} className="w-full">
+                <AudioLines className="h-4 w-4" /> Lip-sync video
+              </Button>
+              {startBlocked && (
+                <p id="lipsync-start-why" className="text-xs text-slate-500">
+                  {startBlocked}
+                </p>
+              )}
+              <p className="text-xs text-slate-500">The lip-synced video is not added to the library; download it once it is ready. {keepLength ? "The video keeps its length, whatever the new audio's." : "When the new audio is longer or shorter, the video is stretched to fit it."}</p>
+            </div>
+          )}
+        </Card>
+
+        <div ref={listRef} className="min-w-0">
+          <h2 ref={headingRef} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 outline-none">
+            Lip-synced videos
+          </h2>
+          {data && (items.length > 0 || search.q) && <ListSearch search={search} label="Search lip syncs" placeholder="Search by name or audio" shown={shown.length} total={items.length} noun="lip syncs" />}
+          {!data ? null : items.length === 0 ? (
+            <EmptyState icon={<AudioLines className="h-8 w-8" />} title="No lip-synced videos yet" body="Choose a video and its new audio on the left to get started." />
+          ) : (
+            <div className="space-y-3">
+              {shown.map((l) => (
+                <Card key={l.id} className="p-4 outline-none focus:ring-2 focus:ring-brand-500" data-testid="lipsync" data-lipsync={l.id} tabIndex={-1}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="break-words text-sm font-medium text-slate-900">{l.title}</div>
+                      <div className="mt-0.5 break-words text-xs text-slate-500" data-testid="lipsync-meta">
+                        {l.videoId ? "A library video" : "A linked video"} · {l.voiceChangeId ? `“${l.audioName ?? "a recording"}” in your voice` : l.clipId ? (clipName(l.clipId) ? `audio clip “${clipName(l.clipId)}”` : "an audio clip") : "linked audio"} · {MODE_LABEL[l.mode]}
+                        {optionsSaid(l).map((o) => ` · ${o}`).join("")} · {formatDate(l.createdAt)}
+                        {l.status === "completed" && typeof l.durationSec === "number" ? ` · ${formatSeconds(Math.max(1, Math.round(l.durationSec)))}` : ""}
+                      </div>
+                      {l.error && <div className="mt-1 text-xs text-rose-600">{l.error}</div>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <StatusBadge status={l.status} />
+                      {canEdit === true && (
+                        <>
+                          <button type="button" onClick={() => void rename(l)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700" aria-label={`Rename ${l.title}`} title="Rename">
+                            <Pencil className="h-4 w-4" aria-hidden />
+                          </button>
+                          <button type="button" onClick={() => remove(l)} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600" aria-label={`Delete ${l.title}`} title="Delete">
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {l.status === "completed" && l.videoUrl && (
+                    <>
+                      <video src={l.videoUrl} controls preload="none" className="mt-3 w-full rounded-lg bg-black" aria-label={l.title} />
+                      <a href={l.videoUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline" aria-label={`Download ${l.title}`}>
+                        <Download className="h-3 w-3" aria-hidden /> Download
+                      </a>
+                      <span className="mt-2 ml-4 inline-flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                        Captions:
+                        {(["srt", "vtt"] as const).map((format) => (
+                          <button
+                            key={format}
+                            type="button"
+                            className="font-medium text-brand-700 hover:underline aria-busy:cursor-wait aria-busy:opacity-60"
+                            aria-busy={captionsBusy === `${l.id}:${format}` || undefined}
+                            aria-label={`Download captions for ${l.title} as ${format === "srt" ? "SRT" : "WebVTT"}`}
+                            onClick={() => saveCaptions(l, format)}
+                          >
+                            {captionsBusy === `${l.id}:${format}` ? "Getting…" : format === "srt" ? "SRT" : "WebVTT"}
+                          </button>
+                        ))}
+                      </span>
+                      {captionErr?.id === l.id && (
+                        <p role="alert" className="mt-1 text-xs text-rose-600">
+                          {captionErr.message}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}

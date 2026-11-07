@@ -1,0 +1,4297 @@
+// Service-layer tests against the demo providers and the in-memory store.
+// Run with: npm test
+import assert from "node:assert/strict";
+import { beforeEach, describe, it } from "node:test";
+import { MemoryStore } from "../store/memory";
+import {
+  brandKitSchema,
+  bulkVideoSchema,
+  bulkVideos,
+  createAvatar,
+  createAvatarSchema,
+  deleteAvatar,
+  getAvatar,
+  deleteBrandKit,
+  getBrandKit,
+  saveBrandKit,
+  createTranslation,
+  createVideo,
+  deleteVideo,
+  getVideo,
+  listAvatars,
+  listVideos,
+  chatSchema,
+  chatWithAvatar,
+  agentSchema,
+  createAgent,
+  deleteAgent,
+  getAgent,
+  listAgents,
+  publicAgent,
+  talkToAgent,
+  updateAgent,
+  listConversations,
+  clearConversations,
+  deleteConversation,
+  getConversation,
+  setFollowedUp,
+  updateVisit,
+  rateReply,
+  MAX_TRANSCRIPT_MESSAGES,
+  captureLead,
+  listVoices,
+  cloneVoice,
+  cloneVoiceSchema,
+  deleteClonedVoice,
+  MAX_CLONED_VOICES,
+  exportOwnerData,
+  deleteOwnerData,
+  recordView,
+  scriptSchema,
+  updateVideo,
+  videoPatchSchema,
+  videoRequestSchema,
+} from "../services";
+import { MockAvatarProvider } from "../providers/avatar/mock";
+import { MockScriptProvider } from "../providers/script/mock";
+import { setScriptProvider } from "../providers";
+import { API_KEY_PREFIX, MAX_API_KEYS, createApiKey, listApiKeys, ownerForApiKey, revokeApiKey } from "../api-keys";
+import { getStore } from "../store";
+import { UnauthorizedError } from "../errors";
+import type { ApiKey, Translation } from "../types";
+import { createHmac } from "node:crypto";
+import { parseCsv, toCsv } from "../csv";
+import { conversationMatches } from "../transcripts";
+import { ANALYTICS_COLUMNS, analyticsRows, bumpViewsByDay, computeInsights, finishRateOf, viewsInLast, viewsPerDay } from "../insights";
+import { EXPIRED_INVITE_DAYS, acceptInvite, bulkInviteSchema, reinviteExpired, canEdit, canManageAccount, createInvite, createInvites, createWorkspace, deleteWorkspace, findInvite, inviteSchema, listWorkspaces, removeMember, RESEND_COOLDOWN_MS, renewInvite, revokeInvite, seesInviteAddresses, setInviteRole, setMemberRole, workspaceForMember, workspaceView } from "../workspaces";
+import { deliverInvite } from "../invite-mail";
+import { bulkInviteSummary, seatLine, seatsLeft, splitEmails } from "../invite-text";
+import { LimitError as InviteLimitError } from "../errors";
+import { roleArticle, roleCanEdit, roleSchema } from "../roles";
+import { framingFor, isPhotoAvatar, type Video } from "../types";
+import { LOCAL_OWNER } from "../owner-id";
+import { MockEmailProvider, inviteEmail, setEmailProvider } from "../providers/email";
+import { forgetMemo, memo } from "../cache";
+import { extractReadableText, fetchPageText } from "../webpage";
+import { MAX_SESSIONS_PER_SCOPE, SESSION_TTL_MS, closeLiveSession, keepLiveSession, liveSessionCall, openLiveSession, resetLiveSessions, setStreamingProvider, speakLive } from "../streaming";
+import type { StreamingProvider } from "../providers/types";
+import { generateScript } from "../services";
+import { MockBillingProvider, applyStripeEvent, getPlan, renderLimitFor, setBillingProvider, setPlan, verifyStripeSignature } from "../billing";
+import { config } from "../config";
+import { dispatchNotification, emailVideoResult, getNotifySettings, notifyVideoTransition, savePrefs, saveNotifySettings, setNotificationFetch, signPayload } from "../notifications";
+import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
+import { SCRIPT_TEMPLATES, findTemplate } from "../templates";
+
+beforeEach(() => {
+  // Fresh store per test; getStore() memoises on globalThis.
+  globalThis.__avatarStudioStore = new MemoryStore();
+});
+
+describe("avatars", () => {
+  it("lists stock avatars in demo mode", async () => {
+    const avatars = await listAvatars();
+    assert.equal(avatars.length, STOCK_AVATARS.length);
+    assert.ok(avatars.every((a) => a.imageUrl.startsWith("data:image/svg+xml")));
+  });
+
+  it("creates a custom avatar and lists it first", async () => {
+    const created = await createAvatar({ name: "Dan", imageUrl: "https://example.com/p.jpg" });
+    assert.equal(created.source, "custom");
+    const avatars = await listAvatars();
+    assert.equal(avatars[0].id, created.id);
+  });
+
+  it("renames a photo avatar and changes its gender, never a library presenter or someone else's", async () => {
+    const { updateAvatar, updateAvatarSchema } = await import("../services/avatars");
+    const created = await createAvatar({ name: "Dan", imageUrl: "https://example.com/p.jpg", gender: "male" }, "r1");
+    const renamed = await updateAvatar(created.id, updateAvatarSchema.parse({ name: " Daniel " }), "r1");
+    assert.equal(renamed.name, "Daniel");
+    assert.equal(renamed.gender, "male", "untouched fields stay");
+    assert.equal(renamed.imageUrl, created.imageUrl);
+    const cleared = await updateAvatar(created.id, { gender: null }, "r1");
+    assert.equal("gender" in cleared, false, "null clears the gender");
+    assert.equal((await updateAvatar(created.id, { gender: "neutral" }, "r1")).gender, "neutral");
+    assert.equal((await listAvatars("r1"))[0].name, "Daniel");
+    await assert.rejects(updateAvatar(created.id, { name: "Nope" }, "r2"), /not found/);
+    await assert.rejects(updateAvatar(STOCK_AVATARS[0].id, { name: "Nope" }, "r1"), /not found/, "library presenters are the provider's");
+    assert.throws(() => updateAvatarSchema.parse({}), /Nothing to update/);
+    assert.throws(() => updateAvatarSchema.parse({ name: "" }));
+  });
+
+  it("renaming a photo avatar renames the shared presenters built on it, and only those", async () => {
+    const { updateAvatar } = await import("../services/avatars");
+    const mine = await createAvatar({ name: "Dan", imageUrl: "https://example.com/p.jpg" }, "r3");
+    const other = await createAvatar({ name: "Ann", imageUrl: "https://example.com/a.jpg" }, "r3");
+    const onMine = await createAgent(agentSchema.parse({ name: "Dan live", avatarId: mine.id, isPublic: true }), "r3");
+    const onOther = await createAgent(agentSchema.parse({ name: "Ann live", avatarId: other.id }), "r3");
+    await updateAvatar(mine.id, { gender: "male" }, "r3");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarName, "Dan", "a gender change leaves the snapshot alone");
+    await updateAvatar(mine.id, { name: "Daniel" }, "r3");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarName, "Daniel");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarImageUrl, mine.imageUrl, "the portrait snapshot stays");
+    assert.equal((await publicAgent(onMine.id)).avatar.name, "Daniel", "the talk page shows the new name");
+    assert.equal((await getAgent(onOther.id, "r3")).avatarName, "Ann");
+    // A presenter whose write failed last time is brought in step by the next rename, even to the same name.
+    const store = (await import("../store")).getStore();
+    await store.put("agent", { ...(await getAgent(onMine.id, "r3")), avatarName: "Stale" });
+    await updateAvatar(mine.id, { name: "Daniel" }, "r3");
+    assert.equal((await getAgent(onMine.id, "r3")).avatarName, "Daniel", "stragglers heal");
+  });
+
+  it("a photo avatar can carry a default voice the owner can render with, cleared when that clone is deleted", async () => {
+    const { updateAvatar, updateAvatarSchema } = await import("../services/avatars");
+    const sample = `data:audio/webm;base64,${Buffer.from("bytes").toString("base64")}`;
+    const clone = await cloneVoice(cloneVoiceSchema.parse({ name: "Mine", samples: [sample] }), "r5");
+    const a = await createAvatar(createAvatarSchema.parse({ name: "Dan", imageUrl: "https://example.com/p.jpg", defaultVoiceId: STOCK_VOICES[1].id }), "r5");
+    assert.equal(a.defaultVoiceId, STOCK_VOICES[1].id);
+    await assert.rejects(createAvatar({ name: "X", imageUrl: "https://example.com/p.jpg", defaultVoiceId: "nope" }, "r5"), /not available/);
+    await assert.rejects(createAvatar({ name: "X", imageUrl: "https://example.com/p.jpg", defaultVoiceId: clone.id }, "r6"), /not available/, "another account's clone");
+    assert.equal((await updateAvatar(a.id, { defaultVoiceId: clone.id }, "r5")).defaultVoiceId, clone.id);
+    await assert.rejects(updateAvatar(a.id, { defaultVoiceId: "nope" }, "r5"), /not available/);
+    assert.equal((await getAvatar(a.id, "r5")).defaultVoiceId, clone.id, "a refused change leaves the stored voice");
+    await deleteClonedVoice(clone.id, "r5");
+    assert.equal("defaultVoiceId" in (await getAvatar(a.id, "r5")), false, "a deleted clone is cleared from the avatar");
+    const back = await updateAvatar(a.id, { defaultVoiceId: STOCK_VOICES[0].id }, "r5");
+    assert.equal(back.name, "Dan", "other fields stay");
+    assert.equal("defaultVoiceId" in (await updateAvatar(a.id, { defaultVoiceId: null }, "r5")), false, "null clears it");
+    assert.throws(() => updateAvatarSchema.parse({ defaultVoiceId: "" }));
+  });
+
+  it("an upload that finishes after a rename keeps the new name, and never brings a deleted avatar back", async () => {
+    const { updateAvatar } = await import("../services/avatars");
+    const custom = await createAvatar({ name: "Before", imageUrl: "https://example.com/me.jpg" }, "r4");
+    const proto = MockAvatarProvider.prototype as unknown as { prepareAvatar?: (a: typeof custom) => Promise<typeof custom> };
+    let during: () => Promise<unknown> = async () => undefined;
+    proto.prepareAvatar = async (a) => {
+      if (a.providerAssetIds?.mock) return a;
+      await during();
+      return { ...a, providerAssetIds: { ...a.providerAssetIds, mock: "asset_9" } };
+    };
+    const req = { title: "V", script: "Hi.", avatarId: custom.id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    try {
+      during = () => updateAvatar(custom.id, { name: "After" }, "r4");
+      const video = await createVideo(req, "r4");
+      assert.equal(video.status, "processing");
+      const stored = await getAvatar(custom.id, "r4");
+      assert.equal(stored.name, "After", "the rename that landed during the upload survives");
+      assert.equal(stored.providerAssetIds?.mock, "asset_9", "and the upload is still recorded");
+
+      const gone = await createAvatar({ name: "Gone", imageUrl: "https://example.com/g.jpg" }, "r4");
+      during = () => deleteAvatar(gone.id, "r4");
+      const v2 = await createVideo({ ...req, avatarId: gone.id }, "r4");
+      assert.equal(v2.status, "processing", "the render in flight still uses the upload");
+      await assert.rejects(getAvatar(gone.id, "r4"), /not found/, "the deleted avatar is not written back");
+    } finally {
+      delete proto.prepareAvatar;
+    }
+  });
+
+  it("rejects non-image inputs", () => {
+    assert.throws(() => createAvatarSchema.parse({ name: "x", imageUrl: "not a url" }));
+    assert.doesNotThrow(() => createAvatarSchema.parse({ name: "x", imageUrl: "data:image/png;base64,AAAA" }));
+  });
+});
+
+describe("videos", () => {
+  const base = {
+    title: "Test",
+    script: "Hello there. This is a short test script for the renderer.",
+    avatarId: STOCK_AVATARS[0].id,
+    voiceId: STOCK_VOICES[0].id,
+  };
+
+  it("applies schema defaults", () => {
+    const parsed = videoRequestSchema.parse(base);
+    assert.equal(parsed.aspect, "16:9");
+    assert.equal(parsed.captions, false);
+    assert.equal(parsed.speed, 1);
+    assert.deepEqual(parsed.background, { type: "color", value: "#f1f5f9" });
+  });
+
+  it("submits a render, records names, and reports processing", async () => {
+    const video = await createVideo(videoRequestSchema.parse(base));
+    assert.equal(video.status, "processing");
+    assert.equal(video.provider, "mock");
+    assert.equal(video.avatarName, STOCK_AVATARS[0].name);
+    assert.equal(video.voiceName, STOCK_VOICES[0].name);
+    assert.ok(video.providerJobId?.startsWith("mock_"));
+    const again = await getVideo(video.id);
+    assert.equal(again.status, "processing");
+  });
+
+  it("completes once the mock render window has elapsed", async () => {
+    const video = await createVideo(videoRequestSchema.parse(base));
+    // Rewind the embedded start time so the mock provider reports completion.
+    const [, , duration] = video.providerJobId!.split("_");
+    await globalThis.__avatarStudioStore!.put("video", { ...video, providerJobId: `mock_${Date.now() - 60_000}_${duration}` });
+    const done = await getVideo(video.id);
+    assert.equal(done.status, "completed");
+    assert.ok(done.videoUrl);
+    assert.equal(done.durationSec, Number(duration));
+  });
+
+  it("fails cleanly for an unknown avatar", async () => {
+    await assert.rejects(createVideo(videoRequestSchema.parse({ ...base, avatarId: "nope" })), /not found/);
+  });
+
+  it("lists newest first and deletes", async () => {
+    const a = await createVideo(videoRequestSchema.parse({ ...base, title: "A" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await createVideo(videoRequestSchema.parse({ ...base, title: "B" }));
+    const list = await listVideos();
+    assert.deepEqual(list.map((v) => v.id), [b.id, a.id]);
+    await deleteVideo(a.id);
+    assert.equal((await listVideos()).length, 1, "a trashed video leaves the library");
+    assert.deepEqual((await listVideos(LOCAL_OWNER, false, true)).map((v) => v.id), [a.id], "and shows in the trash");
+    await deleteVideo(a.id, LOCAL_OWNER, true);
+    await assert.rejects(deleteVideo(a.id), /not found/, "deleted for good");
+    await assert.rejects(deleteVideo(b.id, LOCAL_OWNER, true), /trash first/, "deleting for good is only offered from the trash");
+    assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0);
+  });
+
+  it("trashed videos hide from the public, restore, and are purged after the retention period", async () => {
+    const { TRASH_RETENTION_DAYS } = await import("../types");
+    const { restoreVideo, queryVideos, videoQuerySchema, retryVideo } = await import("../services/videos");
+    const { PUBLIC_ACCESS } = await import("../services");
+    const { getShareLock } = await import("../share-lock");
+    const v = await createVideo(videoRequestSchema.parse({ ...base, title: "Keep me" }));
+    const stored = await getVideo(v.id, undefined, false);
+    await globalThis.__avatarStudioStore!.put("video", { ...stored, status: "completed", views: 3 });
+    const before = await deleteVideo(v.id);
+    assert.deepEqual(before, { title: "Keep me", changed: true });
+    const trashed = await getVideo(v.id, undefined, false);
+    assert.ok(trashed.deletedAt, "the owner still reads it");
+    assert.equal(trashed.views, 3, "counters survive the move");
+    await assert.rejects(getVideo(v.id, PUBLIC_ACCESS, false), /not found/, "the public does not");
+    await assert.rejects(recordView(v.id), /not found/, "nor the beacons");
+    const firstDeletedAt = trashed.deletedAt;
+    await new Promise((r) => setTimeout(r, 3));
+    await deleteVideo(v.id);
+    assert.equal((await getVideo(v.id, undefined, false)).deletedAt, firstDeletedAt, "trashing twice keeps the first time");
+    await assert.rejects(deleteVideo(v.id, "someone-else"), /not found/);
+    await assert.rejects(restoreVideo(v.id, "someone-else"), /not found/);
+    // The library and the trash are two views of the same page, with the trash newest deletion first.
+    const library = await queryVideos(LOCAL_OWNER, videoQuerySchema.parse({}));
+    assert.equal(library.videos.some((x) => x.id === v.id), false);
+    assert.equal(library.trashed, 1);
+    const bin = await queryVideos(LOCAL_OWNER, videoQuerySchema.parse({ trash: "true" }));
+    assert.deepEqual(bin.videos.map((x) => x.id), [v.id]);
+    assert.equal(bin.trashed, 1);
+    // Restore puts it back, with its counters.
+    const back = await restoreVideo(v.id);
+    assert.equal("deletedAt" in back, false);
+    assert.equal(back.views, 3);
+    assert.equal((await restoreVideo(v.id)).updatedAt, back.updatedAt, "restoring a live video is a no-op");
+    await getVideo(v.id, PUBLIC_ACCESS, false);
+    // A failed render in the trash cannot be retried until it is restored.
+    await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), status: "failed", deletedAt: new Date().toISOString() });
+    await assert.rejects(retryVideo(v.id), /Restore the video/);
+    // Once the retention period has passed, listing the owner's videos removes it for good, side records included.
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret12" }));
+    const old = new Date(Date.now() - (TRASH_RETENTION_DAYS * 86_400_000 + 1000)).toISOString();
+    await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, undefined, false)), deletedAt: old });
+    await assert.rejects(getVideo(v.id, undefined, false), /not found/, "a due video reads as gone before any listing purges it");
+    await assert.rejects(restoreVideo(v.id), /not found/, "and cannot be restored");
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ title: "late" })), /not found/, "nor written");
+    const { bulkVideos: bulk } = await import("../services/videos");
+    assert.deepEqual(await bulk({ action: "restore", ids: [v.id] }), { done: 0, missing: [v.id] }, "bulk reports it instead of failing the request");
+    assert.equal((await listVideos(LOCAL_OWNER, false, true)).length, 0, "purged on the way out");
+    await assert.rejects(getVideo(v.id, undefined, false), /not found/);
+    assert.equal(await getShareLock(v.id), null, "the lock went with it");
+    // A write that raced a purge never brings the record back.
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ title: "ghost" })), /not found/);
+    assert.equal(await globalThis.__avatarStudioStore!.get("video", v.id), null);
+  });
+
+  it("purges a bounded batch per listing and keeps listing when a purge fails", async () => {
+    const { PURGE_PER_LIST, queryVideos, videoQuerySchema } = await import("../services/videos");
+    const { TRASH_RETENTION_DAYS } = await import("../types");
+    const old = new Date(Date.now() - (TRASH_RETENTION_DAYS + 1) * 86_400_000).toISOString();
+    const ids: string[] = [];
+    for (let i = 0; i < PURGE_PER_LIST + 2; i += 1) {
+      const v = await createVideo(videoRequestSchema.parse({ ...base, title: `Old ${i}` }), "purger");
+      await globalThis.__avatarStudioStore!.put("video", { ...(await getVideo(v.id, "purger", false)), deletedAt: old });
+      ids.push(v.id);
+    }
+    const keep = await createVideo(videoRequestSchema.parse({ ...base, title: "Keep" }), "purger");
+    const store = globalThis.__avatarStudioStore!;
+    const realRemove = store.remove.bind(store);
+    // Whichever due video the batch removes first fails once; the test must not depend on the store's list order.
+    let failedId: string | null = null;
+    store.remove = async (kind: Parameters<typeof realRemove>[0], id: string) => {
+      if (kind === "video" && ids.includes(id) && failedId === null) {
+        failedId = id;
+        throw new Error("store hiccup");
+      }
+      return realRemove(kind, id);
+    };
+    try {
+      const page = await queryVideos("purger", videoQuerySchema.parse({}));
+      assert.deepEqual(page.videos.map((v) => v.id), [keep.id], "the listing answers although one purge failed");
+      assert.equal(page.trashed, 0, "due videos are gone from the owner's point of view");
+      const left = (await store.list("video", "purger")).filter((v) => (v as { deletedAt?: string }).deletedAt).length;
+      assert.equal(left, 3, "a bounded batch went, the failed one and the overflow wait for the next listing");
+      assert.notEqual(await store.get("video", failedId!), null, "the failed one is still stored for the retry");
+      await queryVideos("purger", videoQuerySchema.parse({}));
+      assert.equal((await store.list("video", "purger")).filter((v) => (v as { deletedAt?: string }).deletedAt).length, 0, "the next listing finishes the job");
+    } finally {
+      store.remove = realRemove;
+    }
+  });
+
+  it("the library refreshes in-flight renders without a detail visit", async () => {
+    const video = await createVideo(videoRequestSchema.parse({ ...base, title: "Rendering" }));
+    const [, , duration] = video.providerJobId!.split("_");
+    await globalThis.__avatarStudioStore!.put("video", { ...video, providerJobId: `mock_${Date.now() - 60_000}_${duration}` });
+    assert.equal((await listVideos(LOCAL_OWNER, false)).find((v) => v.id === video.id)?.status, "processing", "refresh can be skipped");
+    const listed = (await listVideos()).find((v) => v.id === video.id)!;
+    assert.equal(listed.status, "completed");
+    assert.ok(listed.videoUrl);
+    // The change was stored, so the next read needs no provider call.
+    assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).status, "completed");
+  });
+
+  it("concurrent refreshes record a completion once and keep edits made meanwhile", async () => {
+    const { refreshStatus } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ ...base, title: "Race" }));
+    const [, , duration] = video.providerJobId!.split("_");
+    const stale = { ...video, providerJobId: `mock_${Date.now() - 60_000}_${duration}` };
+    // The library poll and the detail page both hold this snapshot; a folder move lands in between.
+    await globalThis.__avatarStudioStore!.put("video", { ...stale, folder: "Listings" });
+    const store = (await import("../store")).getStore();
+    const originalPut = store.put.bind(store);
+    let puts = 0;
+    store.put = async (kind, item) => {
+      if (kind === "video") puts += 1;
+      return originalPut(kind, item);
+    };
+    const [a, b] = await Promise.all([refreshStatus(stale), refreshStatus(stale)]);
+    store.put = originalPut;
+    assert.equal(a.status, "completed");
+    assert.equal(b.status, "completed");
+    assert.equal(puts, 1, "one refresher records (and announces) the transition");
+    assert.equal(a.folder, "Listings", "the write builds on the stored record, not the stale snapshot");
+    assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).folder, "Listings");
+    // A later refresher with the old snapshot sees the stored outcome and writes nothing.
+    assert.equal((await refreshStatus(stale)).status, "completed");
+  });
+
+  it("a render whose provider check fails sits out of the list refresh for a while", async () => {
+    const { isRefreshDeferred, listVideos: list } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ ...base, title: "Stuck" }));
+    await globalThis.__avatarStudioStore!.put("video", { ...video, providerJobId: "job-from-another-world" });
+    let checks = 0;
+    const proto = MockAvatarProvider.prototype;
+    const originalStatus = proto.getStatus;
+    proto.getStatus = async function (id: string) {
+      checks += 1;
+      return originalStatus.call(this, id);
+    };
+    try {
+      const first = (await list()).find((v) => v.id === video.id)!;
+      assert.equal(first.status, "processing", "a failed check does not flip the render");
+      assert.equal(checks, 1);
+      assert.equal(isRefreshDeferred(video.id), true);
+      await list();
+      assert.equal(checks, 1, "the next poll leaves it alone");
+      assert.equal(isRefreshDeferred(video.id, Date.now() + 61_000), false, "it is checked again later");
+    } finally {
+      proto.getStatus = originalStatus;
+    }
+  });
+
+  it("queries the library with filters, sorting, and a page size", async () => {
+    const { filterVideos, queryVideos, videoQuerySchema } = await import("../services/videos");
+    const a = await createVideo(videoRequestSchema.parse({ ...base, title: "Zulu tour" }));
+    await new Promise((r) => setTimeout(r, 5));
+    const b = await createVideo(videoRequestSchema.parse({ ...base, title: "Alpha intro", script: "Welcome to the quartz kitchen." }));
+    await new Promise((r) => setTimeout(r, 5));
+    const c = await createVideo(videoRequestSchema.parse({ ...base, title: "Mike update" }));
+    await globalThis.__avatarStudioStore!.put("video", { ...b, folder: "Listings", views: 3 });
+    await globalThis.__avatarStudioStore!.put("video", { ...c, status: "failed", providerJobId: undefined });
+
+    const query = (raw: Record<string, string>) => videoQuerySchema.parse(raw);
+    const page = await queryVideos(LOCAL_OWNER, query({ limit: "2" }));
+    assert.deepEqual(page.videos.map((v) => v.title), ["Mike update", "Alpha intro"], "newest first, two per page");
+    assert.equal(page.matched, 3);
+    assert.equal(page.total, 3);
+    assert.equal(page.hasMore, true);
+    assert.deepEqual(page.folders, ["Listings"]);
+    assert.equal(page.rendering, 2);
+    assert.equal((await queryVideos(LOCAL_OWNER, query({}))).hasMore, false, "no limit returns everything");
+
+    const all = await listVideos(LOCAL_OWNER, false);
+    assert.deepEqual(filterVideos(all, query({ q: "QUARTZ" })).map((v) => v.id), [b.id], "search covers the script, case-insensitively");
+    assert.deepEqual(filterVideos([{ ...a, description: "Lakeside listing tour" }, b, c], query({ q: "lakeside" })).map((v) => v.id), [a.id], "and the share-page description");
+    assert.deepEqual(filterVideos(all, query({ folder: "Listings" })).map((v) => v.id), [b.id]);
+    assert.deepEqual(filterVideos(all, query({ folder: "" })).map((v) => v.id), [c.id, a.id], "an empty folder means unfiled");
+    assert.deepEqual(filterVideos(all, query({ status: "failed" })).map((v) => v.id), [c.id]);
+    assert.deepEqual(filterVideos(all, query({ status: "processing" })).map((v) => v.id), [b.id, a.id]);
+    assert.deepEqual(filterVideos(all, query({ sort: "title" })).map((v) => v.title), ["Alpha intro", "Mike update", "Zulu tour"]);
+    assert.deepEqual(filterVideos(all, query({ sort: "oldest" })).map((v) => v.id), [a.id, b.id, c.id]);
+    // Share states, as the cards' badges say; one video is in exactly one of off, expired, scheduled, and live.
+    const day = 86_400_000;
+    const at = (ms: number) => new Date(Date.now() + ms).toISOString();
+    const shared = [
+      { ...a, shareDisabled: true, shareExpiresAt: at(-day) },
+      { ...b, shareExpiresAt: at(-day) },
+      { ...c, shareStartsAt: at(day), shareExpiresAt: at(2 * day) },
+      { ...a, id: "vid_soon", shareExpiresAt: at(3 * day), shareLocked: true },
+      { ...a, id: "vid_later", shareExpiresAt: at(30 * day) },
+      { ...a, id: "vid_open", shareStartsAt: undefined },
+    ];
+    const ids = (share: string) => filterVideos(shared, query({ share, sort: "title" })).map((v) => v.id).sort();
+    assert.deepEqual(ids("off"), [a.id], "switched off wins over expired");
+    assert.deepEqual(ids("expired"), [b.id]);
+    assert.deepEqual(ids("scheduled"), [c.id], "not live yet, though it expires within the week");
+    assert.deepEqual(ids("expiring"), ["vid_soon"], "live and within the week, password or not");
+    assert.deepEqual(ids("live"), ["vid_later", "vid_open", "vid_soon"].sort());
+    assert.equal(filterVideos(shared, query({ share: "all" })).length, shared.length);
+    // A trashed video's link answers "not found", so it is in no share state; other filters still narrow.
+    const trashedSoon = { ...a, id: "vid_trashed", shareExpiresAt: at(3 * day), deletedAt: at(-1) };
+    for (const share of ["live", "expiring", "off", "expired", "scheduled"]) {
+      assert.equal(filterVideos([trashedSoon], query({ share })).length, 0, `trashed is not ${share}`);
+    }
+    assert.deepEqual(filterVideos(shared, query({ share: "live", q: "zulu" })).map((v) => v.id).sort(), ["vid_later", "vid_open", "vid_soon"].sort(), "with a search");
+    assert.deepEqual(filterVideos(shared, query({ share: "expired", status: "failed" })).map((v) => v.id), [], "with a status");
+    assert.equal(videoQuerySchema.safeParse({ share: "public" }).success, false);
+    assert.deepEqual(filterVideos(all, query({ sort: "views" }))[0].id, b.id);
+    assert.throws(() => query({ limit: "0" }));
+    assert.throws(() => query({ sort: "random" }));
+  });
+
+  it("estimates duration from script length and speed", async () => {
+    const provider = new MockAvatarProvider();
+    const words = Array.from({ length: 50 }, () => "word").join(" ");
+    const slow = await provider.createVideo({ ...base, script: words, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 0.5 });
+    const fast = await provider.createVideo({ ...base, script: words, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1.5 });
+    assert.equal(Number(slow.providerJobId.split("_")[2]), 40);
+    assert.equal(Number(fast.providerJobId.split("_")[2]), 13);
+  });
+});
+
+describe("translations and scripts", () => {
+  it("creates a translation job", async () => {
+    const t = await createTranslation({ title: "Dub", sourceVideoUrl: "https://example.com/v.mp4", targetLanguage: "Spanish" });
+    assert.equal(t.status, "processing");
+    assert.equal(t.targetLanguage, "Spanish");
+  });
+
+  it("validates script writer input", () => {
+    const parsed = scriptSchema.parse({ topic: "welcoming tenants" });
+    assert.equal(parsed.tone, "friendly");
+    assert.equal(parsed.lengthSec, 45);
+    assert.throws(() => scriptSchema.parse({ topic: "hi", lengthSec: 5 }));
+  });
+});
+
+describe("templates", () => {
+  it("have unique ids and non-empty scripts", () => {
+    const ids = new Set(SCRIPT_TEMPLATES.map((t) => t.id));
+    assert.equal(ids.size, SCRIPT_TEMPLATES.length);
+    assert.ok(SCRIPT_TEMPLATES.every((t) => t.script.trim().length > 40));
+    assert.equal(findTemplate("listing-walkthrough")?.aspect, "9:16");
+    assert.equal(findTemplate("missing"), undefined);
+  });
+});
+
+describe("captions", () => {
+  it("times cues proportionally and covers the full duration", async () => {
+    const { buildCues, buildSrt, formatSrtTime } = await import("../captions");
+    const cues = buildCues("One two three. Four five six seven eight nine.", 9);
+    assert.equal(cues.length, 2);
+    assert.equal(cues[0].startMs, 0);
+    assert.equal(cues[0].endMs, 3000);
+    assert.equal(cues[1].endMs, 9000);
+    assert.equal(formatSrtTime(3_723_456), "01:02:03,456");
+    const srt = buildSrt("Hello there. Welcome!", 4);
+    assert.match(srt, /^1\n00:00:00,000 --> 00:00:0\d,\d{3}\nHello there\.\n\n2\n/);
+  });
+
+  it("puts cues at the top of the frame when the video asks for it", async () => {
+    const { buildVtt } = await import("../captions");
+    assert.match(buildVtt("Hello there. Welcome!", 4, "top"), /^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:0\d\.\d{3} line:5%\nHello there\.\n/);
+    assert.doesNotMatch(buildVtt("Hello there.", 4), /line:/, "the bottom is the player's default and needs no setting");
+    assert.doesNotMatch(buildVtt("Hello there.", 4, "bottom"), /line:/);
+    const { captionStyleSchema } = await import("../services/videos");
+    assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large" }), { position: "top", size: "large" });
+    assert.throws(() => captionStyleSchema.parse({ position: "middle", size: "large" }));
+  });
+
+  it("takes a caption look, storing the classic one as absent", async () => {
+    const { captionStyleSchema, videoRequestSchema } = await import("../services/videos");
+    const { isDefaultCaptionStyle } = await import("../types");
+    assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large", look: "yellow" }), { position: "top", size: "large", look: "yellow" });
+    assert.deepEqual(captionStyleSchema.parse({ position: "top", size: "large", look: "classic" }), { position: "top", size: "large" });
+    assert.throws(() => captionStyleSchema.parse({ position: "top", size: "large", look: "neon" }));
+    assert.equal(isDefaultCaptionStyle({ position: "bottom", size: "medium", look: "classic" }), true);
+    assert.equal(isDefaultCaptionStyle({ position: "bottom", size: "medium", look: "bold" }), false, "a look alone is a style worth keeping");
+    // A look on otherwise default placement survives into the stored video, so HeyGen leaves its captions to the track.
+    const v = await createVideo(videoRequestSchema.parse({ title: "Look", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, captions: true, captionStyle: { position: "bottom", size: "medium", look: "minimal" } }));
+    assert.deepEqual(v.captionStyle, { position: "bottom", size: "medium", look: "minimal" });
+    const plain = await createVideo(videoRequestSchema.parse({ title: "Plain", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, captions: true, captionStyle: { position: "bottom", size: "medium", look: "classic" } }));
+    assert.equal(plain.captionStyle, undefined);
+  });
+
+  it("keeps the share page's track off only for a HeyGen file that carries captions already", async () => {
+    const { captionsBurnedIn, heygenBurnsCaptions } = await import("../captions");
+    assert.equal(heygenBurnsCaptions({ captions: true }), true);
+    assert.equal(heygenBurnsCaptions({ captions: true, captionStyle: { position: "top", size: "large" } }), false);
+    assert.equal(heygenBurnsCaptions({ captions: false }), false);
+    assert.equal(captionsBurnedIn({ captions: true, provider: "heygen" }), true, "default look on HeyGen: burned in, track waits in the CC menu");
+    assert.equal(captionsBurnedIn({ captions: true, provider: "heygen", captionStyle: { position: "top", size: "large" } }), false);
+    assert.equal(captionsBurnedIn({ captions: true, provider: "mock" }), false, "other renderers never burn captions in");
+    assert.equal(captionsBurnedIn({ captions: true, provider: "did" }), false);
+  });
+
+  it("stores a zero pitch as absent and keeps a shift through a retry and a template", async () => {
+    const { createTemplate, templateInputSchema: tplSchema } = await import("../services/templates");
+    const req = { title: "P", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const flat = await createVideo({ ...req, pitch: 0 });
+    assert.equal("pitch" in flat, false);
+    const high = await createVideo({ ...req, pitch: 15 });
+    assert.equal(high.pitch, 15);
+    const tpl = await createTemplate(tplSchema.parse({ fromVideoId: high.id }));
+    assert.equal(tpl.pitch, 15);
+    assert.equal("pitch" in (await createTemplate(tplSchema.parse({ fromVideoId: flat.id }))), false);
+  });
+
+  it("keeps a voice emotion through a retry and a template, in HeyGen's own spelling only", async () => {
+    const { createTemplate, templateInputSchema: tplSchema } = await import("../services/templates");
+    const { retryVideo } = await import("../services");
+    const { getStore } = await import("../store");
+    const req = { title: "E", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const plain = await createVideo(req);
+    assert.equal("emotion" in plain, false, "no emotion is the voice's natural delivery");
+    const bright = await createVideo(videoRequestSchema.parse({ ...req, emotion: "Excited" }));
+    assert.equal(bright.emotion, "Excited");
+    assert.equal((await createTemplate(tplSchema.parse({ fromVideoId: bright.id }))).emotion, "Excited");
+    assert.equal("emotion" in (await createTemplate(tplSchema.parse({ fromVideoId: plain.id }))), false);
+    await getStore().put("video", { ...bright, id: "vid_emotion_failed", status: "failed", providerJobId: undefined });
+    assert.equal((await retryVideo("vid_emotion_failed")).emotion, "Excited");
+    for (const bad of ["excited", "Angry", ""]) assert.equal(videoRequestSchema.safeParse({ ...req, emotion: bad }).success, false, bad);
+  });
+
+  it("stores the default caption style as absent whichever client spelled it out", async () => {
+    const req = { title: "C", script: "Hi.", avatarId: "stock_1", voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: true, speed: 1 };
+    const plain = await createVideo({ ...req, captionStyle: { position: "bottom", size: "medium" } });
+    assert.equal("captionStyle" in plain, false);
+    assert.equal((await getVideo(plain.id)).captionStyle, undefined);
+    const styled = await createVideo({ ...req, captionStyle: { position: "bottom", size: "large" } });
+    assert.deepEqual(styled.captionStyle, { position: "bottom", size: "large" });
+    // A typeface of its own is a style of its own; the player's default one is stored as absent, like the classic look.
+    const parse = (style: unknown) => videoRequestSchema.parse({ ...req, captionStyle: style }).captionStyle;
+    assert.deepEqual(parse({ position: "bottom", size: "medium", look: "classic", font: "sans" }), { position: "bottom", size: "medium" });
+    assert.equal("captionStyle" in (await createVideo(videoRequestSchema.parse({ ...req, captionStyle: { position: "bottom", size: "medium", font: "sans" } }))), false);
+    const serif = await createVideo(videoRequestSchema.parse({ ...req, captionStyle: { position: "bottom", size: "medium", font: "serif" } }));
+    assert.deepEqual(serif.captionStyle, { position: "bottom", size: "medium", font: "serif" });
+    assert.equal(videoRequestSchema.safeParse({ ...req, captionStyle: { position: "bottom", size: "medium", font: "comic" } }).success, false);
+  });
+
+  it("returns nothing for empty input", async () => {
+    const { buildCues } = await import("../captions");
+    assert.deepEqual(buildCues("   ", 10), []);
+    assert.deepEqual(buildCues("Hi.", 0), []);
+    // Scripts without spaces split at their own sentence and clause marks, and long runs by character.
+    const ja = buildCues("今日は新しい家をご紹介します。広いリビングと、明るいキッチンがあります。ぜひご覧ください！", 12);
+    assert.deepEqual(
+      ja.map((c) => c.text),
+      ["今日は新しい家をご紹介します。", "広いリビングと、明るいキッチンがあります。", "ぜひご覧ください！"],
+    );
+    assert.equal(ja.at(-1)!.endMs, 12_000);
+    assert.ok(ja[1].endMs - ja[1].startMs > ja[2].endMs - ja[2].startMs, "a longer sentence gets more time");
+    const run = buildCues("あ".repeat(100), 10);
+    assert.deepEqual(run.map((c) => Array.from(c.text).length), [40, 40, 20]);
+    // Thai marks neither sentences nor clauses with punctuation; its phrases are spaced. Cues break at those spaces and stay short.
+    const thai = "วันนี้เราจะพาคุณชมบ้านหลังใหม่ ที่มีห้องนั่งเล่นกว้างขวาง และห้องครัวที่สว่างสดใส เชิญชมได้เลยครับ";
+    const th = buildCues(thai, 10).map((c) => c.text);
+    assert.ok(th.length > 1, "a Thai script longer than a cue is split");
+    assert.ok(th.every((t) => Array.from(t).length <= 40), th.join(" | "));
+    assert.equal(th.join(" "), thai, "cut only at spaces, so no word is broken");
+    // One space (around a Latin name) does not turn a Japanese sentence into a 90-character cue.
+    const mixed = buildCues("今日は Avatar Studio の新しい家をご紹介します、広いリビングと明るいキッチンと静かな書斎があります", 10).map((c) => c.text);
+    assert.ok(mixed.length > 1 && mixed.every((t) => Array.from(t).length <= 40), mixed.join(" | "));
+    // Clauses of a long Japanese sentence are not joined back past the 40-character cue.
+    const clauses = buildCues(`${"あ".repeat(35)}，${"い".repeat(35)}。`, 10).map((c) => c.text);
+    assert.deepEqual(clauses, [`${"あ".repeat(35)}，`, `${"い".repeat(35)}。`]);
+    // Mixed text is judged by what it carries: a Latin run with a long unspaced tail is cut so the tail fits too.
+    const tail = buildCues(`${"ab ".repeat(25)}${"あ".repeat(45)}`, 10).map((c) => c.text);
+    assert.ok(tail.every((t) => Array.from(t).filter((c) => /\p{Script=Hiragana}/u.test(c)).length <= 40), tail.join(" | "));
+    assert.equal(buildCues(`${"あ".repeat(44)} ${"b".repeat(46)}`, 10).length, 2, "44 dense characters plus 46 Latin ones do not fit one cue");
+    // A full stop that would be left over on its own stays with its cue.
+    assert.deepEqual(buildCues(`${"あ".repeat(40)}。`, 10).map((c) => c.text), [`${"あ".repeat(40)}。`]);
+    // A closing bracket or quote stays with the sentence it closes.
+    assert.deepEqual(buildCues("「はい。」次は行きましょう。", 4).map((c) => c.text), ["「はい。」", "次は行きましょう。"]);
+    assert.deepEqual(buildCues('She said "Go." Then she left.', 4).map((c) => c.text), ['She said "Go."', "Then she left."]);
+  });
+});
+
+describe("auth", () => {
+  it("is open without a password and validates tokens with one", async () => {
+    const { authEnabled, isValidSession, sessionToken, timingSafeEqual } = await import("../auth");
+    delete process.env.STUDIO_PASSWORD;
+    assert.equal(authEnabled(), false);
+    assert.equal(await isValidSession(undefined), true);
+    process.env.STUDIO_PASSWORD = "hunter2";
+    assert.equal(authEnabled(), true);
+    assert.equal(await isValidSession(undefined), false);
+    assert.equal(await isValidSession("wrong"), false);
+    assert.equal(await isValidSession(await sessionToken("hunter2")), true);
+    assert.notEqual(await sessionToken("hunter2"), await sessionToken("hunter3"));
+    assert.equal(timingSafeEqual("abc", "abd"), false);
+    delete process.env.STUDIO_PASSWORD;
+  });
+});
+
+describe("scenes", () => {
+  it("derives the full script and background from scenes", () => {
+    const parsed = videoRequestSchema.parse({
+      title: "Multi",
+      avatarId: "stock_1",
+      voiceId: "stock_voice_1",
+      scenes: [
+        { script: "Scene one.", background: { type: "color", value: "#000000" } },
+        { script: "Scene two.", background: { type: "color", value: "#ffffff" } },
+      ],
+    });
+    assert.equal(parsed.script, "Scene one.\n\nScene two.");
+    assert.deepEqual(parsed.background, { type: "color", value: "#000000" });
+    assert.equal(parsed.scenes?.length, 2);
+  });
+
+  it("scenes can name their own presenter and voice", async () => {
+    const { resolveRenderContext } = await import("../services/videos");
+    const req = videoRequestSchema.parse({
+      title: "Two presenters",
+      avatarId: STOCK_AVATARS[0].id,
+      voiceId: STOCK_VOICES[0].id,
+      scenes: [
+        { script: "Ava opens.", background: { type: "color", value: "#000000" } },
+        { script: "Marcus closes.", background: { type: "color", value: "#ffffff" }, avatarId: STOCK_AVATARS[1].id, voiceId: STOCK_VOICES[1].id },
+      ],
+    });
+    const ctx = await resolveRenderContext(req, LOCAL_OWNER);
+    assert.equal(ctx.avatar.id, STOCK_AVATARS[0].id);
+    assert.deepEqual(Object.keys(ctx.cast.avatars).sort(), [STOCK_AVATARS[0].id, STOCK_AVATARS[1].id].sort());
+    assert.deepEqual(Object.keys(ctx.cast.voices).sort(), [STOCK_VOICES[0].id, STOCK_VOICES[1].id].sort());
+    const video = await createVideo(req);
+    assert.equal(video.status, "processing");
+    assert.equal(video.scenes?.[0].avatarName, undefined, "a scene on the video's presenter carries no name of its own");
+    assert.equal(video.scenes?.[1].avatarName, STOCK_AVATARS[1].name);
+    assert.equal(video.scenes?.[1].voiceName, STOCK_VOICES[1].name);
+    assert.equal(video.avatarName, STOCK_AVATARS[0].name);
+    await assert.rejects(
+      resolveRenderContext({ ...req, scenes: [{ ...req.scenes![1], voiceId: "ghost" }] }, LOCAL_OWNER),
+      /Voice ghost is not available/,
+    );
+    await assert.rejects(resolveRenderContext({ ...req, scenes: [{ ...req.scenes![1], avatarId: "ghost" }] }, LOCAL_OWNER), /not found/);
+  });
+
+  it("HeyGen renders one studio scene per scene with that scene's presenter; D-ID refuses a second presenter", async () => {
+    const { HeyGenAvatarProvider } = await import("../providers/avatar/heygen");
+    const { DidAvatarProvider } = await import("../providers/avatar/did");
+    const heygen = new HeyGenAvatarProvider("key");
+    type Input = { avatar_id: string; voice_id?: string; voice_settings?: { speed: number; pitch?: number }; background: unknown } & Record<string, unknown>;
+    type Body = { type: string; aspect_ratio: string; resolution: string; caption?: unknown; scenes: Array<{ type: string; input: Input }> };
+    let sent: Body | null = null;
+    (heygen as unknown as { client: { generateVideo: (b: unknown) => Promise<{ video_id: string }> } }).client.generateVideo = async (b) => {
+      sent = b as Body;
+      return { video_id: "hg_1" };
+    };
+    const inputs = () => sent!.scenes.map((sc) => sc.input);
+    const ava = { ...STOCK_AVATARS[0], id: "ava_hg", provider: "heygen", source: "provider" as const };
+    const marcus = { ...STOCK_AVATARS[1], id: "marcus_hg", provider: "heygen", source: "provider" as const };
+    const emma = { ...STOCK_VOICES[0], id: "emma_hg", provider: "heygen" };
+    const james = { ...STOCK_VOICES[1], id: "james_hg", provider: "heygen" };
+    const req = videoRequestSchema.parse({
+      title: "Two presenters",
+      avatarId: ava.id,
+      voiceId: emma.id,
+      aspect: "9:16",
+      resolution: "1080p",
+      scenes: [
+        { script: "Ava opens.", background: { type: "color", value: "#000000" } },
+        { script: "Marcus closes.", background: { type: "color", value: "#ffffff" }, avatarId: marcus.id, voiceId: james.id },
+      ],
+    });
+    const cast = { avatars: { [ava.id]: ava, [marcus.id]: marcus }, voices: { [emma.id]: emma, [james.id]: james } };
+    assert.equal((await heygen.createVideo(req, ava, emma, cast)).providerJobId, "hg_1");
+    assert.deepEqual([sent!.type, sent!.aspect_ratio, sent!.resolution], ["studio", "9:16", "1080p"]);
+    assert.deepEqual(sent!.scenes.map((sc) => sc.type), ["avatar_video", "avatar_video"]);
+    assert.deepEqual(inputs().map((i) => [i.type, i.avatar_id, i.voice_id, i.script]), [["avatar", ava.id, emma.id, "Ava opens."], ["avatar", marcus.id, james.id, "Marcus closes."]]);
+    assert.deepEqual(inputs().map((i) => i.background), [{ type: "color", color: "#000000" }, { type: "color", color: "#ffffff" }]);
+    // Burned-in captions only when the video has no caption style of its own; the styled look comes from the subtitle track.
+    await heygen.createVideo({ ...req, captions: true }, ava, emma, cast);
+    assert.deepEqual(sent!.caption, { file_format: "srt", style: "default" });
+    await heygen.createVideo({ ...req, captions: true, captionStyle: { position: "top", size: "large" } }, ava, emma, cast);
+    assert.equal("caption" in sent!, false, "a styled caption is not burned in");
+    // A pitch shift reaches the voice settings; none means the field is left out.
+    await heygen.createVideo({ ...req, pitch: 20 }, ava, emma, cast);
+    assert.deepEqual(inputs()[0].voice_settings, { speed: 1, pitch: 20 });
+    await heygen.createVideo(req, ava, emma, cast);
+    assert.deepEqual(inputs()[0].voice_settings, { speed: 1 });
+    assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 51 }).success, false);
+    assert.equal(videoRequestSchema.safeParse({ ...req, pitch: 2.5 }).success, false);
+    // HeyGen's v3 studio takes no emotion, layout, or framing (its schema refuses unknown fields), so none is sent.
+    const framed = videoRequestSchema.parse({ ...req, emotion: "Soothing", scenes: [{ ...req.scenes![0], layout: { scale: 1.2, x: 0.25, y: -0.1, framing: "circle" } }, req.scenes![1]] });
+    await heygen.createVideo(framed, ava, emma, cast);
+    const allowed = ["type", "avatar_id", "script", "voice_id", "voice_settings", "audio_asset_id", "background"];
+    for (const i of inputs()) assert.deepEqual(Object.keys(i).filter((k) => !allowed.includes(k)), [], "only fields the v3 studio input takes");
+    assert.deepEqual(Object.keys(sent!).filter((k) => !["type", "title", "aspect_ratio", "resolution", "caption", "callback_url", "scenes"].includes(k)), []);
+    // The voice list is HeyGen's, with its sample clip as the preview.
+    const { HeyGenTtsProvider } = await import("../providers/tts/heygen");
+    const tts = new HeyGenTtsProvider("key");
+    (tts as unknown as { client: { listVoices: () => Promise<unknown> } }).client.listVoices = async () => [
+      { voice_id: "a", name: "A", language: "English", gender: "Female", preview_audio_url: "https://cdn.example.com/a.mp3" },
+      { voice_id: "b", name: "B" },
+    ];
+    assert.deepEqual(await tts.listVoices(), [
+      { id: "a", name: "A", provider: "heygen", language: "English", gender: "female", previewUrl: "https://cdn.example.com/a.mp3" },
+      { id: "b", name: "B", provider: "heygen", language: undefined, gender: undefined, previewUrl: undefined },
+    ]);
+    // A video background loops behind the presenter; an image is passed by URL; both fill the frame.
+    const withVideo = videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "https://cdn.example.com/loop.mp4" } }, { ...req.scenes![1], background: { type: "image", value: "https://cdn.example.com/bg.jpg", fit: "contain" } }] });
+    await heygen.createVideo(withVideo, ava, emma, cast);
+    assert.deepEqual(inputs().map((i) => i.background), [
+      { type: "video", source: { type: "url", url: "https://cdn.example.com/loop.mp4" } },
+      { type: "image", source: { type: "url", url: "https://cdn.example.com/bg.jpg" } },
+    ]);
+    assert.equal(videoRequestSchema.safeParse({ ...req, scenes: [{ ...req.scenes![0], background: { type: "video", value: "loop.mp4" } }] }).success, false, "a video background must be a URL");
+    // The layout is still kept with the video for the editor, bounded, and an explicit default is stored as absent.
+    assert.throws(() => videoRequestSchema.parse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 2, x: 0, y: 0 } }] }), "the scale is bounded");
+    const plain = await createVideo(videoRequestSchema.parse({ title: "Plain", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0 } }] }));
+    assert.equal("layout" in plain.scenes![0], false, "an explicit default layout is stored as absent");
+    const photo = { ...ava, source: "custom" as const, providerAssetIds: { heygen: "tp_1" } };
+    assert.deepEqual([framingFor("closeUp", photo), framingFor("circle", photo), framingFor("closeUp", ava), framingFor(undefined, ava)], ["full", "circle", "closeUp", "full"]);
+    assert.equal(isPhotoAvatar({ tags: ["photo avatar"] }), true);
+    assert.equal((await createVideo(videoRequestSchema.parse({ title: "Full", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "full" } }] }))).scenes![0].layout, undefined);
+    const circled = await createVideo(videoRequestSchema.parse({ title: "Circle", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" }, layout: { scale: 1, x: 0, y: 0, framing: "circle" } }] }));
+    assert.deepEqual(circled.scenes![0].layout, { scale: 1, x: 0, y: 0, framing: "circle" });
+    assert.equal(videoRequestSchema.safeParse({ ...req, scenes: [{ ...req.scenes![0], layout: { scale: 1, x: 0, y: 0, framing: "square" } }] }).success, false, "only the three framings");
+    // A scene voice from another provider is refused like the video's voice would be.
+    await assert.rejects(heygen.createVideo(req, ava, emma, { ...cast, voices: { ...cast.voices, [james.id]: { ...james, provider: "elevenlabs" } } }), /HeyGen voice/);
+    await assert.rejects(new DidAvatarProvider("key").createVideo(req, ava, emma), /one presenter and one voice per video/);
+  });
+
+  it("requires a script when no scenes are given", () => {
+    assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v" }), /Script is required/);
+    assert.throws(() => videoRequestSchema.parse({ title: "x", avatarId: "a", voiceId: "v", scenes: [] }));
+  });
+});
+
+describe("share call to action", () => {
+  it("stores a labelled http(s) link and clears it with null", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ title: "CTA", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const set = await updateVideo(video.id, videoPatchSchema.parse({ shareCta: { label: "  Book a showing ", url: "https://example.com/book " } }));
+    assert.deepEqual(set.shareCta, { label: "Book a showing", url: "https://example.com/book" });
+    assert.equal((await getVideo(video.id, LOCAL_OWNER, false)).shareCta?.label, "Book a showing");
+    const cleared = await updateVideo(video.id, videoPatchSchema.parse({ shareCta: null }));
+    assert.equal(cleared.shareCta, undefined);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go", url: "javascript:alert(1)" } }), /http/);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go", url: "example.com" } }), /http/);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "x".repeat(41), url: "https://example.com" } }), /40/);
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "", url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "   ", url: "https://example.com" } }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: {} }));
+    assert.throws(() => videoPatchSchema.parse({ shareCta: { label: "Go" } }));
+    assert.throws(() => videoPatchSchema.parse({}), /Nothing to update/);
+  });
+
+  it("survives patches that do not mention it", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const video = await createVideo(videoRequestSchema.parse({ title: "CTA", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    await updateVideo(video.id, videoPatchSchema.parse({ shareCta: { label: "Book", url: "https://example.com" } }));
+    const renamed = await updateVideo(video.id, videoPatchSchema.parse({ title: "Renamed", shareDownload: true }));
+    assert.deepEqual(renamed.shareCta, { label: "Book", url: "https://example.com" });
+  });
+});
+
+describe("translated subtitles", () => {
+  it("keeps up to five translated tracks per video, served by language", async () => {
+    const { addSubtitles, removeSubtitles, subtitlesFor, subtitleSchema, MAX_SUBTITLE_LANGUAGES } = await import("../services/videos");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Sub", script: "Welcome home.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-sub");
+    const withEs = await addSubtitles(v.id, "Spanish", "u-sub");
+    assert.deepEqual(withEs.subtitles, { Spanish: "[Spanish] Welcome home." });
+    assert.deepEqual(subtitlesFor(withEs, "spanish"), { language: "Spanish", text: "[Spanish] Welcome home." }, "matched without regard to case");
+    assert.equal(subtitlesFor(withEs, "French"), undefined);
+    const again = await addSubtitles(v.id, "spanish", "u-sub");
+    assert.deepEqual(Object.keys(again.subtitles ?? {}), ["spanish"], "asking again replaces the track under the new spelling");
+    await assert.rejects(addSubtitles(v.id, "Spanish", "u-else"), /not found/);
+    for (const l of ["French", "German", "Italian", "Dutch"]) await addSubtitles(v.id, l, "u-sub");
+    await assert.rejects(addSubtitles(v.id, "Polish", "u-sub"), /At most/);
+    assert.equal(Object.keys((await addSubtitles(v.id, "Dutch", "u-sub")).subtitles ?? {}).length, MAX_SUBTITLE_LANGUAGES, "a known language can still be refreshed at the cap");
+    const fewer = await removeSubtitles(v.id, "FRENCH", "u-sub");
+    assert.equal("French" in (fewer.subtitles ?? {}), false);
+    await assert.rejects(removeSubtitles(v.id, "French", "u-sub"), /No French subtitles/);
+    assert.throws(() => subtitleSchema.parse({ language: "x" }));
+    assert.throws(() => subtitleSchema.parse({ language: "__proto__" }), "an object key is not a language");
+    assert.throws(() => subtitleSchema.parse({ language: "12" }));
+    assert.equal(subtitleSchema.parse({ language: " Portuguese (Brazil) " }).language, "Portuguese (Brazil)");
+    // Edits and counters that land during the translation are kept.
+    const { getStore } = await import("../store");
+    const during = async (script: string, language: string) => {
+      const stored = (await getStore().get<Video>("video", v.id))!;
+      await getStore().put("video", { ...stored, title: "Renamed meanwhile", views: 7 });
+      return `[${language}] ${script}`;
+    };
+    const polish = await addSubtitles(v.id, "Polish", "u-sub", during);
+    assert.equal(polish.title, "Renamed meanwhile");
+    assert.equal(polish.views, 7, "counters written during the translation stay");
+    assert.equal(polish.subtitles?.Polish, "[Polish] Welcome home.");
+    for (const l of Object.keys((await getVideo(v.id, "u-sub", false)).subtitles ?? {})) await removeSubtitles(v.id, l, "u-sub");
+    assert.equal("subtitles" in (await getVideo(v.id, "u-sub", false)), false, "the last removal clears the field");
+    // A trashed video takes no new translation; the library listing leaves the text off its cards.
+    const { queryVideos, videoQuerySchema } = await import("../services/videos");
+    await addSubtitles(v.id, "Spanish", "u-sub");
+    const listed = (await queryVideos("u-sub", videoQuerySchema.parse({}))).videos.find((x) => x.id === v.id)!;
+    assert.equal("subtitles" in listed, false);
+    await deleteVideo(v.id, "u-sub");
+    await assert.rejects(addSubtitles(v.id, "French", "u-sub"), /Restore the video/);
+    // Deleting reports whether anything changed, so the route can skip a feed line for a trash that was already done.
+    assert.deepEqual(await deleteVideo(v.id, "u-sub"), { title: "Renamed meanwhile", changed: false });
+    assert.deepEqual(await deleteVideo(v.id, "u-sub", true), { title: "Renamed meanwhile", changed: true });
+    // Two trashes of one live video that overlap: both read it live, but only the one that writes under the lock did the change.
+    const w = await createVideo(videoRequestSchema.parse({ title: "Twice", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-sub");
+    const both = await Promise.all([deleteVideo(w.id, "u-sub"), deleteVideo(w.id, "u-sub")]);
+    assert.deepEqual(both.map((r) => r.changed).sort(), [false, true]);
+  });
+
+  it("decides the language and the cap on the record as stored, so overlapping adds cannot double a track or pass the cap", async () => {
+    const { addSubtitles, MAX_SUBTITLE_LANGUAGES } = await import("../services/videos");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Race", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-race");
+    // Both translations finish only once both requests have passed their early checks.
+    const gate = () => {
+      let waiting = 0;
+      let open!: () => void;
+      const opened = new Promise<void>((r) => (open = r));
+      return async (script: string, language: string) => {
+        if (++waiting === 2) open();
+        await opened;
+        return `[${language}] ${script}`;
+      };
+    };
+    const both = gate();
+    const results = await Promise.all([addSubtitles(v.id, "Spanish", "u-race", both), addSubtitles(v.id, "spanish", "u-race", both)]);
+    // The first writer stores "Spanish"; the second sees it under the lock and replaces it rather than adding "spanish" beside it.
+    assert.deepEqual(results.map((r) => Object.keys(r.subtitles ?? {}).length), [1, 1], "one track for one language, whichever lands last");
+    assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, 1);
+    for (const l of ["French", "German", "Italian"]) await addSubtitles(v.id, l, "u-race");
+    const two = gate();
+    const settled = await Promise.allSettled([addSubtitles(v.id, "Dutch", "u-race", two), addSubtitles(v.id, "Polish", "u-race", two)]);
+    assert.deepEqual(settled.map((r) => r.status).sort(), ["fulfilled", "rejected"], "the cap holds against overlapping adds");
+    const rejected = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    assert.match(String(rejected.reason), /At most/);
+    assert.equal(Object.keys((await getVideo(v.id, "u-race", false)).subtitles ?? {}).length, MAX_SUBTITLE_LANGUAGES);
+  });
+
+  it("an owner edit in flight keeps a track added, a track removed, and a trash that landed meanwhile", async () => {
+    const { addSubtitles, removeSubtitles, restoreVideo } = await import("../services/videos");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Edit race", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-edit");
+    const quick = async (script: string, language: string) => `[${language}] ${script}`;
+    // The password edit reads the record, then hashes (scrypt, whose callback is a macrotask) before it
+    // writes; the translation, all microtasks on the in-memory store, lands in between.
+    const edit = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret12" }), "u-edit");
+    await addSubtitles(v.id, "Spanish", "u-edit", quick);
+    const edited = await edit;
+    assert.equal(edited.shareLocked, true);
+    assert.equal(edited.subtitles?.Spanish, "[Spanish] Hello.", "the edit does not write its pre-translation copy over the new track");
+    await deleteVideo(v.id, "u-edit");
+    const restored = await restoreVideo(v.id, "u-edit");
+    assert.equal(restored.subtitles?.Spanish, "[Spanish] Hello.");
+    // A track removed meanwhile does not come back with the edit either.
+    const edit2 = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "secret34" }), "u-edit");
+    await removeSubtitles(v.id, "Spanish", "u-edit");
+    assert.equal("subtitles" in (await edit2), false);
+    // Nor does the edit pull a video back out of the trash it was moved to meanwhile.
+    const edit3 = updateVideo(v.id, videoPatchSchema.parse({ title: "Renamed", sharePassword: "secret56" }), "u-edit");
+    await deleteVideo(v.id, "u-edit");
+    const trashed = await edit3;
+    assert.equal(trashed.title, "Renamed");
+    assert.ok(trashed.deletedAt, "the trash mark set meanwhile stays");
+  });
+
+  it("removes a track stored under any key name, not only one the add route would accept today", async () => {
+    const { removeSubtitles, removeSubtitleSchema } = await import("../services/videos");
+    const { getStore } = await import("../store");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Legacy", script: "Hello.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "u-legacy");
+    await getStore().put("video", { ...(await getStore().get<Video>("video", v.id))!, subtitles: { pt_BR: "Olá." } });
+    assert.equal(removeSubtitleSchema.parse({ language: " pt_BR " }).language, "pt_BR", "the remove route takes the stored key as it is");
+    assert.throws(() => removeSubtitleSchema.parse({ language: "" }));
+    assert.equal("subtitles" in (await removeSubtitles(v.id, "pt_br", "u-legacy")), false);
+  });
+});
+
+describe("activity feed", () => {
+  it("says when each person last did something, from every kept event", async () => {
+    const { recordActivity, lastActiveByActor, activityQuerySchema } = await import("../services/activity");
+    const first = await recordActivity("ws_last", { id: "u-dan" }, "video.created", { subject: "One" });
+    const ann = await recordActivity("ws_last", { id: "u-ann" }, "member.joined");
+    const latest = await recordActivity("ws_last", { id: "u-dan" }, "video.trashed", { subject: "One" });
+    await recordActivity("ws_last_other", { id: "u-zed" }, "brand.removed");
+    const last = await lastActiveByActor("ws_last");
+    assert.deepEqual(last, { "u-dan": latest!.createdAt, "u-ann": ann!.createdAt }, "the newest per person, this space only");
+    assert.ok(first!.createdAt < latest!.createdAt);
+    assert.deepEqual(await lastActiveByActor("ws_nobody"), {});
+    assert.equal(activityQuerySchema.parse({ summary: "1" }).summary, "1");
+    assert.throws(() => activityQuerySchema.parse({ summary: "yes" }));
+  });
+  it("marks teammates' events newer than the last visit as new, and keeps the mark moving forward", async () => {
+    const { newActivityIds, activitySeenMark, activitySeenKey } = await import("../activity-text");
+    const ev = (id: string, actorId: string, createdAt: string) => ({ id, actorId, createdAt });
+    const events = [ev("e3", "u-ann", "2026-11-03T10:00:03.000Z"), ev("e2", "u-dan", "2026-11-03T10:00:02.000Z"), ev("e1", "u-ann", "2026-11-03T10:00:01.000Z")];
+    assert.deepEqual([...newActivityIds(events, null, "u-dan")], [], "a first visit has nothing new");
+    assert.deepEqual([...newActivityIds(events, "2026-11-03T10:00:01.000Z", "u-dan")], ["e3"], "after the mark, by someone else; the mark's own millisecond is not new");
+    assert.deepEqual([...newActivityIds(events, "2026-11-03T09:00:00.000Z", "u-dan")], ["e3", "e1"], "the reader's own are never new");
+    assert.deepEqual([...newActivityIds(events, "not a date", "u-dan")], []);
+    assert.equal(activitySeenMark(events, "u-dan", null), "2026-11-03T10:00:03.000Z", "the newest teammate event");
+    assert.equal(activitySeenMark(events, "u-ann", null), "2026-11-03T10:00:02.000Z", "your own are passed over");
+    assert.equal(activitySeenMark(events, "u-dan", "2026-11-04T00:00:00.000Z"), "2026-11-04T00:00:00.000Z", "a later mark from another tab stays");
+    assert.equal(activitySeenMark([], "u-dan", null), new Date(0).toISOString(), "nothing yet: every later teammate event is new");
+    assert.equal(activitySeenKey("u-dan", "ws_1"), "avatar-studio:activity-seen:u-dan:ws_1");
+    const { newActivityCount, newActivityLine } = await import("../activity-text");
+    assert.equal(newActivityCount(0, 12, 30), "", "none new: nothing to say");
+    assert.equal(newActivityCount(3, 12, 30), "3");
+    assert.equal(newActivityCount(12, 12, 30), "12", "every line new, but fewer than the limit loaded: that is all of them");
+    assert.equal(newActivityCount(30, 30, 30), "30+", "every one of a full page new: there may be more");
+    assert.equal(newActivityLine("1"), "1 new in the workspace's activity since you last opened it");
+    assert.equal(newActivityLine("30+"), "30+ new in the workspace's activity since you last opened it");
+    const { nextActivityLimit, canShowMoreActivity, ACTIVITY_KEPT } = await import("../activity-text");
+    const { MAX_ACTIVITY } = await import("../services/activity");
+    assert.equal(ACTIVITY_KEPT, MAX_ACTIVITY, "the feed can show every event the server keeps");
+    assert.equal(nextActivityLimit(30), 60);
+    assert.equal(nextActivityLimit(180), 200, "never past what is kept");
+    assert.equal(canShowMoreActivity(30, 30), true, "a full page: there may be more");
+    assert.equal(canShowMoreActivity(12, 30), false, "fewer than asked: that is all");
+    assert.equal(canShowMoreActivity(200, 200), false, "everything kept is shown");
+  });
+  it("links a line to what it is about while that is still in the owner's space", async () => {
+    const { recordActivity, listActivity, activityLinks } = await import("../services/activity");
+    const { getStore } = await import("../store");
+    const store = getStore();
+    const dan = { id: "u-dan" };
+    await store.put("video", { id: "vid_here", ownerId: "ws_links", status: "completed" });
+    await store.put("video", { id: "vid_trashed", ownerId: "ws_links", status: "completed", deletedAt: new Date().toISOString() });
+    await store.put("video", { id: "vid_elsewhere", ownerId: "ws_other_links", status: "completed" });
+    await store.put("agent", { id: "agt_here", ownerId: "ws_links", name: "Ava" });
+    await store.put("apikey", { id: "key_here", ownerId: "ws_links", name: "CI" });
+    await store.put("brand", { id: "brand_ws_links", ownerId: "ws_links" });
+    await store.put("video", { id: "vid_overdue", ownerId: "ws_links", status: "completed", deletedAt: new Date(Date.now() - 31 * 86_400_000).toISOString() });
+    await store.put("video", { id: "vid_legacy", status: "completed" });
+    const made = [
+      await recordActivity("ws_links", dan, "video.created", { subject: "Here", subjectId: "vid_here" }),
+      await recordActivity("ws_links", dan, "video.trashed", { subject: "Trashed", subjectId: "vid_trashed" }),
+      await recordActivity("ws_links", dan, "video.approved", { subject: "Gone", subjectId: "vid_gone" }),
+      await recordActivity("ws_links", dan, "video.created", { subject: "Not ours", subjectId: "vid_elsewhere" }),
+      await recordActivity("ws_links", dan, "video.trashed", { count: 3 }),
+      await recordActivity("ws_links", dan, "agent.created", { subject: "Ava", subjectId: "agt_here" }),
+      await recordActivity("ws_links", dan, "agent.deleted", { subject: "Old", subjectId: "agt_old" }),
+      await recordActivity("ws_links", dan, "apikey.created", { subject: "CI", subjectId: "key_here" }),
+      await recordActivity("ws_links", dan, "apikey.created", { subject: "Revoked", subjectId: "key_gone" }),
+      await recordActivity("ws_links", dan, "brand.saved", { subject: "Acme" }),
+      await recordActivity("ws_links", dan, "usage.replaced", { subject: "Ava", replaced: { kind: "voice", agents: 1, templates: 0, brand: false, avatars: 0 } }),
+      await recordActivity("ws_links", dan, "member.removed", { subject: "ann@example.com", subjectId: "u-ann" }),
+      await recordActivity("ws_links", dan, "video.trashed", { subject: "Overdue", subjectId: "vid_overdue" }),
+      await recordActivity("ws_links", dan, "video.created", { subject: "Legacy", subjectId: "vid_legacy" }),
+    ];
+    const ids = made.map((e) => e!.id);
+    const links = await activityLinks("ws_links", await listActivity("ws_links", 50));
+    assert.deepEqual(
+      ids.map((id) => links[id] ?? null),
+      ["/videos/vid_here", "/videos/vid_trashed", null, null, null, "/interactive", null, "/settings", null, "/brand", "/voices", null, null, null],
+      "only what still exists here; a trashed video keeps its page until its time in the trash is up; another owner's video (a legacy one with no owner is the local owner's) and bulk actions have none",
+    );
+    await store.remove("brand", "brand_ws_links");
+    assert.equal((await activityLinks("ws_links", await listActivity("ws_links", 50)))[ids[9]], undefined, "a removed brand kit stops linking");
+    assert.deepEqual(await activityLinks("ws_links", []), {});
+    // A store that fails leaves the lines unlinked rather than failing the feed.
+    const recent = await listActivity("ws_links", 3);
+    globalThis.__avatarStudioStore = { ...store, get: async () => { throw new Error("store down"); } } as typeof store;
+    try {
+      assert.deepEqual(await activityLinks("ws_links", recent), {});
+    } finally {
+      globalThis.__avatarStudioStore = store;
+    }
+  });
+  it("lists one area of the feed at a time, up to the limit of that area's events", async () => {
+    const { recordActivity, listActivity, activityQuerySchema } = await import("../services/activity");
+    const { activityArea, parseActivityArea, ACTIVITY_AREAS, ACTIVITY_AREA_LABELS } = await import("../activity-text");
+    const dan = { id: "u-dan", email: "dan@example.com" };
+    await recordActivity("ws_area", dan, "video.created", { subject: "One" });
+    await recordActivity("ws_area", dan, "member.role", { subject: "ann@example.com", role: "viewer" });
+    await recordActivity("ws_area", dan, "batch.created", { subject: "Batch", count: 2 });
+    await recordActivity("ws_area", dan, "video.approved", { subject: "One" });
+    await recordActivity("ws_area", dan, "usage.replaced", { subject: "Ava", replacement: "Ben", replaced: { kind: "avatar", agents: 1, templates: 0, brand: false, avatars: 0 } });
+    assert.deepEqual((await listActivity("ws_area", 50, "videos")).map((e) => e.kind), ["batch.created", "video.created"], "videos and batches, newest first");
+    assert.deepEqual((await listActivity("ws_area", 1, "videos")).map((e) => e.kind), ["batch.created"], "the limit counts the area's events");
+    assert.deepEqual((await listActivity("ws_area", 50, "reviews")).map((e) => e.kind), ["video.approved"]);
+    assert.deepEqual((await listActivity("ws_area", 50, "replaces")).map((e) => e.kind), ["usage.replaced"]);
+    assert.deepEqual(await listActivity("ws_area", 50, "keys"), []);
+    assert.equal((await listActivity("ws_area")).length, 5, "no area lists everything");
+    // Every area has a label, and kinds map where the filter names them.
+    assert.deepEqual(Object.keys(ACTIVITY_AREA_LABELS), [...ACTIVITY_AREAS]);
+    assert.equal(activityArea("agent.duplicated"), "presenters");
+    assert.equal(activityArea("apikey.revoked"), "keys");
+    assert.equal(activityArea("apikey.renamed"), "keys");
+    {
+      const { describeActivity } = await import("../activity-text");
+      const renamed = (await recordActivity("ws_rename", { id: "u_dan", email: "dan@example.com" }, "apikey.renamed", { subject: "Zapier (prod)", subjectId: "key_r", previous: "Zapier" }))!;
+      assert.equal(renamed.previous, "Zapier");
+      assert.equal(describeActivity(renamed), 'dan@example.com renamed the API key "Zapier" to "Zapier (prod)"');
+      assert.equal(describeActivity({ ...renamed, previous: undefined }), 'dan@example.com renamed an API key to "Zapier (prod)"');
+    }
+    assert.equal(activityArea("video.purged"), "videos");
+    assert.equal(parseActivityArea("brand"), "brand");
+    assert.equal(parseActivityArea("toString"), null);
+    assert.equal(parseActivityArea(""), null);
+    assert.equal(parseActivityArea(undefined), null);
+    // The CSV download: one row per event, worded for no one in particular, a formula-like name defused.
+    const { activityRows, ACTIVITY_CSV_COLUMNS } = await import("../activity-text");
+    const { toCsv, parseCsv } = await import("../csv");
+    await recordActivity("ws_area", { id: "ws_area" }, "apikey.created", { subject: "=HYPERLINK(1)" });
+    const rows = activityRows(await listActivity("ws_area", 2));
+    assert.deepEqual(rows[0], { when: rows[0].when, who: "A script with an API key", area: "API keys", kind: "apikey.created", what_happened: "A script with an API key created the API key \"=HYPERLINK(1)\"" });
+    assert.match(rows[0].when, /^\d{4}-\d\d-\d\dT/);
+    assert.deepEqual({ ...rows[1], when: "" }, { when: "", who: "dan@example.com", area: "Presenter and voice replaces", kind: "usage.replaced", what_happened: 'dan@example.com replaced "Ava" with "Ben" in 1 interactive presenter' });
+    const table = parseCsv(toCsv(ACTIVITY_CSV_COLUMNS, rows));
+    assert.deepEqual(table.columns, ACTIVITY_CSV_COLUMNS);
+    assert.equal(table.rows[0].what_happened, rows[0].what_happened, "a sentence starting with a name is not altered");
+    // One person's events, alone or within an area; the owner id itself stands for scripts with an API key.
+    assert.deepEqual((await listActivity("ws_area", 50, undefined, "ws_area")).map((e) => e.kind), ["apikey.created"]);
+    assert.deepEqual((await listActivity("ws_area", 50, "videos", "u-dan")).map((e) => e.kind), ["batch.created", "video.created"]);
+    assert.deepEqual((await listActivity("ws_area", 1, undefined, "u-dan")).map((e) => e.kind), ["usage.replaced"], "the limit counts the person's events");
+    assert.deepEqual(await listActivity("ws_area", 50, "keys", "u-dan"), []);
+    assert.deepEqual(await listActivity("ws_area", 50, undefined, "u-nobody"), []);
+    const { activityFilterPhrase } = await import("../activity-text");
+    assert.equal(activityFilterPhrase(null, null), "");
+    assert.equal(activityFilterPhrase("reviews", null), " under Reviews");
+    assert.equal(activityFilterPhrase("reviews", "ann@example.com", true), " under “Reviews” by ann@example.com");
+    assert.equal(activityFilterPhrase(null, "you"), " by you");
+    assert.equal(activityQuerySchema.parse({ actor: " u-dan " }).actor, "u-dan");
+    assert.throws(() => activityQuerySchema.parse({ actor: "" }));
+    assert.equal(activityQuerySchema.parse({ format: "csv" }).format, "csv");
+    assert.throws(() => activityQuerySchema.parse({ format: "json" }));
+  });
+
+  it("records who did what, newest first, keeps the last 200, and never fails the request", async () => {
+    const { recordActivity, listActivity, activityQuerySchema, MAX_ACTIVITY } = await import("../services/activity");
+    const { describeActivity, activityActor } = await import("../activity-text");
+    const { exportOwnerData } = await import("../services/account");
+    const dan = { id: "u-dan", email: "dan@example.com" };
+    const first = await recordActivity("ws_feed", dan, "video.created", { subject: "  Welcome home  ", subjectId: "vid_1" });
+    assert.equal(first?.subject, "Welcome home");
+    assert.equal(first?.actorEmail, "dan@example.com");
+    await recordActivity("ws_feed", { id: "u-ann" }, "member.role", { subject: "dan@example.com", subjectId: "u-dan", role: "owner" });
+    await recordActivity("ws_feed", { id: "ws_feed" }, "video.trashed", { count: 3 });
+    await recordActivity("ws_other", dan, "brand.removed");
+    const events = await listActivity("ws_feed");
+    assert.deepEqual(events.map((e) => e.kind), ["video.trashed", "member.role", "video.created"], "newest first, this owner only");
+    assert.deepEqual(await listActivity("ws_feed", 1).then((l) => l.map((e) => e.kind)), ["video.trashed"]);
+    // Sentences, from the viewer's point of view.
+    assert.equal(describeActivity(events[2], "u-dan"), 'You created "Welcome home"');
+    assert.equal(describeActivity(events[2], "u-ann"), 'dan@example.com created "Welcome home"');
+    assert.equal(describeActivity(events[1]), 'A member made "dan@example.com" an owner');
+    assert.equal(describeActivity({ ...events[1], role: "viewer" }), 'A member made "dan@example.com" a viewer');
+    assert.equal(describeActivity(events[0]), "A script with an API key moved 3 videos to the trash");
+    assert.equal(activityActor({ actorId: "u-x", ownerId: "ws_feed" }), "A member");
+    assert.equal(describeActivity({ ...events[0], count: 1, kind: "video.purged" }), "A script with an API key deleted 1 video for good");
+    assert.equal(describeActivity({ ...events[2], kind: "batch.created", count: 12 }, "u-dan"), 'You started a batch of 12 videos from "Welcome home"');
+    assert.equal(describeActivity({ ...events[2], kind: "member.left", subject: undefined }, "u-dan"), "You left the workspace");
+    // A long label is cut; the cap keeps the newest; the query takes a bounded limit.
+    const long = await recordActivity("ws_feed", dan, "agent.created", { subject: "x".repeat(300) });
+    assert.equal(long?.subject?.length, 80);
+    for (let i = 0; i < MAX_ACTIVITY + 5; i++) await recordActivity("ws_cap", dan, "video.created", { subject: `v${i}` });
+    const capped = await listActivity("ws_cap", MAX_ACTIVITY);
+    assert.equal(capped.length, MAX_ACTIVITY);
+    assert.equal(capped[0].subject, `v${MAX_ACTIVITY + 4}`, "the newest is kept");
+    assert.equal(activityQuerySchema.parse({}).limit, 50);
+    assert.throws(() => activityQuerySchema.parse({ limit: "500" }));
+    assert.equal(activityQuerySchema.parse({ area: "members" }).area, "members");
+    assert.throws(() => activityQuerySchema.parse({ area: "everything" }), "an unknown area is refused");
+    // The feed is part of the export and never breaks the work it describes.
+    assert.equal((await exportOwnerData("ws_feed")).activity.length, 4);
+    const { getStore } = await import("../store");
+    const store = getStore();
+    const broken = { ...store, put: async () => { throw new Error("store down"); }, list: store.list.bind(store), remove: store.remove.bind(store), get: store.get.bind(store), findBy: store.findBy.bind(store) };
+    globalThis.__avatarStudioStore = broken as typeof store;
+    try {
+      assert.equal(await recordActivity("ws_feed", dan, "video.created", { subject: "lost" }), null, "a failed write is swallowed");
+    } finally {
+      globalThis.__avatarStudioStore = store;
+    }
+  });
+});
+
+describe("video comments", () => {
+  it("lets the owner's team leave notes the share page never shows, and deletes them with the video", async () => {
+    const { addComment, listComments, deleteComment, commentSchema, MAX_COMMENTS_PER_VIDEO } = await import("../services/comments");
+    const { exportOwnerData } = await import("../services/account");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Notes", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "ws_team");
+    const first = await addComment(v.id, commentSchema.parse({ text: "  Tighten the intro.  " }), "ws_team", { id: "u-ann", email: "ann@example.com" });
+    assert.equal(first.text, "Tighten the intro.");
+    assert.equal(first.authorEmail, "ann@example.com");
+    const second = await addComment(v.id, { text: "Agreed." }, "ws_team", { id: "u-bob" });
+    assert.deepEqual((await listComments(v.id, "ws_team")).map((c) => c.id), [first.id, second.id], "oldest first");
+    await assert.rejects(listComments(v.id, "someone-else"), /not found/, "another owner cannot read them");
+    await assert.rejects(addComment("vid_missing", { text: "x" }, "ws_team"), /not found/);
+    await assert.rejects(deleteComment(v.id, first.id, "ws_team", { id: "u-bob" }), /Only the author/);
+    await deleteComment(v.id, first.id, "ws_team", { id: "u-ann" });
+    assert.deepEqual((await listComments(v.id, "ws_team")).map((c) => c.id), [second.id]);
+    await assert.rejects(deleteComment(v.id, first.id, "ws_team", { id: "u-ann" }), /Comment not found/);
+    assert.throws(() => commentSchema.parse({ text: "   " }));
+    assert.throws(() => commentSchema.parse({ text: "x".repeat(1001) }));
+    // The export carries them; deleting the video for good removes them.
+    const exported = await exportOwnerData("ws_team");
+    assert.equal(exported.comment.length, 1);
+    await deleteVideo(v.id, "ws_team");
+    await deleteVideo(v.id, "ws_team", true);
+    const store = (await import("../store")).getStore();
+    assert.equal((await store.list("comment", "ws_team")).length, 0, "purging the video removes its comments");
+    // The cap holds per video.
+    const w = await createVideo(videoRequestSchema.parse({ title: "Busy", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }), "ws_team");
+    for (let i = 0; i < MAX_COMMENTS_PER_VIDEO; i++) await addComment(w.id, { text: `n${i}` }, "ws_team");
+    await assert.rejects(addComment(w.id, { text: "one more" }, "ws_team"), /At most/);
+  });
+});
+
+describe("saved templates", () => {
+  it("saves a video as a template and reopens it", async () => {
+    const { createTemplate, deleteTemplate, getTemplate, listTemplates, templateInputSchema, MAX_TEMPLATES } = await import("../services/templates");
+    const video = await createVideo(
+      videoRequestSchema.parse({
+        title: "Open house",
+        avatarId: STOCK_AVATARS[0].id,
+        voiceId: STOCK_VOICES[0].id,
+        aspect: "9:16",
+        resolution: "720p",
+        captions: true,
+        speed: 1.1,
+        scenes: [
+          { script: "Welcome.", background: { type: "color", value: "#000000" } },
+          { script: "Goodbye.", background: { type: "color", value: "#ffffff" }, avatarId: STOCK_AVATARS[1].id, voiceId: STOCK_VOICES[1].id },
+        ],
+      }),
+    );
+    const t = await createTemplate(templateInputSchema.parse({ fromVideoId: video.id, description: "Listing opener" }));
+    assert.equal(t.title, "Open house");
+    assert.equal(t.description, "Listing opener");
+    assert.equal(t.sourceVideoId, video.id);
+    assert.deepEqual(t.scenes.map((sc) => sc.script), ["Welcome.", "Goodbye."]);
+    assert.equal(t.scenes[1].avatarId, STOCK_AVATARS[1].id);
+    assert.equal(t.scenes[1].voiceId, STOCK_VOICES[1].id);
+    assert.equal((t.scenes[1] as { avatarName?: string }).avatarName, undefined, "display names are not copied; the render fills them in");
+    assert.deepEqual([t.avatarId, t.voiceId, t.aspect, t.resolution, t.captions, t.speed], [STOCK_AVATARS[0].id, STOCK_VOICES[0].id, "9:16", "720p", true, 1.1]);
+    assert.equal((await getTemplate(t.id)).id, t.id);
+    assert.deepEqual((await listTemplates()).map((x) => x.id), [t.id]);
+    // Another owner can neither copy the video nor read the template.
+    await assert.rejects(createTemplate({ fromVideoId: video.id }, "someone-else"), /not found/);
+    await assert.rejects(getTemplate(t.id, "someone-else"), /not found/);
+    await assert.rejects(createTemplate({ fromVideoId: "vid_missing" }), /not found/);
+    // Spelled out: title and scenes are required, settings default.
+    await assert.rejects(createTemplate(templateInputSchema.parse({ title: "No scenes" })), /at least one scene/);
+    const plain = await createTemplate(templateInputSchema.parse({ title: "Plain", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    assert.deepEqual([plain.aspect, plain.captions, plain.speed, plain.avatarId], ["16:9", false, 1, undefined]);
+    await deleteTemplate(plain.id);
+    await assert.rejects(deleteTemplate(plain.id), /not found/);
+    assert.equal((await listTemplates()).length, 1);
+    // The cap.
+    for (let i = 1; i < MAX_TEMPLATES; i++) await createTemplate({ fromVideoId: video.id, title: `T${i}` });
+    await assert.rejects(createTemplate({ fromVideoId: video.id }), /up to 50 templates/);
+    assert.equal((await listTemplates()).length, MAX_TEMPLATES);
+  });
+
+  it("renames a template and changes its description, keeping everything else", async () => {
+    const { createTemplate, deleteTemplate, editTemplate, getTemplate, templateEditSchema, templateInputSchema } = await import("../services/templates");
+    const t = await createTemplate(templateInputSchema.parse({ title: "Plain", description: "First", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    const renamed = await editTemplate(t.id, templateEditSchema.parse({ title: "  Listing opener  " }));
+    assert.deepEqual([renamed.title, renamed.description], ["Listing opener", "First"]);
+    assert.ok(renamed.updatedAt > t.updatedAt);
+    assert.deepEqual({ ...(await getTemplate(t.id)), title: t.title, updatedAt: t.updatedAt }, t, "only the name and the time changed");
+    assert.equal((await editTemplate(t.id, templateEditSchema.parse({ description: "For new listings" }))).description, "For new listings");
+    // Blank or null removes the description; the name stays.
+    const bare = await editTemplate(t.id, templateEditSchema.parse({ description: "   " }));
+    assert.equal("description" in bare, false);
+    assert.equal(bare.title, "Listing opener");
+    assert.equal("description" in (await editTemplate(t.id, templateEditSchema.parse({ description: null }))), false);
+    // What the form refuses.
+    assert.throws(() => templateEditSchema.parse({}), /new name or description/);
+    assert.throws(() => templateEditSchema.parse({ title: " " }), /Name the template/);
+    assert.throws(() => templateEditSchema.parse({ title: "x".repeat(121) }), /at most 120/);
+    assert.throws(() => templateEditSchema.parse({ description: "x".repeat(201) }), /at most 200/);
+    // Another owner's template, or one deleted, is not found and stays gone.
+    await assert.rejects(editTemplate(t.id, { title: "Mine now" }, "someone-else"), /not found/);
+    await deleteTemplate(t.id);
+    await assert.rejects(editTemplate(t.id, { title: "Back" }), /not found/);
+    assert.equal(await globalThis.__avatarStudioStore!.get("template", t.id), null);
+  });
+
+  it("duplicates a template under a name of its own, within the cap", async () => {
+    const { copyTitle, createTemplate, deleteTemplate, getTemplate, listTemplates, templateInputSchema, MAX_TEMPLATES } = await import("../services/templates");
+    const t = await createTemplate(
+      templateInputSchema.parse({ title: "Open house", description: "Listing opener", aspect: "9:16", captions: true, speed: 1.2, scenes: [{ script: "Welcome.", background: { type: "color", value: "#fff" }, speed: 0.9 }] }),
+    );
+    const copy = await createTemplate(templateInputSchema.parse({ fromTemplateId: t.id }));
+    assert.notEqual(copy.id, t.id);
+    assert.equal(copy.title, "Open house (copy)");
+    const strip = ({ id: _i, title: _t, createdAt: _c, updatedAt: _u, ...rest }: typeof t) => rest;
+    assert.deepEqual(strip(copy), strip(t), "everything else is the same");
+    // The original is untouched, a second copy counts on, and a copy of a copy does not stack.
+    assert.equal((await getTemplate(t.id)).title, "Open house");
+    assert.equal((await createTemplate({ fromTemplateId: t.id })).title, "Open house (copy 2)");
+    assert.equal((await createTemplate({ fromTemplateId: copy.id })).title, "Open house (copy 3)");
+    // A name and description given are used; a blank description leaves none.
+    const named = await createTemplate(templateInputSchema.parse({ fromTemplateId: t.id, title: "Spring opener", description: "  " }));
+    assert.deepEqual([named.title, "description" in named], ["Spring opener", false]);
+    assert.equal((await createTemplate(templateInputSchema.parse({ fromTemplateId: t.id, description: "For spring" }))).description, "For spring");
+    assert.throws(() => templateInputSchema.parse({ fromTemplateId: t.id, fromVideoId: "vid_x" }), /not both/);
+    // Not another account's, not a missing one.
+    await assert.rejects(createTemplate({ fromTemplateId: t.id }, "someone-else"), /not found/);
+    await assert.rejects(createTemplate({ fromTemplateId: "tpl_missing" }), /not found/);
+    // The cap counts copies; at the cap a missing source is still "not found".
+    const have = (await listTemplates()).length;
+    for (let i = have; i < MAX_TEMPLATES; i++) await createTemplate({ fromTemplateId: t.id });
+    await assert.rejects(createTemplate({ fromTemplateId: t.id }), /up to 50 templates/);
+    await assert.rejects(createTemplate({ fromTemplateId: "tpl_missing" }), /not found/);
+    await deleteTemplate(copy.id);
+    // Names stay within 120 UTF-16 units (the form's limit too), cut between whole characters.
+    const long = copyTitle("é".repeat(120), []);
+    assert.equal(long.length, 120);
+    assert.ok(long.endsWith(" (copy)"));
+    const family = ["👨", "👩", "👧"].join(String.fromCharCode(0x200d));
+    const emoji = copyTitle(family.repeat(20), []);
+    assert.ok(emoji.length <= 120);
+    assert.equal(emoji.replace(" (copy)", "").length % family.length, 0, "no family is cut in half");
+    assert.equal(copyTitle("Intro (copy 7)", ["Intro (copy)"]), "Intro (copy 2)");
+  });
+
+  it("does not name a video as the source of a copy", async () => {
+    const { createTemplate, templateInputSchema } = await import("../services/templates");
+    const video = await createVideo(videoRequestSchema.parse({ title: "From video", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const saved = await createTemplate(templateInputSchema.parse({ fromVideoId: video.id }));
+    assert.equal(saved.sourceVideoId, video.id);
+    assert.equal("sourceVideoId" in (await createTemplate({ fromTemplateId: saved.id })), false);
+  });
+
+  it("gives a copied scene a plain background when its picture is gone", async () => {
+    const { createTemplate, templateInputSchema } = await import("../services/templates");
+    const { createBackdrop } = await import("../services/backdrops");
+    const store = globalThis.__avatarStudioStore!;
+    const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    const pic = await createBackdrop({ name: "Lobby", image: `data:image/png;base64,${PNG.toString("base64")}` });
+    const t = await createTemplate(templateInputSchema.parse({ title: "With picture", scenes: [{ script: "Hi.", background: { type: "image", value: `/api/backdrops/${pic.id}` } }] }));
+    // Removed underneath, without the delete path that would have rewritten the template.
+    await store.remove("backdrop", pic.id);
+    const copy = await createTemplate({ fromTemplateId: t.id });
+    assert.equal(copy.scenes[0].background.type, "color");
+  });
+
+  it("keeps a change that lands while a template is being renamed", async () => {
+    const { createTemplate, editTemplate, getTemplate, templateInputSchema } = await import("../services/templates");
+    const store = globalThis.__avatarStudioStore!;
+    const t = await createTemplate(templateInputSchema.parse({ title: "Plain", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    // Between the rename's read and its write, something else rewrites the scenes (as deleting a picture does).
+    const putIf = store.putIf.bind(store);
+    let raced = false;
+    store.putIf = async (kind, item, field, expected) => {
+      if (!raced && kind === "template") {
+        raced = true;
+        const now = await store.get<typeof t>("template", t.id);
+        await store.put("template", { ...now!, scenes: [{ script: "Changed.", background: { type: "color", value: "#000" } }], updatedAt: new Date(Date.parse(now!.updatedAt) + 5).toISOString() });
+      }
+      return putIf(kind, item, field, expected);
+    };
+    try {
+      const renamed = await editTemplate(t.id, { title: "Renamed" });
+      assert.equal(renamed.title, "Renamed");
+      const stored = await getTemplate(t.id);
+      assert.equal(stored.title, "Renamed");
+      assert.deepEqual(stored.scenes.map((sc) => sc.script), ["Changed."]);
+    } finally {
+      store.putIf = putIf;
+    }
+  });
+
+  it("keeps both of two edits to different fields, stays deleted when deleted mid-edit, and gives up on a template that keeps changing", async () => {
+    const { createTemplate, deleteTemplate, editTemplate, getTemplate, templateInputSchema } = await import("../services/templates");
+    const store = globalThis.__avatarStudioStore!;
+    const t = await createTemplate(templateInputSchema.parse({ title: "Plain", scenes: [{ script: "Hi.", background: { type: "color", value: "#fff" } }] }));
+    const putIf = store.putIf.bind(store);
+    try {
+      // A description edit lands between a rename's read and its write: both survive.
+      let raced = false;
+      store.putIf = async (kind, item, field, expected) => {
+        if (!raced && kind === "template") {
+          raced = true;
+          store.putIf = putIf;
+          await editTemplate(t.id, { description: "Theirs" });
+        }
+        return putIf(kind, item, field, expected);
+      };
+      await editTemplate(t.id, { title: "Mine" });
+      assert.deepEqual([(await getTemplate(t.id)).title, (await getTemplate(t.id)).description], ["Mine", "Theirs"]);
+      // Changing on every attempt: five tries, then a conflict, and the name is not taken.
+      let tries = 0;
+      store.putIf = async (kind, item, field, expected) => {
+        tries++;
+        const now = await store.get<typeof t>("template", t.id);
+        await store.put("template", { ...now!, updatedAt: new Date(Date.parse(now!.updatedAt) + 1000).toISOString() });
+        return putIf(kind, item, field, expected);
+      };
+      await assert.rejects(editTemplate(t.id, { title: "Never" }), /kept changing/);
+      assert.equal(tries, 5);
+      store.putIf = putIf;
+      assert.equal((await getTemplate(t.id)).title, "Mine");
+      // Deleted between the read and the write: not found, and it stays deleted.
+      store.putIf = async (kind, item, field, expected) => {
+        store.putIf = putIf;
+        await deleteTemplate(t.id);
+        return putIf(kind, item, field, expected);
+      };
+      await assert.rejects(editTemplate(t.id, { title: "Back" }), /not found/);
+      assert.equal(await store.get("template", t.id), null);
+    } finally {
+      store.putIf = putIf;
+    }
+  });
+});
+
+describe("review fixes", () => {
+  it("rejects a voice the current provider does not list", async () => {
+    await assert.rejects(
+      createVideo(videoRequestSchema.parse({ title: "x", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: "not_a_voice" })),
+      /not available/,
+    );
+  });
+
+  it("store findBy matches a top-level field", async () => {
+    const store = globalThis.__avatarStudioStore!;
+    const v = await createVideo(videoRequestSchema.parse({ title: "x", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const found = await store.findBy<{ id: string }>("video", "providerJobId", v.providerJobId!);
+    assert.equal(found?.id, v.id);
+    assert.equal(await store.findBy("video", "providerJobId", "missing"), null);
+  });
+
+  it("mock providers refuse foreign job ids instead of completing them", async () => {
+    const { MockTranslateProvider } = await import("../providers/translate/mock");
+    await assert.rejects(new MockAvatarProvider().getStatus("heygen-job-123"), /Not a demo job id/);
+    await assert.rejects(new MockTranslateProvider().getStatus("abc"), /Not a demo job id/);
+  });
+
+  it("HeyGen translate webhook parsing recognises success and failure", async () => {
+    const { HeyGenTranslateProvider } = await import("../providers/translate/heygen");
+    const p = new HeyGenTranslateProvider("key");
+    assert.deepEqual(p.parseWebhook({ event_type: "video_translate.success", event_data: { video_translate_id: "t1", url: "https://x/v.mp4" } }), {
+      providerJobId: "t1",
+      update: { status: "completed", videoUrl: "https://x/v.mp4" },
+    });
+    assert.equal(p.parseWebhook({ event_type: "video_translate.fail", event_data: { video_translate_id: "t2", msg: "bad" } })?.update.status, "failed");
+    assert.equal(p.parseWebhook({ event_type: "other" }), null);
+  });
+
+  it("webhook URLs are only built when a secret is configured", async () => {
+    const { webhookUrl } = await import("../config");
+    assert.equal(webhookUrl("heygen"), undefined);
+  });
+});
+
+describe("rename", () => {
+  it("updates the title and bumps updatedAt", async () => {
+    const { updateVideo } = await import("../services");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Old", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    assert.equal((await updateVideo(v.id, { shareDownload: true })).shareDownload, true);
+    assert.equal("shareDownload" in (await updateVideo(v.id, { shareDownload: false })), false, "off is stored as absent");
+    assert.equal(videoPatchSchema.safeParse({}).success, false, "an empty patch is rejected");
+    const renamed = await updateVideo(v.id, { title: "New" });
+    assert.equal(renamed.title, "New");
+    assert.ok(renamed.updatedAt >= v.updatedAt);
+    await assert.rejects(updateVideo("missing", { title: "x" }), /not found/);
+    // A share-page description is trimmed, kept, and removed by a blank save.
+    assert.equal((await updateVideo(v.id, videoPatchSchema.parse({ description: "  Why this matters.  " }))).description, "Why this matters.");
+    assert.equal((await updateVideo(v.id, { title: "Newer" })).description, "Why this matters.", "other edits keep it");
+    assert.equal("description" in (await updateVideo(v.id, videoPatchSchema.parse({ description: "   " }))), false, "a blank save removes it");
+    assert.equal(videoPatchSchema.safeParse({ description: "x".repeat(501) }).success, false);
+  });
+});
+
+describe("script assistant", () => {
+  it("revises scripts in demo mode", async () => {
+    const { reviseScript } = await import("../services");
+    const script = "Hi there! One. Two. Three. Four.";
+    assert.equal(await reviseScript({ script, action: "shorten" }), "Hi there! One. Two.");
+    assert.match(await reviseScript({ script, action: "expand" }), /Thanks for watching\.$/);
+    assert.match(await reviseScript({ script, action: "tone", tone: "formal" }), /^Hello\./);
+    assert.match(await reviseScript({ script, action: "translate", language: "Spanish" }), /^\[Spanish\]/);
+  });
+});
+
+describe("owner isolation", () => {
+  const req = () => videoRequestSchema.parse({ title: "mine", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+  it("scopes videos, avatars, and translations to their owner", async () => {
+    const a = await createVideo(req(), "user-a");
+    await createVideo(req(), "user-b");
+    assert.deepEqual((await listVideos("user-a")).map((v) => v.id), [a.id]);
+    assert.equal((await listVideos("user-b")).length, 1);
+    await assert.rejects(getVideo(a.id, "user-b"), /not found/);
+    const { PUBLIC_ACCESS } = await import("../services");
+    assert.equal((await getVideo(a.id, PUBLIC_ACCESS)).id, a.id, "public access (share page) still works");
+    await assert.rejects(getVideo(a.id, undefined as unknown as string), /not found/, "undefined must not mean public");
+    await assert.rejects(deleteVideo(a.id, "user-b"), /not found/);
+
+    const av = await createAvatar({ name: "A", imageUrl: "https://example.com/a.jpg" }, "user-a");
+    assert.ok((await listAvatars("user-a")).some((x) => x.id === av.id));
+    assert.ok(!(await listAvatars("user-b")).some((x) => x.id === av.id));
+    await assert.rejects(createVideo(videoRequestSchema.parse({ ...req(), avatarId: av.id }), "user-b"), /not found/);
+
+    const t = await createTranslation({ title: "t", sourceVideoUrl: "https://example.com/v.mp4", targetLanguage: "French" }, "user-a");
+    assert.equal(t.ownerId, "user-a");
+    const { listTranslations } = await import("../services");
+    assert.equal((await listTranslations("user-b")).length, 0);
+  });
+});
+
+describe("render allowance", () => {
+  it("counts this month's renders and enforces RENDER_LIMIT_PER_MONTH", async () => {
+    const { config } = await import("../config");
+    const { rendersThisMonth, LimitError } = await import("../services");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 2;
+    try {
+      await createVideo(req(), "quota-user");
+      await createVideo(req(), "quota-user");
+      assert.equal(await rendersThisMonth("quota-user"), 2);
+      await assert.rejects(createVideo(req(), "quota-user"), (e: unknown) => e instanceof LimitError && /2 of 2/.test((e as Error).message));
+      // Other owners are unaffected.
+      await createVideo(req(), "other-user");
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+
+  it("deleting renders, the trash, or all data does not give the allowance back", async () => {
+    const { rendersThisMonth } = await import("../services");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const a = await createVideo(req(), "keeper");
+    await createVideo(req(), "keeper");
+    await deleteVideo(a.id, "keeper");
+    await deleteVideo(a.id, "keeper", true);
+    assert.equal(await rendersThisMonth("keeper"), 2, "a video deleted for good still counts");
+    await deleteOwnerData("keeper");
+    assert.equal((await listVideos("keeper", false)).length, 0);
+    assert.equal(await rendersThisMonth("keeper"), 2, "deleting all data keeps the month's count");
+  });
+
+  it("counts renders started together, and gives one back once when the provider fails it", async () => {
+    const { applyAvatarWebhook, rendersThisMonth } = await import("../services/videos");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const started = await Promise.all(Array.from({ length: 5 }, () => createVideo(req(), "burst")));
+    // Demo job ids are made from the clock, so renders started together can share one; give the failing one its own.
+    await globalThis.__avatarStudioStore!.put("video", { ...started[0], providerJobId: "mock_job_burst_0" });
+    // The usage record itself, since the five stored videos would also make the total five.
+    const usage = async () => (await globalThis.__avatarStudioStore!.list<{ count?: number }>("usage", "burst")).filter((u) => u.count !== undefined).map((u) => u.count);
+    assert.deepEqual(await usage(), [5], "concurrent first renders of the month each count");
+    assert.equal(await rendersThisMonth("burst"), 5);
+    // The demo provider takes no webhooks; give it one that reports the job failed.
+    const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
+    proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
+    try {
+      await applyAvatarWebhook("mock", { id: "mock_job_burst_0" });
+      await applyAvatarWebhook("mock", { id: "mock_job_burst_0" }); // a repeated delivery refunds nothing more
+      // A second instance that read the render while it was still processing records the failure again; it refunds nothing.
+      const failed = await getVideo(started[0].id, "burst", false);
+      await globalThis.__avatarStudioStore!.put("video", { ...failed, status: "processing" as const });
+      await applyAvatarWebhook("mock", { id: "mock_job_burst_0" });
+    } finally {
+      delete proto.parseWebhook;
+    }
+    assert.equal((await getVideo(started[0].id, "burst", false)).status, "failed");
+    assert.deepEqual(await usage(), [4]);
+    assert.equal(await rendersThisMonth("burst"), 4);
+    await deleteVideo(started[0].id, "burst");
+    assert.equal(await rendersThisMonth("burst"), 4, "deleting the failed render changes nothing");
+  });
+
+  it("stamps the month that counted a render, and a failing usage write never fails a render that started", async () => {
+    const { applyAvatarWebhook } = await import("../services/videos");
+    const req = () => videoRequestSchema.parse({ title: "r", script: "hi there", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id });
+    const counted = await createVideo(req(), "stamp");
+    assert.equal(counted.countedIn, counted.createdAt.slice(0, 7));
+    const store = globalThis.__avatarStudioStore!;
+    const insert = store.insert.bind(store);
+    store.insert = async () => {
+      throw new Error("usage store unavailable");
+    };
+    let uncounted: Video;
+    try {
+      uncounted = await createVideo(req(), "stamp-down");
+    } finally {
+      store.insert = insert;
+    }
+    assert.equal(uncounted.status, "processing", "the render runs and the request succeeds");
+    assert.equal(uncounted.countedIn, undefined);
+    assert.equal((await getVideo(uncounted.id, "stamp-down", false)).status, "processing");
+    // A render that was never counted (failed usage write, or one from before counting) gives nothing back.
+    await store.put("video", { ...uncounted, providerJobId: "mock_job_uncounted" }); // its own id; demo ids come from the clock
+    await createVideo(req(), "stamp-down");
+    const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
+    proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
+    try {
+      await applyAvatarWebhook("mock", { id: "mock_job_uncounted" });
+    } finally {
+      delete proto.parseWebhook;
+    }
+    assert.equal((await getVideo(uncounted.id, "stamp-down", false)).status, "failed");
+    const usage = await store.list<{ count?: number }>("usage", "stamp-down");
+    assert.deepEqual(usage.filter((u) => u.count !== undefined).map((u) => u.count), [1]);
+  });
+});
+
+describe("personalized batches", () => {
+  it("parses CSV with quotes, CRLF, and BOM", async () => {
+    const { parseCsv, fillTemplate, placeholdersIn } = await import("../csv");
+    const t = parseCsv('﻿name,note\r\n"Smith, Jo","Says ""hi"""\r\n\r\nAmy,plain\n');
+    assert.deepEqual(t.columns, ["name", "note"]);
+    assert.deepEqual(t.rows, [{ name: "Smith, Jo", note: 'Says "hi"' }, { name: "Amy", note: "plain" }]);
+    assert.equal(fillTemplate("Hi {name}: {note} {missing}", t.rows[0]), 'Hi Smith, Jo: Says "hi" {missing}');
+    assert.deepEqual(placeholdersIn("{a} {b} {a}"), ["a", "b"]);
+  });
+
+  it("prepares a custom portrait once for a whole batch", async () => {
+    const { createBatch } = await import("../services");
+    const custom = await createAvatar({ name: "Me", imageUrl: "https://example.com/me.jpg" }, "batch-prep");
+    let uploads = 0;
+    const proto = MockAvatarProvider.prototype as unknown as { prepareAvatar?: (a: typeof custom) => Promise<typeof custom> };
+    proto.prepareAvatar = async (a) => {
+      if (a.providerAssetIds?.mock) return a;
+      uploads += 1;
+      return { ...a, providerAssetIds: { ...a.providerAssetIds, mock: "asset_1" } };
+    };
+    try {
+      const result = await createBatch(
+        { title: "Hi", scriptTemplate: "Hi {name}.", csv: "name\nA\nB\nC", avatarId: custom.id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", resolution: "1080p", background: { type: "color", value: "#fff" }, captions: false, speed: 1 },
+        "batch-prep",
+      );
+      assert.equal(result.videos.length, 3);
+      assert.ok(result.videos.every((v) => v.status === "processing"));
+      assert.equal(uploads, 1, "the portrait is uploaded for the first row and reused");
+      const stored = await getAvatar(custom.id, "batch-prep");
+      assert.equal(stored.providerAssetIds?.mock, "asset_1", "the prepared avatar is persisted");
+    } finally {
+      delete proto.prepareAvatar;
+    }
+  });
+
+  it("creates one video per row with substituted scripts and a shared batch id", async () => {
+    const { createBatch, previewBatch } = await import("../services");
+    const csv = "name,city\nJordan,Austin\nPriya,Denver";
+    const preview = previewBatch("Hi {name} from {city}.", csv);
+    assert.equal(preview.rowCount, 2);
+    assert.deepEqual(preview.missing, []);
+    assert.equal(preview.samples[1].script, "Hi Priya from Denver.");
+    const store = (await import("../store")).getStore();
+    const originalPut = store.put.bind(store);
+    let videoPuts = 0;
+    store.put = async (kind, item) => {
+      if (kind === "video") videoPuts += 1;
+      return originalPut(kind, item);
+    };
+    const result = await createBatch({ title: "Welcome", scriptTemplate: "Hi {name} from {city}.", csv, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9", resolution: "1080p", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "batch-user");
+    store.put = originalPut;
+    assert.equal(result.videos.length, 2);
+    assert.equal(videoPuts, 2, "each batch row is written once, with its batch id and row label");
+    assert.ok(result.videos.every((v) => v.batchId === result.batchId));
+    assert.equal(result.videos[0].title, "Welcome – Jordan");
+    assert.equal(result.videos[0].script, "Hi Jordan from Austin.");
+    assert.equal(result.videos[0].rowLabel, "Jordan");
+    assert.equal((await listVideos("batch-user")).length, 2);
+  });
+
+  it("refuses a batch with a row whose filled-in script is empty or too long, before any row starts", async () => {
+    const { createBatch, previewBatch } = await import("../services");
+    const base = { title: "Notes", scriptTemplate: "{msg}", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const empty = "name,msg\nAlice,\nBob,Hello Bob\nCara,[pause 2s]";
+    assert.equal(previewBatch("{msg}", empty).problem, "Rows 1, 3 leave the script empty; fill in their cells.");
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,\u200b\nBob,Hi").problem, "Row 1 leaves the script empty; fill in its cells.");
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,\u200f\nBob,\u202a\u00ad\nCara,Hi").problem, "Rows 1, 2 leave the script empty; fill in their cells.");
+    // Text joined by invisible characters (an emoji family, a Persian word with a non-joiner) is still text.
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,👨\u200d👩\u200d👧\nBob,می\u200cخواهم").problem, null);
+    assert.equal(previewBatch("\u200b", "name,msg\nAlice,Hi").problem, "The script is empty; write what the presenter says, with {column} placeholders for each row.");
+    await assert.rejects(createBatch({ ...base, csv: empty }, "batch-empty"), /Rows 1, 3 leave the script empty/);
+    const long = `name,msg\nAlice,Hi\nBob,${"word ".repeat(1200)}`;
+    assert.equal(previewBatch("{msg}", long).problem, "Row 2 makes the script longer than the 5000 characters a video holds.");
+    await assert.rejects(createBatch({ ...base, csv: long }, "batch-long"), /Row 2 makes the script longer than the 5000 characters a video holds/);
+    assert.equal((await listVideos("batch-empty")).length + (await listVideos("batch-long")).length, 0, "no row of a refused batch renders");
+    // Missing columns are the message while there are any; the row check waits for them.
+    assert.equal(previewBatch("{msg} {city}", empty).problem, null);
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,Hi").problem, null);
+    assert.equal(previewBatch("{msg}", "name,msg\nAlice,\nBob,Hi").problem, "Row 1 leaves the script empty; fill in its cells.");
+    // A template with nothing to say is named as the problem, not every row's cells.
+    for (const blank of ["   ", "[pause 2s]"]) assert.equal(previewBatch(blank, empty).problem, "The script is empty; write what the presenter says, with {column} placeholders for each row.");
+  });
+
+  it("lets a visitor through an email gate only with the cookie the gate handed out", async () => {
+    const { shareGatePassed, shareGateValue } = await import("../share-lock");
+    const video = { id: "vid_gate", createdAt: "2026-10-26T10:00:00.000Z", shareGate: true };
+    assert.equal(shareGatePassed(video, undefined), false);
+    assert.equal(shareGatePassed(video, "1"), false, "a hand-made cookie is not a pass");
+    assert.equal(shareGatePassed(video, shareGateValue(video)), true);
+    assert.equal(shareGatePassed({ ...video, id: "vid_other" }, shareGateValue(video)), false, "one video's pass does not open another");
+    assert.equal(shareGatePassed({ ...video, shareGate: false }, undefined), true, "a link that asks for nothing is open");
+  });
+
+  it("puts the brand kit's background behind batch rows unless the batch names one", async () => {
+    const { createBatch, batchRequestSchema, saveBrandKit, brandKitSchema } = await import("../services");
+    const req = (extra: Record<string, unknown> = {}) => batchRequestSchema.parse({ title: "Hi", scriptTemplate: "Hi {name}.", csv: "name\nAda", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, ...extra });
+    assert.deepEqual((await createBatch(req(), "batch-plain")).videos[0].background, { type: "color", value: "#f1f5f9" }, "light grey without a kit");
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a" }), "batch-brand");
+    assert.deepEqual((await createBatch(req(), "batch-brand")).videos[0].background, { type: "color", value: "#1e3a8a" });
+    await saveBrandKit(brandKitSchema.parse({ name: "Acme", primaryColor: "#1e3a8a", defaultBackground: { type: "image", value: "https://cdn.example.com/office.jpg" } }), "batch-brand");
+    assert.deepEqual((await createBatch(req(), "batch-brand")).videos[0].background, { type: "image", value: "https://cdn.example.com/office.jpg" });
+    assert.deepEqual((await createBatch(req({ background: { type: "color", value: "#ffffff" } }), "batch-brand")).videos[0].background, { type: "color", value: "#ffffff" }, "a batch's own background wins");
+  });
+
+  it("rejects missing columns and stops at the allowance", async () => {
+    const { createBatch } = await import("../services");
+    const { config } = await import("../config");
+    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    await assert.rejects(createBatch({ ...base, scriptTemplate: "Hi {nope}", csv: "name\nA" }, "u"), /does not have: nope/);
+    await assert.rejects(createBatch({ ...base, scriptTemplate: "Hi", csv: "name" }, "u"), /at least one data row/);
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 2;
+    try {
+      const r = await createBatch({ ...base, scriptTemplate: "Hi {name}", csv: "name\nA\nB\nC\nD" }, "quota-batch");
+      assert.equal(r.videos.length, 2);
+      assert.deepEqual(r.skipped.map((s) => s.row), [3, 4]);
+      assert.match(r.skipped[0].reason, /limit reached/);
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+});
+
+describe("hardening", () => {
+  it("rate limiter allows a burst then blocks until the window resets", async () => {
+    const { rateLimit, resetRateLimit } = await import("../rate-limit");
+    const t0 = 1_000_000;
+    for (let i = 0; i < 5; i++) assert.equal(rateLimit("k", 5, 60_000, t0 + i).allowed, true);
+    const blocked = rateLimit("k", 5, 60_000, t0 + 10);
+    assert.equal(blocked.allowed, false);
+    assert.ok(blocked.retryAfterSec >= 59);
+    assert.equal(rateLimit("k", 5, 60_000, t0 + 60_001).allowed, true, "window reset");
+    resetRateLimit("k");
+    assert.equal(rateLimit("k", 1, 60_000, t0).remaining, 0);
+  });
+
+  it("reserves a batch of slots whole or not at all", async () => {
+    const { reserveRateLimit, resetRateLimit } = await import("../rate-limit");
+    const t0 = 2_000_000;
+    assert.equal(reserveRateLimit("batch", 7, 10, 60_000, t0).allowed, true);
+    const refused = reserveRateLimit("batch", 4, 10, 60_000, t0 + 1);
+    assert.equal(refused.allowed, false);
+    assert.equal(refused.remaining, 3, "a refused batch leaves the window untouched");
+    assert.equal(reserveRateLimit("batch", 3, 10, 60_000, t0 + 2).allowed, true, "the three that fit still go");
+    assert.equal(reserveRateLimit("batch", 1, 10, 60_000, t0 + 3).allowed, false);
+    assert.equal(reserveRateLimit("batch", 10, 10, 60_000, t0 + 60_001).allowed, true, "window reset");
+    resetRateLimit("batch");
+  });
+
+  it("gives back reserved slots that went unused, within their window only", async () => {
+    const { releaseRateLimit, reserveRateLimit, resetRateLimit } = await import("../rate-limit");
+    const t0 = 3_000_000;
+    assert.equal(reserveRateLimit("giveback", 8, 10, 60_000, t0).allowed, true);
+    releaseRateLimit("giveback", 5, t0 + 1);
+    assert.equal(reserveRateLimit("giveback", 7, 10, 60_000, t0 + 2).remaining, 0, "the five given back are free again");
+    releaseRateLimit("giveback", 50, t0 + 3);
+    assert.equal(reserveRateLimit("giveback", 10, 10, 60_000, t0 + 4).allowed, true, "never below zero");
+    releaseRateLimit("giveback", 10, t0 + 60_001);
+    assert.equal(reserveRateLimit("giveback", 1, 10, 60_000, t0 + 60_002).remaining, 9, "a lapsed window is started afresh");
+    resetRateLimit("giveback");
+  });
+
+  it("builds WebVTT with dot separators and a header", async () => {
+    const { buildVtt } = await import("../captions");
+    const vtt = buildVtt("Hello there. Welcome!", 4);
+    assert.match(vtt, /^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:0\d\.\d{3}\nHello there\.\n/);
+  });
+});
+
+describe("second review fixes", () => {
+  it("safeNextPath blocks open redirects", async () => {
+    const { safeNextPath } = await import("../safe-url-client");
+    assert.equal(safeNextPath("/videos"), "/videos");
+    assert.equal(safeNextPath("//evil.com"), "/home");
+    assert.equal(safeNextPath("/\\evil.com"), "/home");
+    assert.equal(safeNextPath("https://evil.com"), "/home");
+    assert.equal(safeNextPath(null), "/home");
+    // The URL parser drops tabs and newlines before parsing, so these would resolve off-origin.
+    for (const sneaky of ["/\t/evil.com", "/\t//evil.com", "/\n/evil.com", "/\r//evil.com", "/\t\\evil.com", "/ /evil.com", "/videos\n"]) {
+      assert.equal(safeNextPath(sneaky), "/home", JSON.stringify(sneaky));
+      assert.equal(new URL(safeNextPath(sneaky), "https://app.example").origin, "https://app.example");
+    }
+    assert.equal(safeNextPath("/videos?folder=Q4%20launch#top"), "/videos?folder=Q4%20launch#top");
+  });
+
+  it("rejects private and loopback image hosts, accepts public literals", async () => {
+    const { assertPublicHttpUrl, isPrivateAddress } = await import("../safe-url");
+    for (const bad of ["http://127.0.0.1/x", "http://10.0.0.5:8080/admin", "http://169.254.169.254/latest", "http://[::1]/", "http://localhost/x", "ftp://example.com/x", "http://192.168.1.1/"]) {
+      await assert.rejects(assertPublicHttpUrl(bad), Error, bad);
+    }
+    assert.equal((await assertPublicHttpUrl("https://93.184.216.34/portrait.jpg")).hostname, "93.184.216.34");
+    assert.equal((await assertPublicHttpUrl("https://[2606:4700::1111]/x")).hostname, "[2606:4700::1111]");
+    assert.equal(isPrivateAddress("::ffff:10.1.1.1"), true);
+    assert.equal(isPrivateAddress("8.8.8.8"), false);
+    // IPv4-mapped literals arrive from the URL parser in hex form; NAT64 and other non-global ranges stay blocked.
+    for (const bad of ["http://[::ffff:127.0.0.1]/", "http://[::ffff:169.254.169.254]/latest/meta-data/", "http://[::ffff:10.0.0.5]/", "http://[64:ff9b::7f00:1]/", "http://[fd12::1]/", "http://[fe80::1]/", "http://[::]/"]) {
+      await assert.rejects(assertPublicHttpUrl(bad), Error, bad);
+    }
+    for (const ip of ["::ffff:7f00:1", "::ffff:a9fe:a9fe", "::ffff:a00:5", "0:0:0:0:0:ffff:7f00:1", "64:ff9b::808:808", "100::1"]) assert.equal(isPrivateAddress(ip), true, ip);
+    for (const ip of ["::ffff:8.8.8.8", "::ffff:808:808", "2606:4700::1111", "2001:4860:4860::8888"]) assert.equal(isPrivateAddress(ip), false, ip);
+  });
+
+  it("pins server-side fetches to the addresses the host check saw", async () => {
+    const { resolvePublicHttpUrl } = await import("../safe-url");
+    const { pinnedLookup, safeFetch } = await import("../safe-fetch");
+    // Literals are their own answer, in both families.
+    assert.deepEqual((await resolvePublicHttpUrl("https://93.184.216.34/x")).addresses, [{ address: "93.184.216.34", family: 4 }]);
+    assert.deepEqual((await resolvePublicHttpUrl("https://[2606:4700::1111]/x")).addresses, [{ address: "2606:4700::1111", family: 6 }]);
+    // The socket-level lookup ignores the name and answers in whichever shape net.connect asks for.
+    const lookup = pinnedLookup([{ address: "93.184.216.34", family: 4 }, { address: "2606:4700::1111", family: 6 }]);
+    await new Promise<void>((resolve) => {
+      lookup("evil.example", { all: true }, ((err: unknown, list: Array<{ address: string; family: number }>) => {
+        assert.equal(err, null);
+        assert.deepEqual(list, [{ address: "93.184.216.34", family: 4 }, { address: "2606:4700::1111", family: 6 }]);
+        resolve();
+      }) as never);
+    });
+    await new Promise<void>((resolve) => {
+      lookup("evil.example", 4, ((err: unknown, address: string, family: number) => {
+        assert.equal(err, null);
+        assert.equal(address, "93.184.216.34");
+        assert.equal(family, 4);
+        resolve();
+      }) as never);
+    });
+    // An injected client still goes through the host check.
+    const calls: string[] = [];
+    const fake = async (input: string) => { calls.push(input); return new Response("ok"); };
+    await assert.rejects(safeFetch("http://[::ffff:7f00:1]/", {}, "Page URL", fake), /public host/);
+    assert.equal((await safeFetch("https://93.184.216.34/ok", {}, "Page URL", fake)).status, 200);
+    assert.deepEqual(calls, ["https://93.184.216.34/ok"]);
+  });
+
+  it("reads large bodies through the pinned client and caps them", async () => {
+    const { createServer } = await import("node:http");
+    const { fetchPinned, ResponseTooLargeError } = await import("../safe-fetch");
+    const big = Buffer.alloc(3 * 1024 * 1024, "a");
+    const server = createServer((req, res) => {
+      if (req.url === "/empty") { res.writeHead(204); res.end(); return; }
+      if (req.url === "/hook") { res.writeHead(200, { "content-type": "text/plain" }); res.end(big); return; }
+      res.writeHead(200, { "content-type": "text/html", "x-host-seen": req.headers.host ?? "" });
+      // Several writes so the body spans many socket reads, like a real download.
+      for (let i = 0; i < 3; i++) res.write(big.subarray(i * 1024 * 1024, (i + 1) * 1024 * 1024));
+      res.end();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    // The name never resolves; only the pinned lookup can reach the server.
+    const url = new URL(`http://pinned.example.invalid:${port}/page`);
+    const pinned = [{ address: "127.0.0.1", family: 4 as const }];
+    try {
+      const res = await fetchPinned(url, pinned, { signal: AbortSignal.timeout(5_000) }, "Page URL");
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("x-host-seen"), `pinned.example.invalid:${port}`, "Host header keeps the name, not the address");
+      assert.equal((await res.arrayBuffer()).byteLength, big.byteLength, "the whole body arrives after the client is torn down");
+      await assert.rejects(fetchPinned(url, pinned, { signal: AbortSignal.timeout(5_000) }, "Page URL", { maxBytes: 1_000_000 }), ResponseTooLargeError);
+      const hook = await fetchPinned(new URL(`http://pinned.example.invalid:${port}/hook`), pinned, { method: "POST", body: "{}", signal: AbortSignal.timeout(5_000) }, "Webhook URL", { discardBody: true });
+      assert.equal(hook.status, 200);
+      assert.equal(hook.body, null, "a discarded body is not read");
+      const empty = await fetchPinned(new URL(`http://pinned.example.invalid:${port}/empty`), pinned, {}, "URL");
+      assert.equal(empty.status, 204);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("decodes base64 and utf8 data URLs", async () => {
+    const { decodeDataUrl } = await import("../providers/image");
+    const b64 = decodeDataUrl("data:image/png;base64,aGVsbG8=");
+    assert.equal(b64.mimeType, "image/png");
+    assert.equal(Buffer.from(b64.bytes).toString(), "hello");
+    const utf = decodeDataUrl("data:image/svg+xml;utf8,%3Csvg%20fill%3D%22rgba(1%2C2%2C3)%22%3E");
+    assert.equal(utf.mimeType, "image/svg+xml");
+    assert.equal(Buffer.from(utf.bytes).toString(), '<svg fill="rgba(1,2,3)">');
+  });
+
+  it("batch reserves the allowance up front and reports failed starts", async () => {
+    const { createBatch } = await import("../services");
+    const { config } = await import("../config");
+    const base = { title: "W", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, aspect: "16:9" as const, resolution: "1080p" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+    const original = config.renderLimitPerMonth;
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 3;
+    try {
+      const r = await createBatch({ ...base, scriptTemplate: "Hi {name}", csv: "name\nA\nB\nC\nD\nE" }, "quota-batch-2");
+      assert.equal(r.videos.length, 3);
+      assert.deepEqual(r.videos.map((v) => v.rowLabel), ["A", "B", "C"], "row order preserved under concurrency");
+      assert.deepEqual(r.skipped.map((s) => s.row), [4, 5]);
+      assert.deepEqual(r.failed, []);
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original;
+    }
+  });
+
+  it("global login backstop blocks forged client keys", async () => {
+    const { rateLimitPair } = await import("../rate-limit");
+    const t0 = 5_000_000;
+    let blocked = 0;
+    for (let i = 0; i < 20; i++) if (!rateLimitPair(`ip:${i}`, 5, "all", 10, 60_000, t0 + i).allowed) blocked++;
+    assert.equal(blocked, 10, "after 10 global attempts every further request is blocked");
+  });
+});
+
+describe("brand kit", () => {
+  it("is null until saved, then round-trips per owner", async () => {
+    assert.equal(await getBrandKit("u1"), null);
+    const saved = await saveBrandKit(
+      brandKitSchema.parse({ name: "Acme Realty", primaryColor: "#0F766E", defaultAvatarId: "stock_2", defaultVoiceId: "stock_voice_2", captionsByDefault: true }),
+      "u1",
+    );
+    assert.equal(saved.primaryColor, "#0f766e");
+    assert.equal(saved.logoUrl, undefined);
+    assert.deepEqual(await getBrandKit("u1"), saved);
+    assert.equal(await getBrandKit("u2"), null, "another owner never sees it");
+    await deleteBrandKit("u1");
+    assert.equal(await getBrandKit("u1"), null);
+  });
+
+  it("keeps a caption style for new videos, and none when it is the default one", async () => {
+    const styled = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", captionStyle: { position: "top", size: "large", look: "bold", font: "serif" } }), "u-cap");
+    assert.deepEqual(styled.captionStyle, { position: "top", size: "large", look: "bold", font: "serif" });
+    const plain = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", captionStyle: { position: "bottom", size: "medium", look: "classic", font: "sans" } }), "u-cap");
+    assert.equal("captionStyle" in plain, false, "the default style is what an unset one means");
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", captionStyle: { position: "side", size: "medium" } }).success, false);
+    await deleteBrandKit("u-cap");
+  });
+
+  it("keeps an image or video default background, never a colour one", async () => {
+    const image = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultBackground: { type: "image", value: "https://cdn.example.com/bg.jpg" } }), "u-bg");
+    assert.deepEqual(image.defaultBackground, { type: "image", value: "https://cdn.example.com/bg.jpg" });
+    const colour = await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultBackground: { type: "color", value: "#000000" } }), "u-bg");
+    assert.equal("defaultBackground" in colour, false, "the primary colour already covers a colour background");
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", defaultBackground: { type: "video", value: "loop.mp4" } }).success, false, "a video must be a URL");
+    await deleteBrandKit("u-bg");
+  });
+
+  it("pronunciation rules reach the renderer, not the stored script", async () => {
+    const { applyPronunciations, parsePronunciations, formatPronunciations, spokenCopy } = await import("../pronounce");
+    const rules = [{ word: "Nair", sayAs: "Nye-er" }, { word: "Nairobi", sayAs: "Nye-ROH-bee" }, { word: "SaaS", sayAs: "sass" }];
+    assert.equal(applyPronunciations("Priya Nair flew to Nairobi. nair's SaaS (saas) plan.", rules), "Priya Nye-er flew to Nye-ROH-bee. Nye-er's sass (sass) plan.");
+    assert.equal(applyPronunciations("Unchanged.", []), "Unchanged.");
+    assert.equal(applyPronunciations("C++ rocks", [{ word: "C++", sayAs: "see plus plus" }]), "see plus plus rocks", "a word is matched literally");
+    assert.equal(applyPronunciations("Nair here", [{ word: "Nair", sayAs: "$&-ish $1" }]), "$&-ish $1 here", "a spelling is spoken literally, replacement patterns included");
+    assert.equal(applyPronunciations("Nair visited the ER", [{ word: "Nair", sayAs: "Nye-er" }, { word: "ER", sayAs: "E.R." }]), "Nye-er visited the E.R.", "a spelling is never fed to the other rules");
+    assert.equal(applyPronunciations("alpha beta", [{ word: "alpha", sayAs: "beta" }, { word: "beta", sayAs: "gamma" }]), "beta gamma");
+    assert.equal(applyPronunciations("Dr Lee", [{ word: "Dr", sayAs: "Doctor" }, { word: "Doctor", sayAs: "Dok-tor" }]), "Doctor Lee");
+    assert.deepEqual(parsePronunciations("Nair = Nye-er\nno rule here\n = empty\nSaaS=sass ").rules, [{ word: "Nair", sayAs: "Nye-er" }, { word: "SaaS", sayAs: "sass" }]);
+    assert.equal(parsePronunciations(Array.from({ length: 60 }, (_, i) => `w${i} = x`).join("\n")).rules.length, 60, "the page, not the parser, enforces the count");
+    assert.equal(formatPronunciations(rules.slice(0, 2)), "Nair = Nye-er\nNairobi = Nye-ROH-bee");
+    // A rule for one language: [Language] at the end, which must name one; an empty bracket is a rule for all.
+    const scoped = parsePronunciations("Nair = Naïr [French]\nZeno = Tsay-no [ German ]\nSaaS = sass []\nQ = queue [Klingon]\nA = b [sic]\nNair = [French]");
+    assert.deepEqual(scoped.rules, [{ word: "Nair", sayAs: "Naïr", language: "French" }, { word: "Zeno", sayAs: "Tsay-no", language: "German" }, { word: "SaaS", sayAs: "sass" }]);
+    assert.deepEqual(scoped.badLanguage, [{ line: 4, language: "Klingon" }, { line: 5, language: "sic" }], "a word that only looks like a code is no language");
+    assert.deepEqual(scoped.bad, [6], "a bracket with no spelling is pointed out, not dropped");
+    // A spelling that itself ends in a bracket (a kit saved before rules had languages) reads back as written.
+    const bracketed = [{ word: "Nair", sayAs: "Nye-er [1]" }, { word: "Zeno", sayAs: "Zee [no]", language: "French" }];
+    assert.equal(formatPronunciations(bracketed), "Nair = Nye-er [1] []\nZeno = Zee [no] [French]");
+    assert.deepEqual(parsePronunciations(formatPronunciations(bracketed)).rules, bracketed);
+    assert.equal(formatPronunciations(scoped.rules), "Nair = Naïr [French]\nZeno = Tsay-no [German]\nSaaS = sass");
+    assert.deepEqual(parsePronunciations(formatPronunciations(scoped.rules)).rules, scoped.rules, "the page reads back what it shows");
+    const copy = spokenCopy({ script: "Hi Nair.", scenes: [{ script: "Bye Nair.", background: { type: "color" as const, value: "#fff" } }] }, rules);
+    assert.equal(copy.script, "Hi Nye-er.");
+    assert.equal(copy.scenes?.[0].script, "Bye Nye-er.");
+    // Each scene takes the rules for its voice's language (any region), a language's rule beating the rule for all;
+    // a voice with no known language takes only the rules for all.
+    const { pronunciationsFor } = await import("../pronounce");
+    const mixed = [{ word: "Nair", sayAs: "Nye-er" }, { word: "NAIR", sayAs: "Naïr", language: "French" }, { word: "Zeno", sayAs: "Tsay-no", language: "German" }, { word: "nair", sayAs: "Nah-eer", language: "French" }];
+    assert.deepEqual(pronunciationsFor(mixed, "fr-CA"), [{ word: "NAIR", sayAs: "Naïr" }], "the first rule for the language wins");
+    assert.deepEqual(pronunciationsFor(mixed, "German"), [{ word: "Nair", sayAs: "Nye-er" }, { word: "Zeno", sayAs: "Tsay-no" }]);
+    assert.deepEqual(pronunciationsFor(mixed, undefined), [{ word: "Nair", sayAs: "Nye-er" }]);
+    assert.deepEqual(pronunciationsFor(mixed, "Klingon"), [{ word: "Nair", sayAs: "Nye-er" }]);
+    // Providers' other codes and spellings for a language reach the rules written by its name.
+    const aliased = [{ word: "Ola", sayAs: "Oh-la", language: "Norwegian" }, { word: "Ola", sayAs: "Oh-lah", language: "Portuguese" }, { word: "Ola", sayAs: "Oh-lay", language: "Hebrew" }, { word: "Ola", sayAs: "Oh-lo", language: "Chinese" }];
+    assert.deepEqual(pronunciationsFor(aliased, "nb-NO"), [{ word: "Ola", sayAs: "Oh-la" }]);
+    assert.deepEqual(pronunciationsFor(aliased, "pt_BR"), [{ word: "Ola", sayAs: "Oh-lah" }]);
+    assert.deepEqual(pronunciationsFor(aliased, "iw-IL"), [{ word: "Ola", sayAs: "Oh-lay" }]);
+    assert.deepEqual(pronunciationsFor(aliased, "cmn-CN"), [{ word: "Ola", sayAs: "Oh-lo" }]);
+    const voices = { v_fr: { language: "fr-FR" }, v_de: { language: "de-DE" }, v_none: {} };
+    const each = spokenCopy({ script: "Nair and Zeno.", voiceId: "v_fr", scenes: [{ script: "Nair and Zeno.", background: { type: "color" as const, value: "#fff" } }, { script: "Nair and Zeno.", voiceId: "v_de", background: { type: "color" as const, value: "#fff" } }, { script: "Nair and Zeno.", voiceId: "v_none", background: { type: "color" as const, value: "#fff" } }] }, mixed, voices);
+    assert.equal(each.script, "Naïr and Zeno.");
+    assert.deepEqual(each.scenes?.map((sc) => sc.script), ["Naïr and Zeno.", "Nye-er and Tsay-no.", "Nye-er and Zeno."], "a scene without a voice of its own speaks in the video's");
+
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: " Nair ", sayAs: "Nye-er" }] }), "u-say");
+    assert.deepEqual((await getBrandKit("u-say"))?.pronunciations, [{ word: "Nair", sayAs: "Nye-er" }]);
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", pronunciations: Array.from({ length: 51 }, (_, i) => ({ word: `w${i}`, sayAs: "x" })) }).success, false);
+    // A rule's language is kept (an empty one is a rule for all), must name a language, and a repeat of a word in the
+    // same language keeps the first; a spelling ending in "]" would read back as a language.
+    // A repeat in the same language, whatever its region or spelling (French (Canada), fr), keeps the first; a blank
+    // language is a rule for all; a spelling may end in a bracket.
+    const scopedKit = brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: "Nair", sayAs: "Naïr", language: " French (Canada) " }, { word: "nair", sayAs: "Nah", language: "fr" }, { word: "Nair", sayAs: "Nye-er [1]", language: "  " }, { word: "Zeno", sayAs: "Zee-no", language: null }, { word: "zeno", sayAs: "Zay-no" }] });
+    assert.deepEqual((await saveBrandKit(scopedKit, "u-say-lang")).pronunciations, [{ word: "Nair", sayAs: "Naïr", language: "French (Canada)" }, { word: "Nair", sayAs: "Nye-er [1]" }, { word: "Zeno", sayAs: "Zee-no" }]);
+    await deleteBrandKit("u-say-lang");
+    for (const language of ["Klingon", "sic", "USA"]) {
+      assert.match(brandKitSchema.safeParse({ primaryColor: "#0f766e", pronunciations: [{ word: "Q", sayAs: "queue", language }] }).error?.message ?? "", /Name the pronunciation's language/, language);
+    }
+    const proto = MockAvatarProvider.prototype as unknown as { createVideo: (req: { script: string; scenes?: Array<{ script: string }> }) => Promise<{ providerJobId: string }> };
+    const realCreate = proto.createVideo;
+    let heard: { script: string; scenes?: Array<{ script: string }> } | null = null;
+    proto.createVideo = async function (this: unknown, req) {
+      heard = req;
+      return realCreate.call(this, req);
+    };
+    try {
+      const video = await createVideo(videoRequestSchema.parse({ title: "P", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Meet Nair today.", background: { type: "color", value: "#fff" } }] }), "u-say");
+      assert.equal(video.script, "Meet Nair today.", "the stored script keeps the spelling");
+      assert.equal(video.scenes?.[0].script, "Meet Nair today.");
+      assert.equal(heard!.script, "Meet Nye-er today.", "the renderer hears the rule");
+      assert.equal(heard!.scenes?.[0].script, "Meet Nye-er today.");
+      const other = await createVideo(videoRequestSchema.parse({ title: "P", script: "Meet Nair today.", avatarId: "stock_1", voiceId: "stock_voice_1" }), "u-other");
+      assert.equal(other.script, "Meet Nair today.");
+      assert.equal(heard!.script, "Meet Nair today.", "another account's kit does not apply");
+      // A render applies each scene the rules for its voice's language: a French scene voice hears the French rule.
+      await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", pronunciations: [{ word: "Nair", sayAs: "Nye-er" }, { word: "Nair", sayAs: "Naïr", language: "French" }] }), "u-say");
+      await createVideo(videoRequestSchema.parse({ title: "P", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: [{ script: "Meet Nair.", background: { type: "color", value: "#fff" } }, { script: "Salut Nair.", voiceId: "stock_voice_5", background: { type: "color", value: "#fff" } }] }), "u-say");
+      assert.deepEqual(heard!.scenes?.map((sc) => sc.script), ["Meet Nye-er.", "Salut Naïr."]);
+    } finally {
+      proto.createVideo = realCreate;
+      await deleteBrandKit("u-say");
+    }
+  });
+
+  it("rejects bad colors, unknown voices, and other owners' avatars", async () => {
+    assert.throws(() => brandKitSchema.parse({ primaryColor: "teal" }));
+    assert.throws(() => brandKitSchema.parse({ primaryColor: "#0f766e", logoUrl: "ftp://x/logo.png" }));
+    await assert.rejects(saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultVoiceId: "nope" }), "u1"), /not available/);
+    const foreign = await createAvatar({ name: "Theirs", imageUrl: "https://example.com/t.jpg" }, "u2");
+    await assert.rejects(saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultAvatarId: foreign.id }), "u1"), /not found/);
+  });
+});
+
+describe("folders and share views", () => {
+  const req = { title: "T", script: "Hello there.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+
+  it("moves a video into and out of a folder without touching the title", async () => {
+    const v = await createVideo(req);
+    const moved = await updateVideo(v.id, videoPatchSchema.parse({ folder: " Listings " }));
+    assert.equal(moved.folder, "Listings");
+    assert.equal(moved.title, "T");
+    const unfiled = await updateVideo(v.id, videoPatchSchema.parse({ folder: "" }));
+    assert.equal("folder" in unfiled, false);
+    assert.throws(() => videoPatchSchema.parse({}), /Nothing to update/);
+    await assert.rejects(updateVideo(v.id, { folder: "x" }, "someone-else"), /not found/);
+  });
+
+  it("renames or removes a folder for every video in it, trashed ones included", async () => {
+    const { renameFolder, folderRenameSchema } = await import("../services/videos");
+    const a = await createVideo(req, "f1");
+    const b = await createVideo(req, "f1");
+    const c = await createVideo(req, "f1");
+    const theirs = await createVideo(req, "f2");
+    for (const v of [a, b, theirs]) await updateVideo(v.id, { folder: "Listings" }, v.id === theirs.id ? "f2" : "f1");
+    await updateVideo(c.id, { folder: "Other" }, "f1");
+    await deleteVideo(b.id, "f1");
+    assert.deepEqual(await renameFolder(folderRenameSchema.parse({ from: " Listings ", to: "Homes" }), "f1"), { moved: 2 });
+    assert.equal((await getVideo(a.id, "f1", false)).folder, "Homes");
+    assert.equal((await getVideo(b.id, "f1", false)).folder, "Homes", "a trashed video follows its folder");
+    assert.equal((await getVideo(c.id, "f1", false)).folder, "Other");
+    assert.equal((await getVideo(theirs.id, "f2", false)).folder, "Listings", "another owner's folder is untouched");
+    assert.deepEqual(await renameFolder({ from: "Homes", to: "Homes" }, "f1"), { moved: 0 });
+    assert.deepEqual(await renameFolder({ from: "Other", to: "Homes" }, "f1"), { moved: 1 }, "renaming onto an existing folder merges");
+    assert.deepEqual(await renameFolder({ from: "Homes", to: "" }, "f1"), { moved: 3 }, "an empty name removes the folder");
+    assert.equal("folder" in (await getVideo(a.id, "f1", false)), false);
+    assert.deepEqual(await renameFolder({ from: "Nope", to: "X" }, "f1"), { moved: 0 });
+    assert.throws(() => folderRenameSchema.parse({ from: "", to: "X" }));
+    // A video deleted for good between the listing and its turn is skipped, not fatal.
+    await updateVideo(a.id, { folder: "Gone" }, "f1");
+    await updateVideo(c.id, { folder: "Gone" }, "f1");
+    const store = globalThis.__avatarStudioStore!;
+    const realGet = store.get.bind(store);
+    // The listing still has `a`, but by its turn the record is gone: the rename reads null, like after a purge.
+    store.get = async (kind, id) => (kind === "video" && id === a.id ? null : realGet(kind, id));
+    try {
+      assert.deepEqual(await renameFolder({ from: "Gone", to: "Kept" }, "f1"), { moved: 1 });
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal((await getVideo(c.id, "f1", false)).folder, "Kept");
+    assert.equal((await getVideo(a.id, "f1", false)).folder, "Gone", "the vanished one was left alone");
+  });
+
+  it("counts share views only once the render completed", async () => {
+    const v = await createVideo(req);
+    assert.deepEqual(await recordView(v.id), { views: 0, counted: false });
+    await getVideo(v.id, undefined, false).then(async (fresh) => {
+      globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    });
+    assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+    assert.deepEqual(await recordView(v.id, () => false), { views: 1, counted: false }, "gated repeat is not counted");
+    assert.equal((await recordView(v.id)).views, 2);
+    const counted = await getVideo(v.id, undefined, false);
+    assert.ok(counted.lastViewedAt);
+    const today = counted.lastViewedAt!.slice(0, 10);
+    assert.equal(Object.values(counted.viewsByDay!).reduce((a, b) => a + b, 0), 2, "every counted view lands on its UTC day");
+    assert.ok(counted.viewsByDay![today]! >= 1, "the last view landed on the day of the last write");
+    await assert.rejects(recordView("vid_missing"), /not found/);
+  });
+
+  it("keeps views per day for ninety days and sums the recent window", () => {
+    const now = Date.UTC(2026, 9, 23, 12);
+    const day = (ago: number) => new Date(now - ago * 86_400_000).toISOString().slice(0, 10);
+    const history = { [day(0)]: 2, [day(1)]: 5, [day(6)]: 1, [day(7)]: 4, [day(89)]: 3, [day(90)]: 9, bogus: 4, "2026-13-99": 0 };
+    const bumped = bumpViewsByDay(history, now);
+    assert.equal(bumped[day(0)], 3, "today gains one");
+    assert.equal(bumped[day(89)], 3, "the ninetieth day is still kept");
+    assert.equal(day(90) in bumped, false, "the ninety-first day is dropped");
+    assert.equal("bogus" in bumped, false, "a key that is not a date is dropped even with a count");
+    assert.equal("2026-13-99" in bumped, false, "a zero count is dropped");
+    assert.deepEqual(bumpViewsByDay(undefined, now), { [day(0)]: 1 });
+    const video = { viewsByDay: bumped };
+    const perDay = viewsPerDay(video, now, 14);
+    assert.equal(perDay.length, 14);
+    assert.deepEqual(perDay[13], { day: day(0), count: 3 });
+    assert.deepEqual(perDay[12], { day: day(1), count: 5 });
+    assert.equal(perDay[0].day, day(13));
+    assert.equal(viewsInLast(video, 7, now), 9, "today and the six days before it");
+    assert.equal(viewsInLast(video, 8, now), 13);
+    assert.equal(viewsInLast({}, 7, now), 0);
+    assert.equal(analyticsRows([{ id: "v", title: "t", status: "completed", createdAt: new Date(now).toISOString(), views: 13, viewsByDay: bumped } as never], "https://x.test", now)[0].views_7d, 9);
+  });
+
+  it("counts how far viewers get, once per quarter, under the share rules", async () => {
+    const { recordWatch, updateVideo, videoPatchSchema, watchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    assert.throws(() => watchSchema.parse({ quarter: 30 }), /Invalid/);
+    assert.deepEqual(await recordWatch(v.id, 25), { watch: { q25: 0, q50: 0, q75: 0, q100: 0 }, counted: false }, "nothing counts before the render completed");
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    // One viewer's windows: each quarter counts once, however the beacons arrive.
+    const seen = new Set<number>();
+    const viewer = (q: number) => (seen.has(q) ? false : (seen.add(q), true));
+    assert.deepEqual(await recordWatch(v.id, 25, viewer), { watch: { q25: 1, q50: 0, q75: 0, q100: 0 }, counted: true });
+    assert.deepEqual(await recordWatch(v.id, 100, viewer), { watch: { q25: 1, q50: 1, q75: 1, q100: 1 }, counted: true }, "the end counts every marker not yet counted, in one write");
+    assert.deepEqual(await recordWatch(v.id, 75, viewer), { watch: { q25: 1, q50: 1, q75: 1, q100: 1 }, counted: false }, "nothing left to count for this viewer");
+    assert.equal((await getVideo(v.id, undefined, false)).watch?.q75, 1);
+    // Beacons that land together (several viewers, or a view and a quarter) lose nothing.
+    const before = (await getVideo(v.id, undefined, false)).views ?? 0;
+    const burst = await Promise.all([recordWatch(v.id, 25), recordWatch(v.id, 50), recordView(v.id), recordWatch(v.id, 75), recordView(v.id)]);
+    assert.ok(burst.every((r) => r.counted));
+    const after = await getVideo(v.id, undefined, false);
+    assert.deepEqual(after.watch, { q25: 4, q50: 3, q75: 2, q100: 1 }, "every concurrent quarter landed");
+    assert.equal(after.views, before + 2, "views landed beside them");
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "letmein1" }));
+    assert.equal((await recordWatch(v.id, 50)).counted, false, "a locked link needs the unlock cookie");
+    const { getShareLock, shareCookieValue } = await import("../share-lock");
+    assert.equal((await recordWatch(v.id, 50, undefined, shareCookieValue((await getShareLock(v.id))!))).counted, true);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null, shareDisabled: true }));
+    await assert.rejects(recordWatch(v.id, 75), /not found/, "an offline link answers like the share page");
+    await assert.rejects(recordWatch("vid_missing", 25), /not found/);
+  });
+
+  it("counts how far viewers get, once per tenth, under the share rules", async () => {
+    const { recordRetention, updateVideo, videoPatchSchema, watchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    assert.throws(() => watchSchema.parse({ point: 11 }), /Invalid|Too big/);
+    assert.throws(() => watchSchema.parse({ point: -1 }), /Invalid|Too small/);
+    assert.deepEqual(watchSchema.parse({ point: 0 }), { point: 0 });
+    assert.equal((await recordRetention(v.id, 3)).counted, false, "nothing counts before the render completed");
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    // One viewer's windows: each point counts once, however the beacons arrive.
+    const seen = new Set<number>();
+    const viewer = (p: number) => (seen.has(p) ? false : (seen.add(p), true));
+    assert.equal((await recordRetention(v.id, 0, viewer)).counted, true);
+    assert.equal((await recordRetention(v.id, 4, viewer)).counted, true, "a jump counts every point up to it, in one write");
+    assert.equal((await recordRetention(v.id, 2, viewer)).counted, false, "nothing left to count for this viewer");
+    assert.deepEqual((await getVideo(v.id, undefined, false)).retention, [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
+    // Another viewer, to the end, landing at once with a third who only started.
+    await Promise.all([recordRetention(v.id, 10), recordRetention(v.id, 0)]);
+    assert.deepEqual((await getVideo(v.id, undefined, false)).retention, [3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1], "concurrent beacons all land");
+    // An owner edit keeps them.
+    await updateVideo(v.id, videoPatchSchema.parse({ title: "Renamed" }));
+    assert.equal((await getVideo(v.id, undefined, false)).retention?.[0], 3);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "letmein1" }));
+    assert.equal((await recordRetention(v.id, 5)).counted, false, "a locked link needs the unlock cookie");
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null, shareDisabled: true }));
+    await assert.rejects(recordRetention(v.id, 5), /not found/, "an offline link answers like the share page");
+  });
+
+  it("owner edits and late webhooks never roll the counters back", async () => {
+    const { applyAvatarWebhook, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    // An edit reads the record, then a view lands before the edit writes: the view survives.
+    const [edited] = await Promise.all([updateVideo(v.id, videoPatchSchema.parse({ title: "Renamed" })), recordView(v.id)]);
+    assert.equal(edited.title, "Renamed");
+    assert.equal(edited.views, 1, "the edit carried the view counted while it was in flight");
+    const stored = await getVideo(v.id, undefined, false);
+    assert.equal(stored.title, "Renamed");
+    assert.equal(stored.views, 1);
+    // A provider webhook that repeats a recorded outcome is ignored rather than written over the counts.
+    const proto = MockAvatarProvider.prototype as unknown as { parseWebhook?: (body: unknown) => { providerJobId: string; update: { status: "completed" } } | null };
+    const original = proto.parseWebhook;
+    proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "completed" } });
+    try {
+      const late = await applyAvatarWebhook("mock", { id: stored.providerJobId });
+      assert.equal(late?.views, 1);
+      assert.equal(late?.updatedAt, stored.updatedAt, "nothing was written");
+      assert.equal((await getVideo(v.id, undefined, false)).views, 1);
+    } finally {
+      proto.parseWebhook = original;
+    }
+  });
+
+  it("takes the share link offline for the public only", async () => {
+    const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", shareCta: { label: "Go", url: "https://example.com" } });
+    assert.equal((await getVideo(v.id, null, false)).id, v.id, "public before the switch");
+    const off = await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: true }));
+    assert.equal(off.shareDisabled, true);
+    await assert.rejects(getVideo(v.id, null, false), /not found/, "public after the switch");
+    assert.equal((await getVideo(v.id, undefined, false)).id, v.id, "the owner still sees it");
+    await assert.rejects(recordView(v.id), /not found/, "beacons answer like the share page");
+    await assert.rejects(recordCtaClick(v.id), /not found/);
+    const on = await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: false }));
+    assert.equal("shareDisabled" in on, false);
+    assert.equal((await getVideo(v.id, null, false)).id, v.id);
+    assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+  });
+
+  it("expires a share link at a set time for the public only", async () => {
+    const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const { shareExpired, shareOffline } = await import("../client");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", shareCta: { label: "Go", url: "https://example.com" } });
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "yesterday" }), /ISO 8601/);
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "2030-01-01T09:00" }), /UTC offset/, "a wall-clock time without an offset is ambiguous");
+    assert.throws(() => videoPatchSchema.parse({ shareExpiresAt: "2001-01-01T00:00:00Z" }), /in the future/);
+    const offset = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: "2030-06-01T10:00:00+02:00" }));
+    assert.equal(offset.shareExpiresAt, "2030-06-01T08:00:00.000Z", "stored as a UTC instant");
+    const soon = new Date(Date.now() + 60_000).toISOString();
+    const set = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: soon }));
+    assert.equal(set.shareExpiresAt, soon);
+    assert.equal(shareExpired(set), false);
+    assert.equal(shareOffline(set, Date.parse(soon)), true, "the helper takes a clock");
+    assert.equal((await getVideo(v.id, null, false)).id, v.id, "public until the time passes");
+    assert.deepEqual(await recordView(v.id), { views: 1, counted: true });
+    // The moment passes (the stored instant moves behind the clock rather than the test waiting).
+    const stored = (await getVideo(v.id, undefined, false)) as Video;
+    globalThis.__avatarStudioStore!.put("video", { ...stored, shareExpiresAt: new Date(Date.now() - 1).toISOString() });
+    assert.equal(shareExpired(await getVideo(v.id, undefined, false)), true);
+    await assert.rejects(getVideo(v.id, null, false), /not found/, "public after the time passes");
+    assert.equal((await getVideo(v.id, undefined, false)).id, v.id, "the owner still sees it");
+    await assert.rejects(recordView(v.id), /not found/, "beacons answer like the share page");
+    await assert.rejects(recordCtaClick(v.id), /not found/);
+    const cleared = await updateVideo(v.id, videoPatchSchema.parse({ shareExpiresAt: null }));
+    assert.equal("shareExpiresAt" in cleared, false);
+    assert.equal((await getVideo(v.id, null, false)).id, v.id, "clearing the expiry reopens the link");
+    assert.deepEqual(await recordView(v.id), { views: 2, counted: true });
+  });
+
+  it("the in-memory store refuses one id under two kinds, like the single-key table", async () => {
+    const store = new MemoryStore();
+    await store.put("video", { id: "vid_shared" });
+    await assert.rejects(store.put("sharelock", { id: "vid_shared" }), /already belongs to a video record/);
+    await store.put("video", { id: "vid_shared", title: "again" });
+    await store.remove("video", "vid_shared");
+    await store.put("sharelock", { id: "vid_shared" });
+  });
+
+  it("protects a share link with a password kept only as a hash", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const { getShareLock, shareCookieValue, shareUnlocked, verifySharePassword } = await import("../share-lock");
+    const { exportOwnerData } = await import("../services/account");
+    const v = await createVideo(req);
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    assert.throws(() => videoPatchSchema.parse({ sharePassword: "abc" }), /at least 4/);
+    const locked = await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "  open sesame " }));
+    assert.equal(locked.shareLocked, true);
+    assert.equal(JSON.stringify(locked).includes("sesame"), false, "the password never sits on the video");
+    const lock = await getShareLock(v.id);
+    assert.ok(lock && lock.hash.length === 64 && lock.salt.length === 32);
+    // Supabase keeps every kind in one table keyed by id alone: the lock must never share the video's id.
+    assert.equal(lock!.id, `sharelock_${v.id}`);
+    assert.equal(lock!.videoId, v.id);
+    assert.equal((await getVideo(v.id, undefined, false)).shareLocked, true, "the video row survives the lock write");
+    assert.equal(await verifySharePassword(v.id, "wrong"), null);
+    assert.equal((await verifySharePassword(v.id, "open sesame"))?.videoId, v.id);
+    const cookie = shareCookieValue(lock!);
+    assert.equal(await shareUnlocked(locked, undefined), false);
+    assert.equal(await shareUnlocked(locked, "nope"), false);
+    assert.equal(await shareUnlocked(locked, cookie), true);
+    assert.equal(await shareUnlocked({ id: "vid_orphan", shareLocked: true }, cookie), false, "marked locked with no lock record stays closed");
+    assert.deepEqual(await recordView(v.id), { views: 0, counted: false }, "a beacon without the cookie is not counted");
+    assert.deepEqual(await recordView(v.id, () => true, cookie), { views: 1, counted: true });
+    // Changing the password invalidates every cookie handed out for the old one.
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "different one" }));
+    assert.equal(await shareUnlocked(locked, cookie), false);
+    const exported = await exportOwnerData(LOCAL_OWNER);
+    const row = exported.sharelock.find((r) => r.videoId === v.id)!;
+    assert.ok(row && !("hash" in row) && !("salt" in row), "the export redacts the hash and salt");
+    const open = await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null }));
+    assert.equal("shareLocked" in open, false);
+    assert.equal(await getShareLock(v.id), null);
+    assert.equal(await shareUnlocked(open, undefined), true);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "back again" }));
+    await deleteVideo(v.id);
+    await deleteVideo(v.id, LOCAL_OWNER, true);
+    assert.equal(await getShareLock(v.id), null, "deleting the video for good removes its lock");
+  });
+
+  it("counts call-to-action clicks only while a completed video carries the button", async () => {
+    const { recordCtaClick, updateVideo, videoPatchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    await updateVideo(v.id, videoPatchSchema.parse({ shareCta: { label: "Book", url: "https://example.com" } }));
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 0, counted: false }, "not counted while rendering");
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 1, counted: true });
+    assert.deepEqual(await recordCtaClick(v.id, () => false), { clicks: 1, counted: false }, "gated repeat is not counted");
+    assert.equal((await recordCtaClick(v.id)).clicks, 2);
+    assert.ok((await getVideo(v.id, undefined, false)).lastCtaClickAt);
+    const removed = await updateVideo(v.id, videoPatchSchema.parse({ shareCta: null }));
+    assert.equal(removed.ctaClicks, 2, "the count survives removing the button");
+    assert.deepEqual(await recordCtaClick(v.id), { clicks: 2, counted: false }, "no button, no click");
+    await assert.rejects(recordCtaClick("vid_missing"), /not found/);
+  });
+});
+
+describe("send by email", () => {
+  it("emails the share link of a live, finished video to de-duplicated recipients", async () => {
+    const { shareEmailSchema, shareVideoByEmail, SHARE_EMAILS_PER_HOUR } = await import("../share-email");
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      const v = await createVideo(videoRequestSchema.parse({ title: "Open <house>", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+      const input = shareEmailSchema.parse({ to: [" Jane@Example.com ", "sam@example.com", "jane@example.com"], message: "  Have a look <3 " });
+      assert.deepEqual(input.to, ["jane@example.com", "sam@example.com", "jane@example.com"], "trimmed and lower-cased");
+      assert.throws(() => shareEmailSchema.parse({ to: [] }), /at least one/);
+      assert.throws(() => shareEmailSchema.parse({ to: ["not-an-email"] }), /email address/);
+      assert.throws(() => shareEmailSchema.parse({ to: Array.from({ length: 11 }, (_, i) => `p${i}@example.com`) }), /At most 10/);
+      const ctx = { origin: "https://studio.example.com/", senderEmail: "alice@example.com", siteName: "Acme" };
+      await assert.rejects(shareVideoByEmail(v.id, input, LOCAL_OWNER, ctx), /finished/, "a render in progress has nothing to share yet");
+      const fresh = await getVideo(v.id, undefined, false);
+      globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed", durationSec: 12.4 });
+      await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: true }));
+      await assert.rejects(shareVideoByEmail(v.id, input, LOCAL_OWNER, ctx), /off or expired/);
+      await updateVideo(v.id, videoPatchSchema.parse({ shareDisabled: false, sharePassword: "letmein1" }));
+      const result = await shareVideoByEmail(v.id, input, LOCAL_OWNER, ctx);
+      assert.deepEqual(result, { sent: ["jane@example.com", "sam@example.com"], failed: [], delivers: false });
+      assert.equal(mock.sent.length, 2);
+      const msg = mock.sent[0];
+      assert.equal(msg.subject, 'alice@example.com shared a video with you: "Open <house>"');
+      assert.match(msg.text, /https:\/\/studio\.example\.com\/share\/vid_/);
+      assert.match(msg.text, /\(12s\)/);
+      assert.match(msg.text, /Have a look <3/);
+      assert.match(msg.text, /password protected/);
+      assert.doesNotMatch(msg.text, /letmein1/, "the password never travels in the email");
+      assert.match(msg.html, /Open &lt;house&gt;/, "html escapes the title");
+      assert.match(msg.html, /Have a look &lt;3/, "html escapes the note");
+      assert.match(msg.html, /href="https:\/\/studio\.example\.com\/share\/vid_/);
+      assert.equal(msg.replyTo, "alice@example.com", "replies go to the sender, not the app");
+      assert.match(msg.text, /You received this because alice@example.com entered your address/);
+      await assert.rejects(shareVideoByEmail("vid_missing", input, LOCAL_OWNER, ctx), /not found/);
+      await assert.rejects(shareVideoByEmail(v.id, input, "someone-else", ctx), /not found/, "only the owner can send");
+      // The hourly allowance counts recipients and is charged to the sender, whatever workspace is active.
+      const many = { to: Array.from({ length: 10 }, (_, i) => `r${i}@example.com`) };
+      for (let i = 0; i < Math.floor((SHARE_EMAILS_PER_HOUR - 2) / 10); i += 1) await shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx);
+      await assert.rejects(shareVideoByEmail(v.id, many, LOCAL_OWNER, ctx), /per hour \(8 left\)/);
+      const eight = { to: many.to.slice(0, 8) };
+      assert.equal((await shareVideoByEmail(v.id, eight, LOCAL_OWNER, ctx)).sent.length, 8, "a refused batch took nothing: the eight that fit still go");
+      await assert.rejects(shareVideoByEmail(v.id, { to: ["one@example.com"] }, LOCAL_OWNER, ctx), /\(0 left\)/);
+      const asMember = { ...ctx, senderId: "user_alice" };
+      assert.equal((await shareVideoByEmail(v.id, { to: ["one@example.com"] }, LOCAL_OWNER, asMember)).sent.length, 1, "a signed-in sender has their own allowance");
+    } finally {
+      setEmailProvider(undefined);
+      const { resetRateLimit } = await import("../rate-limit");
+      for (const key of [`share-email:sender:${LOCAL_OWNER}`, "share-email:sender:user_alice", "share-email:global"]) resetRateLimit(key);
+    }
+  });
+
+  it("reports recipients the provider refused without failing the rest", async () => {
+    const { shareVideoByEmail } = await import("../share-email");
+    const flaky = new MockEmailProvider();
+    flaky.send = async (m) => {
+      if (m.to.startsWith("bad@")) throw new Error("mailbox unavailable");
+      flaky.sent.push(m);
+    };
+    setEmailProvider(flaky);
+    try {
+      const v = await createVideo(videoRequestSchema.parse({ title: "Partial", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+      const fresh = await getVideo(v.id, undefined, false);
+      globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+      const result = await shareVideoByEmail(v.id, { to: ["good@example.com", "bad@example.com"] }, LOCAL_OWNER, { origin: "http://localhost:3000" });
+      assert.deepEqual(result.sent, ["good@example.com"]);
+      assert.deepEqual(result.failed, [{ to: "bad@example.com", error: "mailbox unavailable" }]);
+      assert.equal(flaky.sent.length, 1);
+      assert.doesNotMatch(flaky.sent[0].text, /password/, "no password hint for an open link");
+      assert.match(flaky.sent[0].subject, /^Someone shared/);
+      assert.equal(flaky.sent[0].replyTo, undefined);
+    } finally {
+      setEmailProvider(undefined);
+      const { resetRateLimit } = await import("../rate-limit");
+      for (const key of [`share-email:sender:${LOCAL_OWNER}`, "share-email:global"]) resetRateLimit(key);
+    }
+  });
+});
+
+describe("cover image", () => {
+  const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+  it("stores a poster in its own record, serves it back, and removes it with the video", async () => {
+    const { updateVideo, videoPatchSchema } = await import("../services/videos");
+    const { getCover } = await import("../cover");
+    const { exportOwnerData } = await import("../services/account");
+    const v = await createVideo(videoRequestSchema.parse({ title: "Cover", script: "Hi.", avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id }));
+    const set = await updateVideo(v.id, videoPatchSchema.parse({ cover: png }));
+    assert.ok(set.cover?.updatedAt);
+    assert.equal(set.cover?.mimeType, "image/png");
+    assert.equal(set.cover?.bytes, 70);
+    assert.equal(JSON.stringify(set).includes("iVBOR"), false, "the bytes never sit on the video");
+    const cover = await getCover(v.id);
+    assert.equal(cover?.mimeType, "image/png");
+    assert.equal(cover?.bytes.byteLength, 70);
+    const exported = (await exportOwnerData(LOCAL_OWNER)) as unknown as Record<string, unknown>;
+    assert.equal("cover" in exported, false, "the export never loads cover rows");
+    const row = (exported.video as { id: string; cover?: { bytes: number } }[]).find((r) => r.id === v.id)!;
+    assert.equal(row.cover?.bytes, 70, "the export describes the cover from the video");
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ cover: "data:image/svg+xml;base64,PHN2Zy8+" })), /PNG, JPEG, WebP, or GIF/);
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ cover: "data:image/png,%E0%A4%A" })), /malformed/, "a bad payload is a validation error, not a crash");
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ cover: "data:image/png;base64" })), /malformed/);
+    assert.throws(() => videoPatchSchema.parse({ cover: "https://example.com/a.png" }), /uploaded image/);
+    const cleared = await updateVideo(v.id, videoPatchSchema.parse({ cover: null }));
+    assert.equal("cover" in cleared, false);
+    assert.equal(await getCover(v.id), null);
+    await updateVideo(v.id, videoPatchSchema.parse({ cover: png }));
+    await deleteVideo(v.id);
+    await deleteVideo(v.id, LOCAL_OWNER, true);
+    assert.equal(await getCover(v.id), null, "deleting the video removes its cover");
+  });
+
+  it("refuses a cover over the size limit", async () => {
+    const { setCover } = await import("../cover");
+    const big = `data:image/png;base64,${Buffer.alloc(2 * 1024 * 1024 + 1, 1).toString("base64")}`;
+    await assert.rejects(setCover({ id: "vid_big" }, big), /too large/);
+  });
+});
+
+describe("favourites", () => {
+  it("stars avatars and voices idempotently, keeps the newest 50, and survives an email change", async () => {
+    const { getPrefs, toggleFavorite } = await import("../notifications");
+    await toggleFavorite({ kind: "avatar", id: "stock_2", on: true }, "fav1");
+    await toggleFavorite({ kind: "avatar", id: "stock_2", on: true }, "fav1");
+    await toggleFavorite({ kind: "voice", id: "stock_voice_3", on: true }, "fav1");
+    assert.deepEqual((await getPrefs("fav1"))?.favoriteAvatarIds, ["stock_2"]);
+    assert.deepEqual((await getPrefs("fav1"))?.favoriteVoiceIds, ["stock_voice_3"]);
+    await savePrefs({ emailOnComplete: "fav@example.com" }, "fav1");
+    assert.deepEqual((await getPrefs("fav1"))?.favoriteAvatarIds, ["stock_2"], "an email change keeps the stars");
+    assert.equal((await getPrefs("fav1"))?.emailOnComplete, "fav@example.com");
+    for (let i = 0; i < 60; i++) await toggleFavorite({ kind: "avatar", id: `a${i}`, on: true }, "fav1");
+    const many = (await getPrefs("fav1"))?.favoriteAvatarIds ?? [];
+    assert.equal(many.length, 50);
+    assert.equal(many[0], "a10", "the oldest stars fall off first");
+    await toggleFavorite({ kind: "voice", id: "stock_voice_3", on: false }, "fav1");
+    assert.equal("favoriteVoiceIds" in ((await getPrefs("fav1")) ?? {}), false);
+    assert.equal((await getPrefs("someone-else"))?.favoriteAvatarIds, undefined, "stars are per owner");
+  });
+});
+
+describe("bulk actions", () => {
+  const req = { title: "B", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+
+  it("moves and deletes many videos, skipping foreign and unknown ids", async () => {
+    const a = await createVideo(req, "u1");
+    const b = await createVideo(req, "u1");
+    const theirs = await createVideo(req, "u2");
+    const moved = await bulkVideos(bulkVideoSchema.parse({ action: "move", ids: [a.id, b.id, theirs.id, "vid_nope", a.id], folder: "Q4" }), "u1");
+    assert.deepEqual(moved, { done: 2, missing: [theirs.id, "vid_nope"] });
+    assert.equal((await getVideo(a.id, "u1", false)).folder, "Q4");
+    assert.equal((await getVideo(theirs.id, "u2", false)).folder, undefined);
+    const deleted = await bulkVideos({ action: "delete", ids: [a.id, theirs.id] }, "u1");
+    assert.deepEqual(deleted, { done: 1, missing: [theirs.id] });
+    assert.equal((await listVideos("u1")).length, 1);
+    assert.equal((await listVideos("u2")).length, 1);
+    assert.deepEqual((await listVideos("u1", false, true)).map((v) => v.id), [a.id], "bulk delete moves to the trash");
+    // Purge reaches only the trash; restore brings a trashed video back.
+    assert.deepEqual(await bulkVideos({ action: "purge", ids: [b.id] }, "u1"), { done: 0, missing: [b.id] }, "a live video cannot be purged");
+    assert.deepEqual(await bulkVideos({ action: "restore", ids: [a.id, theirs.id] }, "u1"), { done: 1, missing: [theirs.id] });
+    assert.equal((await listVideos("u1")).length, 2);
+    await bulkVideos({ action: "delete", ids: [a.id] }, "u1");
+    assert.deepEqual(await bulkVideos({ action: "purge", ids: [a.id] }, "u1"), { done: 1, missing: [] });
+    await assert.rejects(getVideo(a.id, "u1", false), /not found/);
+    assert.equal((await listVideos("u1", false, true)).length, 0);
+    assert.throws(() => bulkVideoSchema.parse({ action: "move", ids: [] }));
+    // Share links switch off and on in bulk, never for someone else's video.
+    const off = await bulkVideos(bulkVideoSchema.parse({ action: "share", ids: [b.id, theirs.id], shareDisabled: true }), "u1");
+    assert.deepEqual(off, { done: 1, missing: [theirs.id] });
+    assert.equal((await getVideo(b.id, "u1", false)).shareDisabled, true);
+    assert.equal((await getVideo(theirs.id, "u2", false)).shareDisabled, undefined);
+    await bulkVideos({ action: "share", ids: [b.id], shareDisabled: false }, "u1");
+    assert.equal("shareDisabled" in (await getVideo(b.id, "u1", false)), false, "on is stored as absent");
+    assert.throws(() => bulkVideoSchema.parse({ action: "share", ids: [b.id] }), "the switch is required");
+  });
+});
+
+describe("api keys", () => {
+  it("resolves the owner from a secret, never exposes the hash, and stops after revocation", async () => {
+    const { key, secret } = await createApiKey("Zapier", "u1");
+    assert.ok(secret.startsWith(API_KEY_PREFIX));
+    assert.ok(!("hash" in key));
+    assert.equal(secret.startsWith(key.prefix), true);
+    assert.equal(await ownerForApiKey(secret), "u1");
+    assert.equal(await ownerForApiKey(`${secret}x`), null);
+    assert.equal(await ownerForApiKey("not-a-key"), null);
+    const listed = await listApiKeys("u1");
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].id, key.id);
+    assert.deepEqual(await listApiKeys("u2"), []);
+    assert.equal(await revokeApiKey(key.id, "u2"), false, "another owner cannot revoke it");
+    assert.equal(await revokeApiKey(key.id, "u1"), true);
+    assert.equal(await ownerForApiKey(secret), null);
+  });
+
+  it("caps the number of keys per owner", async () => {
+    for (let i = 0; i < MAX_API_KEYS; i++) await createApiKey(`k${i}`, "u3");
+    await assert.rejects(createApiKey("one more", "u3"), /At most/);
+  });
+
+  it("gives a key an optional lifetime, after which it is refused with its own message and its last use is not recorded", async () => {
+    const { apiKeyExpired } = await import("../api-keys");
+    const forever = await createApiKey("forever", "u4");
+    assert.equal(forever.key.expiresAt, undefined, "no lifetime, no expiry");
+    const before = Date.now();
+    const month = await createApiKey("month", "u4", "u4", 30);
+    const at = Date.parse(month.key.expiresAt!);
+    assert.ok(at >= before + 30 * 86_400_000 && at <= Date.now() + 30 * 86_400_000, "30 days from now");
+    assert.equal(await ownerForApiKey(month.secret), "u4", "works until then");
+    assert.equal(apiKeyExpired(month.key, at - 1), false);
+    assert.equal(apiKeyExpired(month.key, at), true, "the moment it expires, it is expired");
+    assert.equal(apiKeyExpired(forever.key, Date.now() + 1e12), false);
+
+    // Its lifetime run out: refused, saying so, and its last use left as it was.
+    const stored = (await getStore().get<ApiKey>("apikey", month.key.id))!;
+    await getStore().put("apikey", { ...stored, expiresAt: new Date(Date.now() - 1000).toISOString(), lastUsedAt: undefined });
+    await assert.rejects(ownerForApiKey(month.secret), (err: unknown) => err instanceof UnauthorizedError && /expired on \d{4}-\d\d-\d\d \d\d:\d\d UTC; create a new one/.test(err.message));
+    assert.equal((await getStore().get<ApiKey>("apikey", month.key.id))!.lastUsedAt, undefined);
+    assert.equal(await ownerForApiKey(forever.secret), "u4", "other keys are unaffected");
+    // Still listed (to be revoked), with when it expired and that it has, by the server's clock.
+    const listed = await listApiKeys("u4");
+    const gone = listed.find((k) => k.id === month.key.id)!;
+    assert.ok(gone.expiresAt);
+    assert.equal(gone.expired, true);
+    assert.equal(listed.find((k) => k.id === forever.key.id)!.expired, false);
+    assert.equal((await listApiKeys("u4", Date.now() - 86_400_000)).find((k) => k.id === month.key.id)!.expired, false, "judged at the time given");
+  });
+
+  it("renames a key, keeping its secret, and only for its own owner", async () => {
+    const { renameApiKey } = await import("../api-keys");
+    const made = await createApiKey("Old name", "u6", "u6", 30, "read");
+    assert.equal(await renameApiKey(made.key.id, "someone-else", "Taken"), null, "another owner's key is not found");
+    const renamed = (await renameApiKey(made.key.id, "u6", "New name"))!;
+    assert.equal(renamed.previous, "Old name");
+    assert.equal(renamed.key.name, "New name");
+    assert.equal((renamed.key as Record<string, unknown>).hash, undefined, "the hash is never returned");
+    assert.equal(await ownerForApiKey(made.secret), "u6", "the secret still works");
+    const listed = (await listApiKeys("u6")).find((k) => k.id === made.key.id)!;
+    assert.equal(listed.name, "New name");
+    assert.equal(listed.expiresAt, made.key.expiresAt, "its lifetime is unchanged");
+    assert.equal(listed.access, "read", "and its access");
+    assert.equal(await renameApiKey("key_nosuch", "u6", "X"), null);
+
+    // A key revoked while a rename is saved stays revoked, and a last-use stamp never undoes a rename or revives a key.
+    const store = getStore();
+    const realPutIf = store.putIf.bind(store);
+    const racing = await createApiKey("Racing", "u6");
+    store.putIf = (async (kind: Parameters<typeof store.putIf>[0], item: { id: string }, field: string, expected: string) => {
+      if (kind === "apikey" && item.id === racing.key.id) await revokeApiKey(racing.key.id, "u6");
+      return realPutIf(kind, item, field, expected);
+    }) as typeof store.putIf;
+    try {
+      assert.equal(await renameApiKey(racing.key.id, "u6", "Renamed"), null, "gone, so not found");
+    } finally {
+      store.putIf = realPutIf;
+    }
+    assert.equal(await getStore().get("apikey", racing.key.id), null, "and not written back");
+    assert.equal(await ownerForApiKey(racing.secret), null, "its secret stays refused");
+
+    const used = await createApiKey("Used", "u6");
+    const { apiKeyForSecret } = await import("../api-keys");
+    store.putIf = (async (kind: Parameters<typeof store.putIf>[0], item: { id: string }, field: string, expected: string) => {
+      if (kind === "apikey" && item.id === used.key.id) {
+        store.putIf = realPutIf;
+        await renameApiKey(used.key.id, "u6", "Renamed while used");
+      }
+      return realPutIf(kind, item, field, expected);
+    }) as typeof store.putIf;
+    try {
+      await apiKeyForSecret(used.secret);
+      await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      store.putIf = realPutIf;
+    }
+    assert.equal((await getStore().get<ApiKey>("apikey", used.key.id))!.name, "Renamed while used", "the stamp did not undo the rename");
+  });
+
+  it("gives a key full access unless it is made read-only, and lists what each may do", async () => {
+    const { apiKeyAccess, apiKeyForSecret } = await import("../api-keys");
+    const full = await createApiKey("full", "u5");
+    const read = await createApiKey("reader", "u5", "u5", undefined, "read");
+    assert.equal(full.key.access, "full");
+    assert.equal(read.key.access, "read");
+    assert.equal((await apiKeyForSecret(read.secret))!.access, "read", "the secret resolves to its access");
+    assert.equal(await ownerForApiKey(read.secret), "u5", "a read-only key still names its owner");
+    // A key made before access was chosen has full access.
+    const stored = (await getStore().get<ApiKey>("apikey", full.key.id))!;
+    const { access: _a, ...legacy } = stored;
+    void _a;
+    await getStore().put("apikey", legacy as ApiKey);
+    assert.equal(apiKeyAccess(legacy as ApiKey), "full");
+    const listed = await listApiKeys("u5");
+    assert.equal(listed.find((k) => k.id === full.key.id)!.access, "full");
+    assert.equal(listed.find((k) => k.id === read.key.id)!.access, "read");
+  });
+});
+
+describe("outbound webhooks", () => {
+  const HOOK = "https://203.0.113.5/hooks/studio";
+
+  it("rejects private hosts and keeps the secret across URL changes", async () => {
+    await assert.rejects(saveNotifySettings({ url: "http://localhost:9/hook" }, "u1"), /public host/);
+    await assert.rejects(saveNotifySettings({ url: "ftp://203.0.113.5/x" }, "u1"), /http or https/);
+    const first = await saveNotifySettings({ url: HOOK }, "u1");
+    assert.ok(first.secret.startsWith("whsec_"));
+    const second = await saveNotifySettings({ url: `${HOOK}2` }, "u1");
+    assert.equal(second.secret, first.secret);
+    assert.equal(await getNotifySettings("u2"), null);
+  });
+
+  it("signs deliveries, records the outcome, and fires only on final transitions", async () => {
+    const calls: Array<{ url: string; headers: Record<string, string>; body: string }> = [];
+    setNotificationFetch(async (input, init) => {
+      calls.push({ url: String(input), headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      const settings = await saveNotifySettings({ url: HOOK }, "u1");
+      const result = (await dispatchNotification(settings, "test", { hello: 1 }))!;
+      assert.equal(result.ok, true);
+      assert.equal(calls.length, 1);
+      const [call] = calls;
+      const expected = createHmac("sha256", settings.secret).update(`${call.headers["X-Studio-Timestamp"]}.${call.body}`).digest("hex");
+      assert.equal(call.headers["X-Studio-Signature"], `sha256=${expected}`);
+      assert.equal(signPayload(settings.secret, call.headers["X-Studio-Timestamp"], call.body), expected);
+      assert.equal(JSON.parse(call.body).event, "test");
+      assert.equal((await getNotifySettings("u1"))?.lastDelivery?.ok, true);
+
+      const base = { ...(await createVideo({ title: "N", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1")) };
+      await notifyVideoTransition(base, { ...base, status: "processing" });
+      assert.equal(calls.length, 1, "processing is not a final state");
+      await notifyVideoTransition({ ...base, status: "processing" }, { ...base, status: "completed", videoUrl: "https://cdn/x.mp4" });
+      assert.equal(calls.length, 2);
+      assert.equal(JSON.parse(calls[1].body).event, "video.completed");
+      assert.equal(JSON.parse(calls[1].body).data.id, base.id);
+      await notifyVideoTransition({ ...base, status: "completed" }, { ...base, status: "completed" });
+      assert.equal(calls.length, 2, "no change, no delivery");
+      await notifyVideoTransition({ ...base, status: "processing", ownerId: "u2" }, { ...base, status: "failed", ownerId: "u2" });
+      assert.equal(calls.length, 2, "owners without a webhook are skipped");
+
+      setNotificationFetch(async () => new Response("nope", { status: 500 }));
+      const failed = (await dispatchNotification(settings, "test", {}))!;
+      assert.equal(failed.ok, false);
+      assert.match(failed.error ?? "", /500/);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("sends only the events chosen, keeps the choice across saves that leave it out, and always sends a test", async () => {
+    const { sendsEvent, sendTestNotification, notifySchema } = await import("../notifications");
+    const sent: string[] = [];
+    setNotificationFetch(async (_input, init) => {
+      sent.push(JSON.parse(String(init?.body)).event);
+      return new Response("", { status: 200 });
+    });
+    try {
+      const all = await saveNotifySettings({ url: HOOK }, "ev1");
+      assert.equal(all.events, undefined, "a new webhook is sent every event");
+      assert.equal(sendsEvent(all, "lead.captured"), true);
+      // Chosen in any order, kept in Settings' order, each once.
+      const some = await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed", "video.completed", "video.failed"] }), "ev1");
+      assert.deepEqual(some.events, ["video.completed", "video.failed"]);
+      assert.equal(await dispatchNotification(some, "lead.captured", { email: "a@example.com" }), null, "not chosen: not sent");
+      assert.deepEqual(sent, []);
+      assert.equal((await getNotifySettings("ev1"))!.deliveries, undefined, "nor logged");
+      assert.equal((await dispatchNotification(some, "video.failed", {}))!.ok, true);
+      assert.equal((await sendTestNotification("ev1"))!.ok, true, "a test is sent whatever is chosen");
+      assert.deepEqual(sent, ["video.failed", "test"]);
+      // A save that leaves the events out (a URL change from the API) keeps the choice; choosing every one is the same as none.
+      assert.deepEqual((await saveNotifySettings({ url: `${HOOK}/v2` }, "ev1")).events, ["video.completed", "video.failed"]);
+      assert.equal((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["lead.captured", "job.failed", "twin.failed", "job.completed", "translation.proofread_ready", "translation.failed", "video.failed", "twin.completed", "translation.completed", "video.completed"] }), "ev1")).events, undefined);
+      assert.equal(notifySchema.safeParse({ url: HOOK, events: [] }).success, false, "at least one");
+      assert.deepEqual((await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed", "video.failed", "video.failed", "video.failed"] }), "ev1")).events, ["video.failed"], "repeats are dropped, not refused");
+      assert.equal(notifySchema.safeParse({ url: HOOK, events: ["test"] }).success, false, "a test is not an event to choose");
+      assert.equal(notifySchema.safeParse({ url: HOOK, events: ["video.deleted"] }).success, false);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("rotates the signing secret, signing with the old one too for a day unless told not to, and never shows it", async () => {
+    const { rotateNotifySecret, retirePreviousSecret, publicNotifySettings, activePreviousSecret, SECRET_OVERLAP_HOURS } = await import("../notifications");
+    const calls: Array<{ headers: Record<string, string>; body: string }> = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("", { status: 200 });
+    });
+    const sig = (secret: string, c: (typeof calls)[number]) => `sha256=${signPayload(secret, c.headers["X-Studio-Timestamp"], c.body)}`;
+    try {
+      await assert.rejects(rotateNotifySecret("rot0"), /Save a webhook URL first/);
+      const first = await saveNotifySettings({ url: HOOK }, "rot1");
+      assert.equal((await dispatchNotification(first, "test", {}))!.ok, true);
+      assert.equal(calls[0].headers["X-Studio-Signature-Previous"], undefined, "no rotation, no second signature");
+
+      const before = Date.now();
+      const rotated = await rotateNotifySecret("rot1");
+      assert.notEqual(rotated.secret, first.secret);
+      assert.ok(rotated.secret.startsWith("whsec_"));
+      assert.equal(rotated.previousSecret, first.secret);
+      const ends = Date.parse(rotated.previousSecretExpiresAt!);
+      assert.ok(ends >= before + SECRET_OVERLAP_HOURS * 3_600_000 && ends <= Date.now() + SECRET_OVERLAP_HOURS * 3_600_000);
+      assert.equal((await getNotifySettings("rot1"))!.deliveries?.length, 1, "the log is kept");
+      await dispatchNotification(rotated, "video.completed", { id: "v" });
+      assert.equal(calls[1].headers["X-Studio-Signature"], sig(rotated.secret, calls[1]), "signed with the new secret");
+      assert.equal(calls[1].headers["X-Studio-Signature-Previous"], sig(first.secret, calls[1]), "and, for now, with the old one");
+
+      // The API and a save never give the old secret away, and a save keeps the overlap.
+      const shown = publicNotifySettings(rotated) as Record<string, unknown>;
+      assert.equal(shown.previousSecret, undefined);
+      assert.equal(shown.previousSecretExpiresAt, rotated.previousSecretExpiresAt);
+      assert.equal("previousSecretExpiresAt" in (publicNotifySettings(rotated, ends) as Record<string, unknown>), false, "an overlap that has ended is not shown");
+      const resaved = await saveNotifySettings({ url: `${HOOK}/v2` }, "rot1");
+      assert.equal(resaved.secret, rotated.secret);
+      assert.equal(resaved.previousSecret, first.secret);
+      assert.equal(activePreviousSecret(resaved, ends), null, "the overlap ends on time");
+
+      // Retired early: deliveries carry one signature again.
+      const retired = await retirePreviousSecret("rot1");
+      assert.equal(retired.previousSecret, undefined);
+      assert.equal(retired.secret, rotated.secret);
+      await dispatchNotification(retired, "test", {});
+      assert.equal(calls[2].headers["X-Studio-Signature-Previous"], undefined);
+
+      // Without the overlap the old secret stops at once; a rotation during an overlap replaces the secret it overlapped.
+      const twice = await rotateNotifySecret("rot1");
+      const thrice = await rotateNotifySecret("rot1");
+      assert.equal(thrice.previousSecret, twice.secret);
+      const abrupt = await rotateNotifySecret("rot1", false);
+      assert.equal(abrupt.previousSecret, undefined);
+      assert.equal(abrupt.previousSecretExpiresAt, undefined);
+
+      // A save keeps no overlap that has run out, and the export carries neither secret.
+      const again = await rotateNotifySecret("rot1");
+      await getStore().put("notify", { ...again, previousSecretExpiresAt: new Date(Date.now() - 1000).toISOString() });
+      const afterExpiry = await saveNotifySettings({ url: HOOK }, "rot1");
+      assert.equal(afterExpiry.previousSecret, undefined);
+      assert.equal(afterExpiry.previousSecretExpiresAt, undefined);
+      await rotateNotifySecret("rot1");
+      const { exportOwnerData } = await import("../services/account");
+      const exported = JSON.stringify(await exportOwnerData("rot1"));
+      const live = (await getNotifySettings("rot1"))!;
+      assert.ok(exported.includes(live.url));
+      assert.equal(exported.includes(live.secret), false);
+      assert.equal(exported.includes(live.previousSecret!), false);
+
+      // A save written over settings that changed after it read them is tried again, so it never brings back the
+      // secret a rotation replaced.
+      const store = getStore();
+      const realPutIf = store.putIf.bind(store);
+      let raced = false;
+      store.putIf = (async (kind: Parameters<typeof store.putIf>[0], item: { id: string }, field: string, expected: string) => {
+        if (!raced && kind === "notify") {
+          raced = true;
+          await rotateNotifySecret("rot1");
+        }
+        return realPutIf(kind, item, field, expected);
+      }) as typeof store.putIf;
+      let savedOver: Awaited<ReturnType<typeof saveNotifySettings>>;
+      try {
+        savedOver = await saveNotifySettings({ url: `${HOOK}/raced` }, "rot1");
+      } finally {
+        store.putIf = realPutIf;
+      }
+      const stored = (await getNotifySettings("rot1"))!;
+      assert.equal(raced, true);
+      assert.equal(stored.url, `${HOOK}/raced`);
+      assert.equal(stored.secret, savedOver.secret, "the save landed on top of the rotation");
+      assert.notEqual(stored.secret, live.secret, "and kept the rotated secret rather than the one it first read");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("pauses the webhook: nothing is sent or logged until it is resumed, a test still goes, and a save keeps the pause", async () => {
+    const { setNotificationsPaused, sendTestNotification, redeliverNotification } = await import("../notifications");
+    const sent: string[] = [];
+    setNotificationFetch(async (_input, init) => {
+      sent.push(JSON.parse(String(init?.body)).event);
+      return new Response("", { status: 200 });
+    });
+    try {
+      await assert.rejects(setNotificationsPaused("pz0", true), /Save a webhook URL first/);
+      await saveNotifySettings({ url: HOOK }, "pz1");
+      const first = (await dispatchNotification((await getNotifySettings("pz1"))!, "video.completed", { id: "v1" }))!;
+      const paused = await setNotificationsPaused("pz1", true);
+      assert.ok(paused.pausedAt);
+      assert.equal((await setNotificationsPaused("pz1", true)).pausedAt, paused.pausedAt, "pausing again keeps when it began");
+      assert.equal(await dispatchNotification(paused, "video.failed", { id: "v2" }), null, "not sent");
+      assert.equal(await dispatchNotification(paused, "lead.captured", { email: "a@example.com" }), null);
+      // A copy read before the pause (a lead's deferred dispatch) is not sent either.
+      const stale = { ...paused, pausedAt: undefined };
+      assert.equal(await dispatchNotification(stale, "video.completed", { id: "v-stale" }), null, "the pause is checked as it is now");
+      assert.equal((await getNotifySettings("pz1"))!.deliveries!.length, 1, "nor logged");
+      // A test and a redelivery are asked for by hand, so they still go.
+      assert.equal((await sendTestNotification("pz1"))!.ok, true);
+      assert.equal((await sendTestNotification("pz1", "video.completed"))!.ok, true);
+      await redeliverNotification(first.id!, "pz1");
+      assert.deepEqual(sent, ["video.completed", "test", "video.completed", "video.completed"]);
+      // A save (a new URL) keeps the pause, and the secret.
+      const resaved = await saveNotifySettings({ url: `${HOOK}/moved` }, "pz1");
+      assert.equal(resaved.pausedAt, paused.pausedAt);
+      assert.equal(resaved.secret, paused.secret);
+      // A rotation keeps the pause.
+      const { rotateNotifySecret } = await import("../notifications");
+      assert.equal((await rotateNotifySecret("pz1")).pausedAt, paused.pausedAt);
+      const resumed = await setNotificationsPaused("pz1", false);
+      assert.equal(resumed.pausedAt, undefined);
+      assert.equal((await dispatchNotification(resumed, "video.failed", { id: "v3" }))!.ok, true, "sent again once resumed");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("sends a marked sample of any event, whatever is chosen, and redelivers it still marked", async () => {
+    const { sendTestNotification, sampleEventData, redeliverNotification, publicDelivery } = await import("../notifications");
+    const calls: Array<{ headers: Record<string, string>; body: string }> = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("", { status: 200 });
+    });
+    try {
+      assert.equal(await sendTestNotification("smp0", "video.completed"), null, "no webhook, nothing sent");
+      // Only renders failing are chosen; a sample of another event is still sent, as a test always is.
+      const { notifySchema } = await import("../notifications");
+      await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.failed"] }), "smp1");
+      const ping = (await sendTestNotification("smp1"))!;
+      assert.equal(ping.event, "test");
+      assert.equal(calls[0].headers["X-Studio-Test"], undefined, "a ping is a test by its name alone");
+      assert.equal(JSON.parse(calls[0].body).test, undefined);
+
+      for (const event of ["video.completed", "video.failed", "lead.captured"] as const) {
+        const sent = (await sendTestNotification("smp1", event))!;
+        assert.equal(sent.ok, true);
+        const call = calls.at(-1)!;
+        assert.equal(call.headers["X-Studio-Event"], event);
+        assert.equal(call.headers["X-Studio-Test"], "true");
+        const body = JSON.parse(call.body);
+        assert.equal(body.event, event);
+        assert.equal(body.test, true);
+        assert.match(body.id, /^whe_/);
+        assert.ok(JSON.stringify(body.data).includes("sample_"));
+      }
+      const completed = JSON.parse(calls[1].body).data;
+      assert.equal(completed.status, "completed");
+      assert.equal(completed.videoUrl, "https://example.com/sample.mp4");
+      assert.equal(JSON.parse(calls[2].body).data.status, "failed");
+      assert.equal(JSON.parse(calls[3].body).data.email, "viewer@example.com");
+
+      // Logged as samples; sent again, still a sample.
+      const log = (await getNotifySettings("smp1"))!.deliveries!;
+      assert.deepEqual(log.map((d) => [d.event, !!d.test]), [["lead.captured", true], ["video.failed", true], ["video.completed", true], ["test", false]]);
+      assert.equal(publicDelivery(log[0]).test, true);
+      assert.equal((await getNotifySettings("smp1"))!.lastDelivery?.test, true, "the last delivery says so too");
+      await redeliverNotification(log[0].id, "smp1");
+      assert.equal(calls.at(-1)!.headers["X-Studio-Test"], "true");
+      assert.equal((await getNotifySettings("smp1"))!.deliveries![0].test, true);
+
+      // Shaped like the data a real event sends: the same fields, each of the same type.
+      const shape = (d: Record<string, unknown>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v]).sort());
+      const real = (await createVideo({ title: "Real", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "smp1"));
+      await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.completed", "video.failed", "lead.captured"] }), "smp1");
+      const before = calls.length;
+      await notifyVideoTransition({ ...real, status: "processing" }, { ...real, status: "completed", videoUrl: "https://cdn/x.mp4", thumbnailUrl: "https://cdn/x.jpg", durationSec: 12 });
+      await notifyVideoTransition({ ...real, status: "processing" }, { ...real, status: "failed", error: "It broke" });
+      const { captureVideoLead } = await import("../services/leads");
+      await captureVideoLead({ ...real, shareGate: true }, { email: "lead@example.com", name: "Lee" });
+      await new Promise((r) => setTimeout(r, 20));
+      const realData = Object.fromEntries(calls.slice(before).map((c) => [JSON.parse(c.body).event, JSON.parse(c.body).data]));
+      for (const event of ["video.completed", "video.failed", "lead.captured"] as const) {
+        assert.ok(realData[event], `a real ${event} was sent`);
+        assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData(event)))), shape(realData[event]), `the ${event} sample is shaped like the real one`);
+      }
+      // A presenter's lead has its own shape, and its own sample.
+      const agent = await createAgent(agentSchema.parse({ name: "Sample check", avatarId: "stock_1", voiceId: "stock_voice_1", isPublic: true, collectEmail: true }), "smp1");
+      const visit = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+      const beforeLead = calls.length;
+      await captureLead(agent.id, { conversationId: visit.conversationId, email: "visitor@example.com", name: "Vi" });
+      await new Promise((r) => setTimeout(r, 20));
+      const presenterLead = JSON.parse(calls.slice(beforeLead).find((c) => JSON.parse(c.body).event === "lead.captured")!.body).data;
+      assert.equal(presenterLead.source, "presenter");
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("lead.captured", undefined, "presenter")))), shape(presenterLead), "the presenter lead sample is shaped like the real one");
+      const sentPresenter = (await sendTestNotification("smp1", "lead.captured", "presenter"))!;
+      assert.equal(sentPresenter.ok, true);
+      assert.equal(JSON.parse(calls.at(-1)!.body).data.source, "presenter");
+      calls.splice(before);
+
+      // Settings saved before revision ids existed still get the delivery logged (written over their updatedAt).
+      const legacy = (await getNotifySettings("smp1"))!;
+      const { rev: _rev, ...noRev } = legacy;
+      void _rev;
+      await getStore().put("notify", noRev);
+      await dispatchNotification(noRev as typeof legacy, "video.failed", { id: "v" });
+      const afterLegacy = (await getNotifySettings("smp1"))!;
+      assert.equal(afterLegacy.deliveries![0].event, "video.failed");
+      assert.ok(afterLegacy.rev, "and carry a rev from then on");
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("sends translation.completed and translation.failed once when a dub finishes or fails, shaped like its sample", async () => {
+    const { notifyTranslationTransition, sampleEventData, sendTestNotification, notifySchema } = await import("../notifications");
+    const { getTranslation, listTranslations, applyTranslationWebhook } = await import("../services/translations");
+    const { MockTranslateProvider } = await import("../providers/translate/mock");
+    const calls: Array<{ event: string; body: Record<string, unknown> }> = [];
+    setNotificationFetch(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push({ event: (init?.headers as Record<string, string>)["X-Studio-Event"], body });
+      return new Response("", { status: 200 });
+    });
+    try {
+      await saveNotifySettings(notifySchema.parse({ url: HOOK }), "dub1");
+      const dub = await createTranslation({ title: "Tour", sourceVideoUrl: "https://example.com/tour.mp4", targetLanguage: "Spanish" }, "dub1");
+      assert.equal(dub.status, "processing");
+      assert.equal(calls.length, 0, "nothing is sent while the dub is being made");
+      // The demo provider reports a job started long ago as finished; reading the dub moves it on and sends the event,
+      // once, though two reads race to do it.
+      await getStore().put("translation", { ...(await getStore().get<Translation>("translation", dub.id))!, providerJobId: "mock_tr_1", proofreadToken: "secret-token-302" });
+      const [done] = await Promise.all([getTranslation(dub.id, "dub1"), getTranslation(dub.id, "dub1")]);
+      assert.equal(done.status, "completed");
+      assert.equal(calls.length, 1);
+      assert.ok(!JSON.stringify(calls[0].body).includes("secret-token-302"), "the proofread link's secret is not sent");
+      assert.equal(calls[0].event, "translation.completed");
+      const data = calls[0].body.data as Record<string, unknown>;
+      assert.equal(data.id, dub.id);
+      assert.equal(data.title, "Tour");
+      assert.equal(data.targetLanguage, "Spanish");
+      assert.equal(data.sourceVideoUrl, "https://example.com/tour.mp4");
+      assert.equal(data.status, "completed");
+      assert.ok(String(data.videoUrl).length > 0);
+      assert.equal(data.providerJobId, undefined, "the provider's job id is not sent");
+      // Read again (and listed), a finished dub sends nothing more.
+      await getTranslation(dub.id, "dub1");
+      await listTranslations("dub1");
+      assert.equal(calls.length, 1, "sent once");
+
+      // A failure is sent as translation.failed with its reason; a dub refused when asked for is not sent (the
+      // caller has the refusal in the answer).
+      const refused = await createTranslation({ title: "No", sourceVideoUrl: "https://example.com/no.mp4?demo=refuse", targetLanguage: "French" }, "dub1");
+      assert.equal(refused.status, "failed");
+      assert.equal(calls.length, 1);
+      // A failure the provider calls back with is sent once, with its reason; reading the dub after sends nothing more.
+      const proto = MockTranslateProvider.prototype as unknown as { parseWebhook?: (body: unknown) => unknown };
+      proto.parseWebhook = (body) => ({ providerJobId: (body as { id: string }).id, update: { status: "failed", error: "provider error" } });
+      try {
+        const doomed = await createTranslation({ title: "Doomed", sourceVideoUrl: "https://example.com/d.mp4", targetLanguage: "German" }, "dub1");
+        await getStore().put("translation", { ...(await getStore().get<Translation>("translation", doomed.id))!, providerJobId: "mock_tr_2" });
+        assert.equal((await applyTranslationWebhook("mock", { id: "mock_tr_2" }))!.status, "failed");
+        await applyTranslationWebhook("mock", { id: "mock_tr_2" }); // a repeated callback
+        await getTranslation(doomed.id, "dub1");
+        const failures = calls.filter((c) => c.event === "translation.failed");
+        assert.equal(failures.length, 1, "sent once");
+        assert.equal((failures[0].body.data as Record<string, unknown>).id, doomed.id);
+        assert.equal((failures[0].body.data as Record<string, unknown>).error, "provider error");
+        assert.equal((failures[0].body.data as Record<string, unknown>).videoUrl, undefined);
+      } finally {
+        delete proto.parseWebhook;
+      }
+      calls.splice(1);
+      const running = { ...done, id: "tr_sample_fail", status: "processing" as const, videoUrl: undefined };
+      await notifyTranslationTransition(running, { ...running, status: "failed", error: "It broke" });
+      assert.equal(calls.at(-1)!.event, "translation.failed");
+      assert.equal((calls.at(-1)!.body.data as Record<string, unknown>).error, "It broke");
+      // Not a move to an end: nothing.
+      await notifyTranslationTransition(running, { ...running, updatedAt: "later" });
+      assert.equal(calls.length, 2);
+
+      // Each sample has the fields of the real event, of the same types.
+      const shape = (d: Record<string, unknown>) => Object.fromEntries(Object.entries(d).map(([k, v]) => [k, typeof v]).sort());
+      await notifyTranslationTransition(running, { ...running, status: "completed", videoUrl: "https://cdn/es.mp4", captionUrls: { srt: "https://cdn/es.srt", vtt: "https://cdn/es.vtt" } });
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("translation.completed")))), shape(calls.at(-1)!.body.data as Record<string, unknown>));
+      assert.deepEqual(shape(JSON.parse(JSON.stringify(sampleEventData("translation.failed")))), shape(calls[1].body.data as Record<string, unknown>));
+      for (const event of ["translation.completed", "translation.failed"] as const) {
+        const sent = (await sendTestNotification("dub1", event))!;
+        assert.equal(sent.ok, true);
+        assert.equal(calls.at(-1)!.event, event);
+        assert.equal(calls.at(-1)!.body.test, true);
+        assert.match(String((calls.at(-1)!.body.data as Record<string, unknown>).id), /^sample_/);
+      }
+
+      // A webhook chosen to send only renders is not sent dubs.
+      await saveNotifySettings(notifySchema.parse({ url: HOOK, events: ["video.completed", "video.failed"] }), "dub1");
+      const before = calls.length;
+      await notifyTranslationTransition(running, { ...running, status: "failed", error: "Again" });
+      assert.equal(calls.length, before);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("logs the last deliveries, redelivers one signed afresh, and starts the log over for a new URL", async () => {
+    const { WEBHOOK_LOG_SIZE, publicDelivery, redeliverNotification, deleteNotifySettings } = await import("../notifications");
+    const calls: Array<{ headers: Record<string, string>; body: string }> = [];
+    let status = 500;
+    setNotificationFetch(async (_input, init) => {
+      calls.push({ headers: init?.headers as Record<string, string>, body: String(init?.body) });
+      return new Response("", { status });
+    });
+    try {
+      const settings = await saveNotifySettings({ url: HOOK }, "log1");
+      const first = (await dispatchNotification(settings, "lead.captured", { email: "ana@example.com" }))!;
+      assert.equal(first.ok, false);
+      assert.ok(first.id?.startsWith("whd_"));
+      assert.equal(calls[0].headers["X-Studio-Delivery"], first.id);
+      assert.equal(calls[0].headers["X-Studio-Redelivery-Of"], undefined);
+      // A second delivery written from the same stale settings keeps the first's entry: the log is read again before writing.
+      await dispatchNotification(settings, "test", {});
+      let log = (await getNotifySettings("log1"))!.deliveries!;
+      assert.deepEqual(log.map((d) => d.event), ["test", "lead.captured"], "newest first");
+      assert.equal(log[1].body, calls[0].body, "the body sent is kept for redelivery");
+      assert.deepEqual(publicDelivery(log[1]), { id: first.id, at: log[1].at, event: "lead.captured", ok: false, status: 500, error: "Endpoint returned 500", resendable: true });
+
+      // Sent again: the same body, a fresh timestamp and signature, a new id, and the original named.
+      status = 200;
+      await new Promise((r) => setTimeout(r, 1100));
+      const again = await redeliverNotification(first.id!, "log1");
+      assert.equal(again.ok, true);
+      const resent = calls.at(-1)!;
+      assert.equal(resent.body, calls[0].body);
+      assert.notEqual(resent.headers["X-Studio-Timestamp"], calls[0].headers["X-Studio-Timestamp"]);
+      assert.equal(resent.headers["X-Studio-Signature"], `sha256=${signPayload(settings.secret, resent.headers["X-Studio-Timestamp"], resent.body)}`);
+      assert.equal(resent.headers["X-Studio-Redelivery-Of"], first.id);
+      assert.notEqual(resent.headers["X-Studio-Delivery"], first.id);
+      // The event's id is inside the signed body, so it is the same on the repeat: the receiver can ignore it.
+      assert.match(JSON.parse(calls[0].body).id, /^whe_/);
+      assert.equal(JSON.parse(resent.body).id, JSON.parse(calls[0].body).id);
+      log = (await getNotifySettings("log1"))!.deliveries!;
+      assert.equal(log[0].redeliveryOf, first.id);
+      assert.equal((await getNotifySettings("log1"))!.lastDelivery?.ok, true);
+      // A redelivery of a redelivery still names the original.
+      await redeliverNotification(log[0].id, "log1");
+      assert.equal(calls.at(-1)!.headers["X-Studio-Redelivery-Of"], first.id);
+
+      // Unknown, another owner's, and too large to keep.
+      await assert.rejects(redeliverNotification("whd_nosuch", "log1"), /no longer in the log/);
+      await assert.rejects(redeliverNotification(first.id!, "someone_else"), /no longer in the log/);
+      const big = (await dispatchNotification((await getNotifySettings("log1"))!, "test", { pad: "x".repeat(20_000) }))!;
+      assert.equal(publicDelivery((await getNotifySettings("log1"))!.deliveries![0]).resendable, false);
+      await assert.rejects(redeliverNotification(big.id!, "log1"), /too large/);
+
+      // Only the last WEBHOOK_LOG_SIZE are kept.
+      for (let i = 0; i < WEBHOOK_LOG_SIZE + 3; i++) await dispatchNotification((await getNotifySettings("log1"))!, "test", { i });
+      assert.equal((await getNotifySettings("log1"))!.deliveries!.length, WEBHOOK_LOG_SIZE);
+
+      // The same URL saved again keeps the log; a new URL starts it over.
+      assert.equal((await saveNotifySettings({ url: HOOK }, "log1")).deliveries?.length, WEBHOOK_LOG_SIZE);
+      const moved = await saveNotifySettings({ url: `${HOOK}/v2` }, "log1");
+      assert.equal(moved.deliveries, undefined);
+      // A delivery that finishes after the URL changed, or after the webhook was removed, is not written back.
+      await dispatchNotification(settings, "test", {});
+      assert.equal((await getNotifySettings("log1"))!.deliveries, undefined);
+      await deleteNotifySettings("log1");
+      await dispatchNotification(moved, "test", {});
+      assert.equal(await getNotifySettings("log1"), null, "a removed webhook is not brought back");
+      // Removed and made again at the same URL: an attempt for the old one is not logged on the new one.
+      await new Promise((r) => setTimeout(r, 5));
+      const remade = await saveNotifySettings({ url: `${HOOK}/v2` }, "log1");
+      await dispatchNotification(moved, "test", {});
+      assert.equal((await getNotifySettings("log1"))!.deliveries, undefined);
+      // A write that lands between the read and the record makes the record read again rather than overwrite it.
+      const store = globalThis.__avatarStudioStore!;
+      const putIf = store.putIf.bind(store);
+      let raced = false;
+      store.putIf = (async (kind, item, field, expected) => {
+        if (!raced && kind === "notify") {
+          raced = true;
+          await saveNotifySettings({ url: `${HOOK}/v2` }, "log1");
+        }
+        return putIf(kind, item, field, expected);
+      }) as typeof store.putIf;
+      try {
+        await dispatchNotification(remade, "test", { raced: true });
+      } finally {
+        store.putIf = putIf;
+      }
+      assert.ok(raced);
+      assert.equal((await getNotifySettings("log1"))!.deliveries?.length, 1, "recorded once, over the settings as they then were");
+
+      // The account export lists the log as the API does: no bodies sent (lead emails among them), no secret.
+      const { exportOwnerData } = await import("../services");
+      await dispatchNotification((await getNotifySettings("log1"))!, "lead.captured", { email: "kept@example.com" });
+      const exported = (await exportOwnerData("log1")) as unknown as { notify: Array<Record<string, unknown>> };
+      const row = exported.notify[0];
+      assert.equal(row.secret, undefined);
+      assert.ok(Array.isArray(row.deliveries) && (row.deliveries as unknown[]).length === 2);
+      assert.ok(!JSON.stringify(row).includes("kept@example.com"));
+      assert.equal((row.deliveries as Array<{ resendable: boolean }>)[0].resendable, true);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+});
+
+describe("insights", () => {
+  it("buckets renders per UTC day, compares with the previous window, and ranks views", () => {
+    const now = Date.parse("2026-10-23T15:00:00Z");
+    const mk = (daysAgo: number, extra: Partial<Video> = {}): Video => ({
+      id: `v${daysAgo}${extra.title ?? ""}`,
+      title: "t",
+      script: "s",
+      avatarId: "a",
+      voiceId: "v",
+      aspect: "16:9",
+      background: { type: "color", value: "#fff" },
+      captions: false,
+      speed: 1,
+      status: "completed",
+      provider: "mock",
+      createdAt: new Date(now - daysAgo * 86_400_000).toISOString(),
+      updatedAt: new Date(now).toISOString(),
+      ...extra,
+    });
+    const videos = [mk(0), mk(0, { title: "b", views: 7, ctaClicks: 3, watch: { q25: 6, q50: 5, q75: 4, q100: 3 } }), mk(13, { views: 2 }), mk(14), mk(20, { status: "failed" }), mk(40), mk(3, { folder: "Listings" }), mk(2, { folder: "Listings", status: "failed" })];
+    const r = computeInsights(videos, now);
+    assert.equal(r.perDay.length, 14);
+    assert.equal(r.perDay[13].day, "2026-10-23");
+    assert.equal(r.perDay[13].count, 2);
+    assert.equal(r.perDay[0].day, "2026-10-10");
+    assert.equal(r.perDay[0].count, 1, "13 days ago is the first day of the window");
+    assert.equal(r.totalLast, 5);
+    assert.equal(r.totalPrevious, 2, "14 and 20 days ago fall in the previous window; 40 is older");
+    assert.equal(r.completionRate, 6 / 8);
+    assert.equal(r.totalViews, 9);
+    assert.equal(r.totalClicks, 3);
+    assert.equal(r.clickRate, 3 / 9);
+    assert.equal(computeInsights([], now).clickRate, null, "no views, no rate");
+    assert.equal(r.finishRate, 3 / 9, "finishes across the library over views across the library");
+    assert.equal(computeInsights([], now).finishRate, null);
+    assert.equal(computeInsights([mk(0, { views: 4 })], now).finishRate, null, "views without any watch marks are no data, not 0%");
+    assert.equal(computeInsights([mk(0, { views: 4, watch: { q25: 1, q50: 0, q75: 0, q100: 0 } })], now).finishRate, 0, "a mark without a finish is a real 0%");
+    // The CSV rows carry the same numbers in spreadsheet form.
+    const rows = analyticsRows([videos[1], videos[0]], "https://studio.example.com/");
+    const sheet = parseCsv(toCsv([...ANALYTICS_COLUMNS], rows));
+    assert.deepEqual(sheet.columns, [...ANALYTICS_COLUMNS], "the file carries the columns in order");
+    assert.equal(sheet.rows[1].finish_rate, "", "no views, empty cell in the file");
+    assert.equal(sheet.rows[0].finish_rate, "43");
+    assert.equal(rows[0].views, 7);
+    assert.equal(rows[0].watched_100, 3);
+    assert.equal(rows[0].finish_rate, 43, "percent, rounded");
+    assert.equal(rows[0].cta_clicks, 3);
+    assert.equal(rows[0].share_link, `https://studio.example.com/share/${videos[1].id}`, "no double slash");
+    assert.equal(rows[1].views, 0);
+    assert.equal(rows[1].finish_rate, undefined, "no views, empty cell");
+    // Retention follows the video page's chart: who started, each tenth's share of them, and where most left.
+    const [kept] = analyticsRows([{ ...videos[0], retention: [10, 10, 9, 8, 8, 6, 5, 5, 4, 3, 2] }], "https://s");
+    assert.equal(kept.retention_started, 10);
+    assert.deepEqual([kept.reached_10_pct, kept.reached_50_pct, kept.reached_100_pct], [100, 60, 20]);
+    assert.equal(kept.most_left_between, "40%-50%");
+    assert.equal(kept.most_left_points, 20);
+    assert.equal(analyticsRows([{ ...videos[0], retention: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3] }], "https://s")[0].most_left_between, undefined, "nobody left, no drop");
+    assert.equal(analyticsRows([{ ...videos[0], retention: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }], "https://s")[0].most_left_between, "0%-10%", "from the start");
+    assert.equal(rows[1].retention_started, 0, "nobody started");
+    assert.equal(rows[1].reached_10_pct, undefined, "no shares before anyone started");
+    assert.equal(sheet.rows[1].reached_100_pct, "");
+    assert.equal(finishRateOf(videos[1]), 3 / 7);
+    assert.equal(finishRateOf({ views: 0 }), null);
+    assert.equal(finishRateOf({ views: 2, watch: { q25: 9, q50: 9, q75: 9, q100: 9 } }), 1, "never above one when counters disagree");
+    assert.equal(computeInsights([mk(0, { views: 1, watch: { q25: 5, q50: 5, q75: 5, q100: 5 } })], now).finishRate, 1);
+    assert.deepEqual(r.topViewed.map((v) => v.views), [7, 2]);
+    assert.deepEqual(r.folders, [{ name: "Listings", count: 2 }]);
+    assert.equal(computeInsights([], now).completionRate, null);
+  });
+});
+
+describe("workspaces", () => {
+  const alice = { id: "alice", email: "alice@example.com" };
+  const bob = { id: "bob", email: "bob@example.com" };
+
+  it("viewers watch and comment: no content changes, no keys, and demotion takes a member's keys away", async () => {
+    const carol = { id: "carol", email: "carol@example.com" };
+    const ws = await createWorkspace("Acme", alice);
+    const invite = await createInvite(ws.id, inviteSchema.parse({ role: "viewer" }), alice);
+    const joined = await acceptInvite(invite.token, carol);
+    assert.equal(joined.members.find((m) => m.userId === "carol")?.role, "viewer");
+    assert.equal(canEdit(joined, "carol"), false);
+    assert.equal(canEdit(joined, "alice"), true);
+    assert.equal(canEdit(null, "carol"), true, "a personal space is always the person's own");
+    assert.equal(canManageAccount(joined, "carol"), false);
+    assert.deepEqual([roleCanEdit("owner"), roleCanEdit("editor"), roleCanEdit("viewer"), roleCanEdit(null)], [true, true, false, false]);
+    assert.deepEqual([roleArticle("owner"), roleArticle("editor"), roleArticle("viewer")], ["an owner", "an editor", "a viewer"]);
+    assert.throws(() => roleSchema.parse("admin"));
+    assert.equal(inviteSchema.parse({}).role, "editor", "invites default to editor");
+    // An editor who minted a key under the workspace loses it when made a viewer; the owner's keys stay.
+    const bobInvite = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(bobInvite.token, bob);
+    await createApiKey("bob's script", ws.id, bob.id);
+    await createApiKey("alice's script", ws.id, alice.id);
+    assert.equal((await listApiKeys(ws.id)).length, 2);
+    const demoted = await setMemberRole(ws.id, bob.id, "viewer", alice);
+    assert.equal(demoted.members.find((m) => m.userId === "bob")?.role, "viewer");
+    assert.deepEqual((await listApiKeys(ws.id)).map((k) => k.name), ["alice's script"]);
+    // Back to editor: nothing is revoked, and the last owner still cannot be demoted to a viewer.
+    await setMemberRole(ws.id, bob.id, "editor", alice);
+    assert.equal((await listApiKeys(ws.id)).length, 1);
+    await assert.rejects(setMemberRole(ws.id, alice.id, "viewer", alice), /at least one owner/);
+  });
+
+  it("creates, invites, joins, scopes content, and protects the last owner", async () => {
+    const ws = await createWorkspace("Acme", alice);
+    assert.equal(ws.members[0].role, "owner");
+    assert.equal((await listWorkspaces(alice.id)).length, 1);
+    assert.deepEqual(await listWorkspaces(bob.id), []);
+    assert.equal(await workspaceForMember(ws.id, bob.id), null);
+
+    await assert.rejects(createInvite(ws.id, { role: "editor" }, bob), /not found/);
+    const invite = await createInvite(ws.id, { email: bob.email, role: "editor" }, alice);
+    assert.ok((await findInvite(invite.token))?.workspace.id === ws.id);
+    assert.equal(await findInvite("nope"), null);
+    const joined = await acceptInvite(invite.token, bob);
+    assert.equal(joined.members.length, 2);
+    assert.equal(await findInvite(invite.token), null, "invite consumed");
+    await assert.rejects(acceptInvite(invite.token, bob), /invalid or has expired/);
+    assert.ok(await workspaceForMember(ws.id, bob.id));
+
+    // Content created under the workspace id is visible to any member and not in personal spaces.
+    const v = await createVideo({ title: "Team", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, ws.id);
+    assert.equal((await listVideos(ws.id))[0].id, v.id);
+    assert.deepEqual(await listVideos(alice.id), []);
+
+    // Editors cannot manage members; the sole owner cannot be removed or demoted.
+    await assert.rejects(removeMember(ws.id, alice.id, bob), /Only workspace owners/);
+    // Account-level actions (wipe, billing) inside the workspace are for owners; personal space is always manageable.
+    assert.equal(canManageAccount(ws, alice.id), true);
+    assert.equal(canManageAccount(ws, bob.id), false);
+    assert.equal(canManageAccount(ws, "stranger"), false);
+    assert.equal(canManageAccount(null, bob.id), true);
+    await assert.rejects(removeMember(ws.id, alice.id, alice), /at least one owner/);
+    await assert.rejects(setMemberRole(ws.id, alice.id, "editor", alice), /at least one owner/);
+    const pendingForOwner = await createInvite(ws.id, { role: "editor" }, alice);
+    assert.equal((await workspaceView(ws, bob)).invites.length, 0, "editors do not see invite tokens");
+    assert.equal((await workspaceView(ws, alice)).invites.some((i) => i.token === pendingForOwner.token), true, "owners do");
+    await revokeInvite(ws.id, pendingForOwner.token, alice);
+    const promoted = await setMemberRole(ws.id, bob.id, "owner", alice);
+    assert.equal(promoted.members.find((m) => m.userId === "bob")?.role, "owner");
+    assert.equal((await listWorkspaces(bob.id)).length, 1, "membership record lists the workspace for bob");
+    const left = await removeMember(ws.id, bob.id, bob);
+    assert.equal(left.members.length, 1);
+    assert.deepEqual(await listWorkspaces(bob.id), [], "leaving removes the membership record");
+
+    const second = await createInvite(ws.id, { role: "owner" }, alice);
+    await revokeInvite(ws.id, second.token, alice);
+    assert.equal(await findInvite(second.token), null);
+    await assert.rejects(deleteWorkspace(ws.id, bob), /not found/);
+    await deleteWorkspace(ws.id, alice);
+    assert.deepEqual(await listWorkspaces(alice.id), []);
+  });
+
+  it("renews a pending invite: same link, a fresh 7 days, owners only, never an expired or another space's invite", async () => {
+    const ws = await createWorkspace("Renew", alice);
+    const other = await createWorkspace("Elsewhere", alice);
+    const inv = await createInvite(ws.id, { email: "dan@example.com", role: "viewer" }, alice);
+    const store = globalThis.__avatarStudioStore!;
+    // A day left on the link: renewing puts it back to the full week, keeping the token, address and role.
+    await store.put("invite", { ...inv, expiresAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const before = Date.now();
+    const renewed = await renewInvite(ws.id, inv.token, alice);
+    const left = Date.parse(renewed.expiresAt) - before;
+    assert.ok(left >= 7 * 86_400_000 - 1000 && left <= 7 * 86_400_000 + 1000, `expires a week out (${left} ms)`);
+    assert.deepEqual({ token: renewed.token, email: renewed.email, role: renewed.role, createdAt: renewed.createdAt }, { token: inv.token, email: inv.email, role: inv.role, createdAt: inv.createdAt });
+    assert.equal((await findInvite(inv.token))?.invite.expiresAt, renewed.expiresAt, "the stored invite carries the new expiry");
+    assert.equal(renewed.renewedAt !== undefined && Date.parse(renewed.renewedAt) >= before, true, "the resend is stamped");
+
+    // Each resend can send an email, so a second one waits out the cooldown; after it, it goes again.
+    await assert.rejects(renewInvite(ws.id, inv.token, alice), (e: unknown) => e instanceof InviteLimitError && /resent a few minutes ago/.test(e.message));
+    await store.put("invite", { ...renewed, renewedAt: new Date(Date.now() - RESEND_COOLDOWN_MS - 1000).toISOString() });
+    const again = await renewInvite(ws.id, inv.token, alice);
+    assert.ok(Date.parse(again.renewedAt!) > Date.now() - 5000, "renewed once the cooldown passed");
+
+    // An invite accepted or revoked between the read and the write stays gone: it never comes back for a week.
+    const raced = await createInvite(ws.id, { role: "editor" }, alice);
+    const realGet = store.get.bind(store);
+    store.get = (async (kind: string, id: string) => {
+      const row = await realGet(kind as never, id);
+      if (kind === "invite" && id === raced.token) await store.remove("invite", id);
+      return row;
+    }) as typeof store.get;
+    try {
+      await assert.rejects(renewInvite(ws.id, raced.token, alice), /Invite not found/);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal(await store.get("invite", raced.token), null, "the used invite is not written back");
+
+    // Owners only: an editor is refused, a stranger does not see the space.
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    await assert.rejects(renewInvite(ws.id, inv.token, bob), /Only workspace owners/);
+    await assert.rejects(renewInvite(ws.id, inv.token, { id: "eve" }), /Workspace not found/);
+    // Not another space's invite, a made-up or over-long token, a revoked invite, or one already expired.
+    await assert.rejects(renewInvite(other.id, inv.token, alice), /Invite not found or already expired/);
+    await assert.rejects(renewInvite(ws.id, "nope", alice), /Invite not found/);
+    await assert.rejects(renewInvite(ws.id, "x".repeat(65), alice), /Invite not found/);
+    const gone = await createInvite(ws.id, { role: "editor" }, alice);
+    await revokeInvite(ws.id, gone.token, alice);
+    await assert.rejects(renewInvite(ws.id, gone.token, alice), /Invite not found/);
+    await store.put("invite", { ...again, renewedAt: undefined, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    await assert.rejects(renewInvite(ws.id, inv.token, alice), /already expired/);
+    assert.equal(Date.parse((await store.get<{ expiresAt: string }>("invite", inv.token))!.expiresAt) < Date.now(), true, "a refused renew writes nothing");
+  });
+
+  it("changes the role a pending invite grants: same link, address and expiry, owners only, never an expired, used, or another space's invite", async () => {
+    const ws = await createWorkspace("Roles", alice);
+    const other = await createWorkspace("Elsewhere", alice);
+    const store = globalThis.__avatarStudioStore!;
+    const inv = await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
+    const { invite: changed, changed: didChange } = await setInviteRole(ws.id, inv.token, "viewer", alice);
+    assert.deepEqual({ ...changed }, { ...inv, role: "viewer" }, "only the role changes");
+    assert.equal(didChange, true);
+    assert.equal((await findInvite(inv.token))?.invite.role, "viewer", "the stored invite carries the new role");
+    // The same role again is a no-op that still answers with the invite, and says nothing changed.
+    const same = await setInviteRole(ws.id, inv.token, "viewer", alice);
+    assert.deepEqual([same.invite.role, same.changed], ["viewer", false]);
+    // Whoever joins with the link joins with the role it grants now.
+    const joined = await acceptInvite(inv.token, { id: "dan", email: "dan@example.com" });
+    assert.equal(joined.members.find((m) => m.userId === "dan")?.role, "viewer");
+    // The used invite is gone, so changing it reads as not found and writes nothing back.
+    await assert.rejects(setInviteRole(ws.id, inv.token, "owner", alice), /Invite not found/);
+    assert.equal(await store.get("invite", inv.token), null);
+
+    // An invite accepted or revoked between the read and the write stays gone.
+    const raced = await createInvite(ws.id, { role: "editor" }, alice);
+    const realGet = store.get.bind(store);
+    store.get = (async (kind: string, id: string) => {
+      const row = await realGet(kind as never, id);
+      if (kind === "invite" && id === raced.token) await store.remove("invite", id);
+      return row;
+    }) as typeof store.get;
+    try {
+      await assert.rejects(setInviteRole(ws.id, raced.token, "viewer", alice), /Invite not found/);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal(await store.get("invite", raced.token), null, "the used invite is not written back");
+
+    // Owners only; not another space's invite, a made-up or over-long token, or one already expired.
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    const link = await createInvite(ws.id, { role: "editor" }, alice);
+    await assert.rejects(setInviteRole(ws.id, link.token, "owner", bob), /Only workspace owners/);
+    await assert.rejects(setInviteRole(ws.id, link.token, "owner", { id: "eve" }), /Workspace not found/);
+    await assert.rejects(setInviteRole(other.id, link.token, "viewer", alice), /Invite not found/);
+    await assert.rejects(setInviteRole(ws.id, "nope", "viewer", alice), /Invite not found/);
+    await assert.rejects(setInviteRole(ws.id, "x".repeat(65), "viewer", alice), /Invite not found/);
+    await store.put("invite", { ...link, expiresAt: new Date(Date.now() - 1000).toISOString() });
+    await assert.rejects(setInviteRole(ws.id, link.token, "viewer", alice), /already expired/);
+    assert.equal((await store.get<{ role: string }>("invite", link.token))?.role, "editor", "a refused change writes nothing");
+  });
+
+  it("shows pending invitees' addresses to workspace owners only, in the feed rule and the data export", async () => {
+    const { recordActivity } = await import("../services/activity");
+    const ws = await createWorkspace("Who sees invites", alice);
+    const join = await createInvite(ws.id, { role: "viewer" }, alice);
+    await acceptInvite(join.token, bob);
+    // Owners, and anyone in their own personal space, see them; an editor or viewer, a script (no user), or someone
+    // who is not (or no longer) a member does not.
+    assert.equal(await seesInviteAddresses(ws.id, alice.id), true);
+    assert.equal(await seesInviteAddresses(ws.id, bob.id), false);
+    assert.equal(await seesInviteAddresses(ws.id, null), false);
+    assert.equal(await seesInviteAddresses(ws.id, "eve"), false);
+    assert.equal(await seesInviteAddresses("bob", "bob"), true);
+    await setMemberRole(ws.id, bob.id, "editor", alice);
+    assert.equal(await seesInviteAddresses(ws.id, bob.id), false, "an editor is not an owner");
+    await setMemberRole(ws.id, bob.id, "owner", alice);
+    assert.equal(await seesInviteAddresses(ws.id, bob.id), true);
+    await setMemberRole(ws.id, bob.id, "viewer", alice);
+
+    // The export leaves the address off the activity rows for a reader who may not see it, as the feed does.
+    await recordActivity(ws.id, alice, "invite.sent", { subject: "dan@example.com", role: "viewer" });
+    const forOwner = await exportOwnerData(ws.id);
+    assert.equal(JSON.stringify(forOwner.activity).includes("dan@example.com"), true);
+    const forViewer = await exportOwnerData(ws.id, { inviteAddresses: await seesInviteAddresses(ws.id, bob.id) });
+    assert.equal(JSON.stringify(forViewer).includes("dan@example.com"), false);
+    assert.deepEqual(forViewer.activity.map((e) => [e.kind, e.subject ?? null, e.count ?? null]), [["invite.sent", null, 1]]);
+  });
+
+  it("gives a member who is not an owner a people list with no invites", async () => {
+    const { peopleRows } = await import("../invite-text");
+    const ws = await createWorkspace("People rows", alice);
+    const join = await createInvite(ws.id, { role: "viewer" }, alice);
+    await acceptInvite(join.token, bob);
+    await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
+    const fresh = (await listWorkspaces(alice.id)).find((w) => w.id === ws.id)!;
+    const forOwner = peopleRows(await workspaceView(fresh, alice));
+    assert.deepEqual(forOwner.map((r) => [r.email, r.status]), [["alice@example.com", "member"], ["bob@example.com", "member"], ["dan@example.com", "pending invite"]]);
+    const forViewer = peopleRows(await workspaceView(fresh, bob));
+    assert.deepEqual(forViewer.map((r) => r.status), ["member", "member"], "a viewer gets the members only");
+    assert.equal(JSON.stringify(forViewer).includes("dan@example.com"), false);
+  });
+
+  it("invites several addresses at once: one link each, skipping members, pending invites, and repeats, with room checked first", async () => {
+    const ws = await createWorkspace("Batch", alice);
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    await createInvite(ws.id, { email: "Dan@Example.com", role: "viewer" }, alice);
+    const res = await createInvites(ws.id, bulkInviteSchema.parse({ emails: ["eve@example.com", "BOB@example.com", "dan@example.com", "fay@example.com", "Eve@Example.com"], role: "viewer" }), alice);
+    assert.deepEqual(res.invites.map((i) => [i.email, i.role]), [["eve@example.com", "viewer"], ["fay@example.com", "viewer"]]);
+    assert.equal(new Set(res.invites.map((i) => i.token)).size, 2, "each gets its own link");
+    assert.deepEqual(res.skipped, [
+      { email: "BOB@example.com", reason: "member" },
+      { email: "dan@example.com", reason: "pending" },
+      { email: "Eve@Example.com", reason: "repeated" },
+    ]);
+    assert.equal((await workspaceView(ws, alice)).invites.length, 3, "the two new ones join the pending one");
+
+    // Owners only; the schema caps a batch and wants real addresses.
+    await assert.rejects(createInvites(ws.id, bulkInviteSchema.parse({ emails: ["gus@example.com"] }), bob), /Only workspace owners/);
+    assert.throws(() => bulkInviteSchema.parse({ emails: [] }), /at least one/);
+    assert.throws(() => bulkInviteSchema.parse({ emails: Array.from({ length: 21 }, (_, n) => `p${n}@example.com`) }), /At most 20/);
+    const bad = bulkInviteSchema.safeParse({ emails: ["ok@example.com", "not-an-address"] });
+    assert.equal(bad.success ? "" : bad.error.issues[0].message, '"not-an-address" is not an email address');
+
+    // A batch bigger than the room left invites nobody, and says how much room there is.
+    const full = await createWorkspace("Full", alice);
+    const seats = Array.from({ length: 45 }, (_, n) => `s${n}@example.com`);
+    await createInvites(full.id, bulkInviteSchema.parse({ emails: seats.slice(0, 20) }), alice);
+    await createInvites(full.id, bulkInviteSchema.parse({ emails: seats.slice(20, 40) }), alice);
+    const before = (await workspaceView(full, alice)).invites.length;
+    assert.equal(before, 40);
+    await assert.rejects(createInvites(full.id, bulkInviteSchema.parse({ emails: Array.from({ length: 10 }, (_, n) => `x${n}@example.com`) }), alice), /room for 9 more/);
+    assert.equal((await workspaceView(full, alice)).invites.length, before, "nothing was written");
+    // Each invite can send an email: a batch the send allowance cannot take whole is refused, with nothing written.
+    const counted: number[] = [];
+    await assert.rejects(
+      createInvites(full.id, bulkInviteSchema.parse({ emails: ["s0@example.com", "z1@example.com", "z2@example.com"] }), alice, (n) => (counted.push(n), false)),
+      (e: unknown) => e instanceof InviteLimitError && /Too many invites/.test(e.message),
+    );
+    assert.deepEqual(counted, [2], "only the new addresses count against it");
+    assert.equal((await workspaceView(full, alice)).invites.length, before);
+    // Skipped addresses take no room: ten addresses, two of them already pending, are eight new ones, and eight fit in nine.
+    const mixed = await createInvites(full.id, bulkInviteSchema.parse({ emails: ["s0@example.com", "s1@example.com", ...Array.from({ length: 8 }, (_, n) => `y${n}@example.com`)] }), alice);
+    assert.equal(mixed.invites.length, 8);
+    assert.equal(mixed.skipped.length, 2);
+  });
+
+  it("lists recently expired invites for owners and invites them again with a new link", async () => {
+    const ws = await createWorkspace("Lapsed", alice);
+    const store = globalThis.__avatarStudioStore!;
+    const lapse = async (inv: { id: string }, daysAgo: number) => {
+      const row = (await store.get<{ id: string; expiresAt: string }>("invite", inv.id))!;
+      await store.put("invite", { ...row, expiresAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString() });
+    };
+    const dan = await createInvite(ws.id, { email: "dan@example.com", role: "viewer" }, alice);
+    const link = await createInvite(ws.id, { role: "editor" }, alice);
+    const old = await createInvite(ws.id, { email: "old@example.com", role: "editor" }, alice);
+    const live = await createInvite(ws.id, { email: "live@example.com", role: "editor" }, alice);
+    await lapse(dan, 1);
+    await lapse(link, 3);
+    await lapse(old, EXPIRED_INVITE_DAYS + 1);
+    const view = await workspaceView(ws, alice);
+    assert.deepEqual(view.invites.map((i) => i.token), [live.token], "the pending list keeps only live invites");
+    assert.deepEqual(view.expiredInvites.map((i) => [i.email, i.role]), [["dan@example.com", "viewer"], [undefined, "editor"]], "lapsed in the last 30 days, the latest first");
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    assert.deepEqual((await workspaceView(ws, bob)).expiredInvites, [], "only owners see them");
+
+    // Invite again: a new link, same address and role, a full week; the old token stays dead.
+    const before = Date.now();
+    const again = await reinviteExpired(ws.id, dan.token, alice);
+    assert.notEqual(again.token, dan.token);
+    assert.deepEqual([again.email, again.role], ["dan@example.com", "viewer"]);
+    assert.ok(Date.parse(again.expiresAt) - before >= 7 * 86_400_000 - 1000);
+    assert.equal(await store.get("invite", dan.token), null, "the lapsed one is gone");
+    assert.equal(await findInvite(dan.token), null);
+    assert.equal((await findInvite(again.token))?.invite.email, "dan@example.com");
+    const after = await workspaceView(ws, alice);
+    assert.ok(after.invites.some((i) => i.token === again.token) && !after.expiredInvites.some((i) => i.token === dan.token));
+
+    // Refused: a live invite, another space's, a stranger or editor, the allowance, and an address that has a pending invite or joined.
+    await assert.rejects(reinviteExpired(ws.id, live.token, alice), /Expired invite not found/);
+    const other = await createWorkspace("Elsewhere", alice);
+    await assert.rejects(reinviteExpired(other.id, link.token, alice), /Expired invite not found/);
+    await assert.rejects(reinviteExpired(ws.id, link.token, bob), /Only workspace owners/);
+    await assert.rejects(reinviteExpired(ws.id, link.token, alice, () => false), (e: unknown) => e instanceof InviteLimitError);
+    assert.ok(await store.get("invite", link.token), "a refused one is kept");
+    const twice = await createInvite(ws.id, { email: "live@example.com", role: "viewer" }, alice);
+    await lapse(twice, 2);
+    await assert.rejects(reinviteExpired(ws.id, twice.token, alice), /already has a pending invite/);
+    const joined = await createInvite(ws.id, { email: "bob@example.com", role: "viewer" }, alice);
+    await lapse(joined, 2);
+    await assert.rejects(reinviteExpired(ws.id, joined.token, alice), /already a member/);
+    // Past the 30 days it is no longer on the list, and cannot be invited again either.
+    await assert.rejects(reinviteExpired(ws.id, old.token, alice), /Expired invite not found/);
+    // A link-only invite comes back as a new link-only invite.
+    const fresh = await reinviteExpired(ws.id, link.token, alice);
+    assert.deepEqual([fresh.email, fresh.role], [undefined, "editor"]);
+    // Two clicks at once make one new invite: the second finds the lapsed one already claimed.
+    const racy = await createInvite(ws.id, { email: "eve@example.com", role: "viewer" }, alice);
+    await lapse(racy, 1);
+    const realGet = store.get.bind(store);
+    let seen = 0;
+    store.get = (async (kind: string, key: string) => {
+      const row = await realGet(kind as never, key);
+      if (kind === "invite" && key === racy.token) seen++;
+      return row;
+    }) as typeof store.get;
+    try {
+      const results = await Promise.allSettled([reinviteExpired(ws.id, racy.token, alice), reinviteExpired(ws.id, racy.token, alice)]);
+      assert.equal(seen, 2, "both read the lapsed invite");
+      assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    } finally {
+      store.get = realGet;
+    }
+    assert.equal((await workspaceView(ws, alice)).invites.filter((i) => i.email === "eve@example.com").length, 1);
+    // A single invite draws on the allowance too.
+    await assert.rejects(createInvite(ws.id, { email: "zed@example.com", role: "viewer" }, alice, () => false), (e: unknown) => e instanceof InviteLimitError);
+  });
+
+  it("counts seats: members and pending invites against the limit, owners seeing the pending ones", async () => {
+    const ws = await createWorkspace("Seats", alice);
+    await createInvite(ws.id, { email: "dan@example.com", role: "viewer" }, alice);
+    const join = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(join.token, bob);
+    const fresh = (await listWorkspaces(alice.id)).find((w) => w.id === ws.id)!;
+    assert.deepEqual((await workspaceView(fresh, alice)).seats, { members: 2, pending: 1, max: 50 });
+    assert.equal((await workspaceView(fresh, bob)).seats, undefined, "an editor, who sees no invites, gets no seat count");
+    assert.equal(seatsLeft({ members: 2, pending: 1, max: 50 }), 47);
+    assert.equal(seatsLeft({ members: 49, pending: 3, max: 50 }), 0, "never below none");
+    assert.equal(seatLine({ members: 2, pending: 1, max: 50 }), "3 of 50 seats used: 2 members and 1 pending invite.");
+    assert.equal(seatLine({ members: 1, pending: 0, max: 50 }), "1 of 50 seats used: 1 member.");
+    assert.equal(seatLine({ members: 48, pending: 2, max: 50 }), "50 of 50 seats used: 48 members and 2 pending invites.");
+  });
+
+  it("reads pasted addresses and sums up a batch", () => {
+    assert.deepEqual(splitEmails(" a@x.com, b@x.com;c@x.com\n\nd@x.com  e@x.com,, "), ["a@x.com", "b@x.com", "c@x.com", "d@x.com", "e@x.com"]);
+    assert.deepEqual(splitEmails("   "), []);
+    // A list copied from a mail app gives the addresses, not the names; a quoted name may hold a comma.
+    assert.deepEqual(splitEmails('Ana Diaz <ana@x.com>, "Lee, Ben" <ben@x.com>; cal@x.com\nDee <dee@x.com>'), ["ana@x.com", "ben@x.com", "cal@x.com", "dee@x.com"]);
+    const invite = (email: string, emailed: boolean, emailError?: string) => ({ invite: { email }, emailed, emailError });
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", true), invite("b@x.com", true), invite("c@x.com", true)], skipped: [] }),
+      "Invited 3 people. Emailed a@x.com, b@x.com, and c@x.com.",
+    );
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", false), invite("b@x.com", false)], skipped: [{ email: "m@x.com", reason: "member" }, { email: "p@x.com", reason: "pending" }] }),
+      "Invited 2 people. Email sending is not configured; copy the links for a@x.com and b@x.com from Pending invites. Skipped m@x.com (already a member), p@x.com (already invited; resend it from Pending invites).",
+    );
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", true), invite("b@x.com", false, "mailbox unavailable")], skipped: [] }),
+      "Invited 2 people. Emailed a@x.com. The email to b@x.com (mailbox unavailable) failed; copy that link from Pending invites.",
+    );
+    // Each failure keeps its own reason.
+    assert.equal(
+      bulkInviteSummary({ invites: [invite("a@x.com", false, "mailbox unavailable"), invite("b@x.com", false, "rate limited")], skipped: [] }),
+      "Invited 2 people. The email to a@x.com (mailbox unavailable) and b@x.com (rate limited) failed; copy those links from Pending invites.",
+    );
+    assert.equal(bulkInviteSummary({ invites: [], skipped: [{ email: "a@x.com", reason: "repeated" }] }), "No new invites. Skipped a@x.com (listed twice).");
+  });
+
+  it("delivers an invite: the link on the request's origin, emailed only with an address and a sending provider", async () => {
+    const ws = await createWorkspace("Mail", alice);
+    const req = new Request("https://studio.example.com/api/workspaces/x/invites", { method: "POST" });
+    const withEmail = await createInvite(ws.id, { email: "dan@example.com", role: "editor" }, alice);
+    const linkOnly = await createInvite(ws.id, { role: "editor" }, alice);
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      // The mock does not deliver: nothing is sent, and no error is claimed.
+      assert.deepEqual(await deliverInvite(req, withEmail, alice), { url: `https://studio.example.com/invite/${withEmail.token}`, emailed: false });
+      assert.equal(mock.sent.length, 0);
+      mock.delivers = true;
+      assert.deepEqual(await deliverInvite(req, linkOnly, alice), { url: `https://studio.example.com/invite/${linkOnly.token}`, emailed: false }, "no address, no email");
+      assert.equal(mock.sent.length, 0);
+      const sent = await deliverInvite(req, withEmail, alice);
+      assert.equal(sent.emailed, true);
+      assert.equal(mock.sent.length, 1);
+      assert.equal(mock.sent[0].to, "dan@example.com");
+      assert.match(mock.sent[0].text, /alice@example.com invited you to join the "Mail" workspace/);
+      assert.ok(mock.sent[0].text.includes(sent.url), "the email carries the same link");
+      mock.send = async () => {
+        throw new Error("mailbox unavailable");
+      };
+      assert.deepEqual(await deliverInvite(req, withEmail, alice), { url: sent.url, emailed: false, emailError: "mailbox unavailable" });
+    } finally {
+      setEmailProvider(undefined);
+    }
+  });
+
+  it("revokes a departing member's workspace keys and every key on deletion", async () => {
+    const ws = await createWorkspace("Keys", alice);
+    const inv = await createInvite(ws.id, { role: "editor" }, alice);
+    await acceptInvite(inv.token, bob);
+    const bobKey = await createApiKey("bob-ci", ws.id, bob.id);
+    const aliceKey = await createApiKey("alice-ci", ws.id, alice.id);
+    const personal = await createApiKey("bob-personal", bob.id, bob.id);
+    assert.equal(await ownerForApiKey(bobKey.secret), ws.id);
+    await removeMember(ws.id, bob.id, alice);
+    assert.equal(await ownerForApiKey(bobKey.secret), null, "removed member's workspace key is revoked");
+    assert.equal(await ownerForApiKey(aliceKey.secret), ws.id, "other members' keys survive");
+    assert.equal(await ownerForApiKey(personal.secret), bob.id, "personal keys are untouched");
+    await deleteWorkspace(ws.id, alice);
+    assert.equal(await ownerForApiKey(aliceKey.secret), null, "deletion revokes every workspace key");
+  });
+});
+
+describe("invite emails", () => {
+  it("builds a safe message with the link and expiry, and the mock records sends", async () => {
+    const msg = inviteEmail({ to: "bob@example.com", workspaceName: "Acme <Realty>", inviterEmail: "alice@example.com", role: "editor", url: "https://studio.example.com/invite/abc", expiresAt: "2026-10-30T00:00:00.000Z" });
+    assert.equal(msg.subject, 'Join "Acme <Realty>" on Avatar Studio');
+    assert.match(msg.text, /alice@example.com invited you/);
+    assert.match(msg.text, /https:\/\/studio.example.com\/invite\/abc/);
+    assert.match(msg.html, /Acme &lt;Realty&gt;/, "html escapes the workspace name");
+    assert.match(msg.html, /href="https:\/\/studio.example.com\/invite\/abc"/);
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      assert.equal(mock.delivers, false);
+      await mock.send(msg);
+      assert.equal(mock.sent.length, 1);
+      assert.equal(mock.sent[0].to, "bob@example.com");
+    } finally {
+      setEmailProvider(undefined);
+    }
+  });
+});
+
+describe("plans and billing", () => {
+  const req = { title: "P", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9" as const, background: { type: "color" as const, value: "#fff" }, captions: false, speed: 1 };
+
+  it("plan decides the allowance and the mock provider switches plans", async () => {
+    const original = { free: config.renderLimitPerMonth, pro: config.proRendersPerMonth };
+    (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = 1;
+    (config as { proRendersPerMonth?: number }).proRendersPerMonth = 3;
+    setBillingProvider(new MockBillingProvider());
+    try {
+      assert.equal((await getPlan("u1")).plan, "free");
+      assert.equal(await renderLimitFor("u1"), 1);
+      await createVideo(req, "u1");
+      await assert.rejects(createVideo(req, "u1"), /Monthly render limit reached \(1 of 1\)/);
+      const { url } = await new MockBillingProvider().checkout("u1", "https://x/settings");
+      assert.match(url, /billing=upgraded/);
+      assert.equal((await getPlan("u1")).plan, "pro");
+      assert.equal(await renderLimitFor("u1"), 3);
+      await createVideo(req, "u1");
+      await new MockBillingProvider().portal("u1", "https://x/settings");
+      assert.equal((await getPlan("u1")).plan, "free");
+      assert.equal((await getPlan("u1")).status, undefined, "downgrade clears subscription state");
+      assert.equal((await getPlan("u2")).plan, "free", "plans are per owner");
+    } finally {
+      (config as { renderLimitPerMonth?: number }).renderLimitPerMonth = original.free;
+      (config as { proRendersPerMonth?: number }).proRendersPerMonth = original.pro;
+      setBillingProvider(undefined);
+    }
+  });
+
+  it("verifies Stripe signatures and applies subscription events", async () => {
+    const secret = "whsec_test";
+    const body = JSON.stringify({ type: "checkout.session.completed", data: { object: { client_reference_id: "u9", customer: "cus_1", subscription: "sub_1" } } });
+    const t = Math.floor(Date.now() / 1000);
+    const v1 = createHmac("sha256", secret).update(`${t}.${body}`).digest("hex");
+    assert.equal(verifyStripeSignature(body, `t=${t},v1=${v1}`, secret), true);
+    assert.equal(verifyStripeSignature(body, `t=${t},v1=${v1}`, "other"), false);
+    assert.equal(verifyStripeSignature(body, `t=${t - 1000},v1=${v1}`, secret), false, "stale timestamp");
+    assert.equal(verifyStripeSignature(body, null, secret), false);
+
+    assert.equal(await applyStripeEvent(JSON.parse(body)), "u9");
+    const plan = await getPlan("u9");
+    assert.equal(plan.plan, "pro");
+    assert.equal(plan.customerId, "cus_1");
+    assert.equal(plan.subscriptionId, "sub_1");
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_1", status: "active", cancel_at_period_end: true, current_period_end: 1800000000, metadata: { ownerId: "u9" } } } }), "u9");
+    assert.equal((await getPlan("u9")).endsAt, new Date(1800000000 * 1000).toISOString());
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.deleted", data: { object: { id: "sub_1", status: "canceled", metadata: { ownerId: "u9" } } } }), "u9");
+    assert.equal((await getPlan("u9")).plan, "free");
+    assert.equal((await getPlan("u9")).customerId, "cus_1", "customer id kept for re-subscribing");
+    assert.equal(await applyStripeEvent({ type: "invoice.paid", data: { object: {} } }), null);
+    await setPlan("u9", { plan: "pro" });
+    assert.equal(await applyStripeEvent({ type: "customer.subscription.updated", data: { object: { id: "sub_2", status: "unpaid", metadata: { ownerId: "u9" } } } }), "u9");
+    assert.equal((await getPlan("u9")).plan, "free", "unpaid subscriptions drop to free");
+  });
+});
+
+describe("interactive avatar", () => {
+  it("a shared presenter can be briefed by a public page, kept from visitors and used in replies", async () => {
+    const { withKnowledge, KNOWLEDGE_MARKER, agentPatchSchema } = await import("../services/agents");
+    const page = `<!doctype html><html><head><title>Hillcrest Dental</title></head><body><nav>Home</nav><main>
+      <h1>Hillcrest Dental</h1><p>We are open Monday to Saturday from 8 am to 6 pm, and we take walk-ins before noon.</p>
+      <p>Parking is free behind the building. Our hygienists speak English and Spanish, and whitening appointments take ninety minutes.</p>
+      </main><footer>Copyright</footer></body></html>`;
+    let reads = 0;
+    const fake = (async (input: string | URL | Request) => {
+      reads += 1;
+      return String(input).endsWith("/about") ? new Response(page, { status: 200, headers: { "content-type": "text/html" } }) : new Response("nope", { status: 404 });
+    }) as typeof fetch;
+    const input = agentSchema.parse({ name: "Dana", avatarId: "stock_1", instructions: "You represent Hillcrest Dental.", knowledgeUrl: "https://203.0.113.5/about", isPublic: true });
+    const agent = await createAgent(input, "u-know", fake);
+    assert.equal(agent.knowledgeUrl, "https://203.0.113.5/about");
+    assert.match(agent.knowledge ?? "", /walk-ins before noon/);
+    assert.doesNotMatch(agent.knowledge ?? "", /Copyright/, "page chrome is dropped");
+    assert.ok(agent.knowledgeUpdatedAt);
+    assert.equal(reads, 1);
+    const pub = await publicAgent(agent.id);
+    assert.equal(JSON.stringify(pub).includes("walk-ins"), false, "the page text never reaches the visitor view");
+    // An opening line is shown to visitors; an empty one is stored as absent and a blank patch removes it.
+    assert.equal("greeting" in pub, false);
+    const greeted = await updateAgent(agent.id, agentPatchSchema.parse({ greeting: "  Hi, ask me about hours.  " }), "u-know", fake);
+    assert.equal(greeted.greeting, "Hi, ask me about hours.");
+    assert.equal((await publicAgent(agent.id)).greeting, "Hi, ask me about hours.");
+    assert.equal("greeting" in (await updateAgent(agent.id, agentPatchSchema.parse({ greeting: "" }), "u-know", fake)), false);
+    assert.equal("greeting" in (await createAgent(agentSchema.parse({ name: "Mute", avatarId: "stock_1", greeting: "   " }), "u-know")), false);
+    assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", greeting: "g".repeat(201) }));
+    // Suggested questions: up to three, offered to visitors, an empty list removes them.
+    const chips = await updateAgent(agent.id, agentPatchSchema.parse({ starters: [" What are your hours? ", "Do you take walk-ins?"] }), "u-know", fake);
+    assert.deepEqual(chips.starters, ["What are your hours?", "Do you take walk-ins?"]);
+    assert.deepEqual((await publicAgent(agent.id)).starters, ["What are your hours?", "Do you take walk-ins?"]);
+    assert.equal("starters" in (await updateAgent(agent.id, agentPatchSchema.parse({ starters: [] }), "u-know", fake)), false);
+    assert.equal("starters" in (await createAgent(agentSchema.parse({ name: "Quiet", avatarId: "stock_1", starters: [] }), "u-know")), false);
+    assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", starters: ["a", "b", "c", "d"] }));
+    assert.throws(() => agentSchema.parse({ name: "x", avatarId: "stock_1", starters: ["   "] }));
+    assert.ok(withKnowledge(agent).startsWith("You represent Hillcrest Dental.\n\n" + KNOWLEDGE_MARKER));
+    assert.match(withKnowledge(agent), /untrusted reference material/);
+    const { splitKnowledge } = await import("../providers/types");
+    assert.deepEqual(splitKnowledge(withKnowledge(agent)), { own: "You represent Hillcrest Dental.", notes: "", reference: agent.knowledge });
+    assert.deepEqual(splitKnowledge("Plain"), { own: "Plain", notes: "", reference: "" });
+    assert.equal(withKnowledge({ instructions: "Plain", knowledgeUrl: undefined, knowledge: undefined }), "Plain");
+
+    const hello = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+    assert.match(hello.reply, /I'm with Hillcrest Dental/, "the owner's own first sentence still introduces the presenter");
+    const parking = await talkToAgent(agent.id, { conversationId: hello.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: hello.reply }, { role: "user", content: "Is there parking nearby?" }] });
+    assert.match(parking.reply, /^From the page: Parking is free behind the building\./);
+    const other = await talkToAgent(agent.id, { conversationId: hello.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: hello.reply }, { role: "user", content: "Do you do braces?" }] });
+    assert.doesNotMatch(other.reply, /^From the page/, "a question the page does not cover gets the usual reply");
+
+    await assert.rejects(createAgent(agentSchema.parse({ ...input, knowledgeUrl: "http://127.0.0.1/about" }), "u-know"), /public host/);
+    await assert.rejects(createAgent(agentSchema.parse({ ...input, knowledgeUrl: "https://203.0.113.5/missing" }), "u-know", fake), /returned 404/);
+    assert.throws(() => agentSchema.parse({ ...input, knowledgeUrl: "ftp://x" }), /http/);
+
+    // A patch never carries the create-time defaults, so editing one field leaves the rest alone.
+    assert.deepEqual(agentPatchSchema.parse({ collectEmail: true }), { collectEmail: true });
+    assert.deepEqual(agentPatchSchema.parse({ knowledgeUrl: null }), { knowledgeUrl: null });
+    const paused = await updateAgent(agent.id, agentPatchSchema.parse({ isPublic: false }), "u-know", fake);
+    assert.equal(paused.instructions, "You represent Hillcrest Dental.");
+    assert.equal(paused.isPublic, false);
+    await updateAgent(agent.id, agentPatchSchema.parse({ isPublic: true }), "u-know", fake);
+    const again = await updateAgent(agent.id, agentPatchSchema.parse({ knowledgeUrl: "https://203.0.113.5/about" }), "u-know", fake);
+    assert.equal(reads, 3, "the same URL is read again on request");
+    assert.equal(again.instructions, "You represent Hillcrest Dental.");
+    assert.equal(again.isPublic, true);
+    assert.ok((again.knowledgeUpdatedAt ?? "") >= (agent.knowledgeUpdatedAt ?? ""));
+    const renamed = await updateAgent(agent.id, { name: "Dana 2" }, "u-know", fake);
+    assert.equal(reads, 3, "other edits leave the page alone");
+    assert.match(renamed.knowledge ?? "", /walk-ins/);
+    const forgot = await updateAgent(agent.id, agentPatchSchema.parse({ knowledgeUrl: null }), "u-know", fake);
+    assert.equal(forgot.instructions, "You represent Hillcrest Dental.", "forgetting the page keeps the owner's text");
+    assert.equal("knowledge" in forgot, false);
+    assert.equal("knowledgeUrl" in forgot, false);
+    assert.equal("knowledgeUpdatedAt" in forgot, false);
+    assert.doesNotMatch((await talkToAgent(agent.id, { messages: [{ role: "user", content: "Is there parking nearby?" }] })).reply, /^From the page/);
+  });
+
+  it("sends the live model a conversation that starts with the visitor and alternates sides", async () => {
+    const { conversationFor } = await import("../providers/script/anthropic");
+    assert.deepEqual(conversationFor([{ role: "assistant", content: "Welcome." }, { role: "user", content: "Hi" }]), [
+      { role: "user", content: "(The visitor has just opened the page.)" },
+      { role: "assistant", content: "Welcome." },
+      { role: "user", content: "Hi" },
+    ]);
+    assert.deepEqual(conversationFor([{ role: "user", content: "One" }, { role: "user", content: "Two" }, { role: "assistant", content: "A" }, { role: "user", content: "Three" }]), [
+      { role: "user", content: "One\n\nTwo" },
+      { role: "assistant", content: "A" },
+      { role: "user", content: "Three" },
+    ]);
+    assert.deepEqual(conversationFor([{ role: "user", content: "Hi" }]), [{ role: "user", content: "Hi" }], "a plain transcript is unchanged");
+  });
+
+  it("answers in character from the demo provider and validates the turn", async () => {
+    const hello = await chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", instructions: "Open houses in Hillsboro. Book showings online.", messages: [{ role: "user", content: "Hi there" }] }));
+    assert.match(hello, /^Hi, I'm /);
+    assert.match(hello, /open houses in hillsboro/i, "uses the first sentence of the instructions as the topic");
+    const price = await chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", messages: [{ role: "user", content: "Hello" }, { role: "assistant", content: "Hi" }, { role: "user", content: "How much does it cost?" }] }));
+    assert.match(price, /pricing/i);
+    await assert.rejects(chatWithAvatar(chatSchema.parse({ avatarId: "stock_1", messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }] })), /last message must be from the visitor/);
+    await assert.rejects(chatWithAvatar(chatSchema.parse({ avatarId: "nope", messages: [{ role: "user", content: "Hi" }] })), /not found/);
+    assert.throws(() => chatSchema.parse({ avatarId: "stock_1", messages: [] }));
+  });
+});
+
+describe("shared agents", () => {
+  it("creates, exposes a safe public view, counts visitor turns, and hides private or deleted agents", async () => {
+    const agent = await createAgent(agentSchema.parse({ name: "Dana", avatarId: "stock_1", voiceId: "stock_voice_2", instructions: "Secret playbook. Open houses on Saturdays." }), "u1");
+    assert.equal((await listAgents("u1"))[0].id, agent.id);
+    assert.deepEqual(await listAgents("u2"), []);
+    await assert.rejects(getAgent(agent.id, "u2"), /not found/);
+
+    const pub = await publicAgent(agent.id);
+    assert.equal(pub.name, "Dana");
+    assert.equal(pub.avatar.name, "Ava Chen", "snapshot of the presenter is stored on the agent");
+    assert.equal(agent.avatarImageUrl.startsWith("data:image/svg+xml"), true);
+    assert.equal(pub.voiceLanguage, "en-US");
+    assert.equal(pub.collectEmail, false);
+    const switched = await updateAgent(agent.id, { avatarId: "stock_2" }, "u1");
+    assert.equal(switched.avatarName, "Marcus Hill", "changing the avatar refreshes the snapshot");
+    assert.equal((await updateAgent(agent.id, { avatarId: "stock_1" }, "u1")).avatarName, "Ava Chen");
+    assert.equal("instructions" in pub, false, "instructions never leave the server");
+    assert.equal("ownerId" in pub, false);
+
+    const first = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+    assert.match(first.reply, /Hi, I'm Ava Chen/);
+    assert.match(first.conversationId, /^conv_/);
+    await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: first.reply }, { role: "user", content: "When?" }] });
+    const counted = await getAgent(agent.id, "u1");
+    assert.equal(counted.conversations, 1, "a continued visit is one conversation");
+    // Visits are counted by the UTC day they start; a continued visit adds none.
+    const started = (await listConversations(agent.id, "u1"))[0].startedAt;
+    assert.deepEqual(counted.visitsByDay, { [started.slice(0, 10)]: 1 });
+    assert.equal("visitsByDay" in (await publicAgent(agent.id)), false, "the counts stay with the owner");
+    assert.equal(counted.messages, 2);
+    // The newest visit's start is kept for the owner's page, and a continued visit does not move it.
+    assert.equal(counted.lastVisitAt, started);
+    assert.equal("lastVisitAt" in (await publicAgent(agent.id)), false);
+
+    // Transcripts: owner-only, one per visit, capped per visit, cleared on demand and on delete.
+    const transcripts = await listConversations(agent.id, "u1");
+    assert.equal(transcripts.length, 1);
+    assert.deepEqual(transcripts[0].messages.map((m) => m.role), ["user", "assistant", "user", "assistant"]);
+    assert.equal(transcripts[0].messages[2].content, "When?");
+    await assert.rejects(listConversations(agent.id, "u2"), /not found/);
+    const other = await talkToAgent(agent.id, { messages: [{ role: "user", content: "New visitor" }] });
+    assert.notEqual(other.conversationId, first.conversationId);
+    assert.equal((await listConversations(agent.id, "u1")).length, 2);
+    let conv = other.conversationId;
+    for (let i = 0; i < MAX_TRANSCRIPT_MESSAGES; i++) conv = (await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: `turn ${i}` }] })).conversationId;
+    const capped = (await listConversations(agent.id, "u1")).find((c) => c.id === conv)!;
+    assert.equal(capped.messages.length, MAX_TRANSCRIPT_MESSAGES, "transcript is capped per visit");
+    // One visit at a time: only its owner's, only under its own presenter, and gone for good.
+    await assert.rejects(deleteConversation(agent.id, first.conversationId, "u2"), /not found/);
+    // A follow-up mark: set once (marking again keeps its time), cleared on demand, and the visit keeps its place.
+    const before = (await getConversation(agent.id, first.conversationId, "u1")).conversation;
+    const marked = await setFollowedUp(agent.id, first.conversationId, true, "u1");
+    assert.ok(marked.followedUpAt);
+    assert.ok(marked.updatedAt > before.updatedAt, "marking moves the version, as every write does");
+    assert.equal((await setFollowedUp(agent.id, first.conversationId, true, "u1")).followedUpAt, marked.followedUpAt);
+    assert.equal((await setFollowedUp(agent.id, first.conversationId, false, "u1")).followedUpAt, undefined);
+    await assert.rejects(setFollowedUp(agent.id, first.conversationId, true, "u2"), /not found/);
+    await assert.rejects(setFollowedUp(agent.id, "conv_nope", true, "u1"), /Conversation not found/);
+    // A private note: set with or without a mark, kept by a mark's change, matched by the search, and removed when empty.
+    const noted = await updateVisit(agent.id, first.conversationId, { followedUp: true, note: "Called back Tuesday" }, "u1");
+    assert.equal(noted.note, "Called back Tuesday");
+    assert.ok(noted.followedUpAt);
+    assert.equal((await setFollowedUp(agent.id, first.conversationId, false, "u1")).note, "Called back Tuesday");
+    assert.equal((await updateVisit(agent.id, first.conversationId, { note: "Wants a showing" }, "u1")).followedUpAt, undefined);
+    assert.ok(conversationMatches((await getConversation(agent.id, first.conversationId, "u1")).conversation, "showing", false));
+    assert.equal((await updateVisit(agent.id, first.conversationId, { note: "" }, "u1")).note, undefined);
+    await assert.rejects(updateVisit(agent.id, first.conversationId, { note: "x" }, "u2"), /not found/);
+    // One visit, read by its owner under its own presenter only.
+    assert.equal((await getConversation(agent.id, first.conversationId, "u1")).conversation.messages[2].content, "When?");
+    await assert.rejects(getConversation(agent.id, first.conversationId, "u2"), /not found/);
+    await assert.rejects(getConversation(agent.id, "conv_nope", "u1"), /Conversation not found/);
+    // A presenter that is not the owner's is an error; a visit it does not have is simply not deleted.
+    assert.equal(await deleteConversation(agent.id, "conv_nope", "u1"), false);
+    const sibling = await createAgent(agentSchema.parse({ name: "Sibling", avatarId: "stock_1", voiceId: "stock_voice_2" }), "u1");
+    assert.equal(await deleteConversation(sibling.id, first.conversationId, "u1"), false);
+    await assert.rejects(getConversation(sibling.id, first.conversationId, "u1"), /Conversation not found/);
+    await deleteAgent(sibling.id, "u1");
+    assert.equal(await deleteConversation(agent.id, first.conversationId, "u1"), true);
+    assert.equal(await deleteConversation(agent.id, first.conversationId, "u1"), false);
+    // An email left on a deleted visit does not bring it back.
+    await assert.rejects(captureLead(agent.id, { conversationId: first.conversationId, email: "late@example.com" }), /Conversation not found/);
+    assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id), [conv]);
+    assert.equal((await getAgent(agent.id, "u1")).conversations, 2, "the count of visits made is kept");
+    // A write that lands between a turn's read and its write: the turn re-reads and keeps it, and a delete is not undone.
+    const { getStore } = await import("../store");
+    type Conversation = import("../types").Conversation;
+    const store = getStore();
+    const putIf = store.putIf.bind(store);
+    const slipIn = (meddle: () => Promise<unknown>) => {
+      let done = false;
+      store.putIf = (async (kind: Parameters<typeof putIf>[0], item: { id: string }, field: string, expected: string) => {
+        if (!done && kind === "conversation") {
+          done = true;
+          await meddle();
+        }
+        return putIf(kind, item, field, expected);
+      }) as typeof store.putIf;
+    };
+    try {
+      // An email left while the turn was on its way.
+      const before = (await store.get<Conversation>("conversation", conv))!;
+      slipIn(() => captureLead(agent.id, { conversationId: conv, email: "both@example.com" }));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "One more" }] });
+      const both = (await store.get<Conversation>("conversation", conv))!;
+      assert.equal(both.visitor?.email, "both@example.com", "the email that landed meanwhile is kept");
+      assert.equal(both.messages.at(-2)?.content, "One more", "and so is the turn");
+      assert.ok(both.updatedAt > before.updatedAt, "each write moves the version on");
+      // A follow-up mark landing between a turn's read and its write is kept, and a mark does not move the visit.
+      const order = (await listConversations(agent.id, "u1")).map((c) => c.id);
+      slipIn(() => setFollowedUp(agent.id, conv, true, "u1"));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "And now?" }] });
+      const kept = (await store.get<Conversation>("conversation", conv))!;
+      assert.ok(kept.followedUpAt, "the mark survives the turn");
+      assert.equal(kept.messages.at(-2)?.content, "And now?");
+      slipIn(() => updateVisit(agent.id, conv, { note: "Landed mid-turn" }, "u1"));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "And a note?" }] });
+      assert.equal((await store.get<Conversation>("conversation", conv))!.note, "Landed mid-turn", "a note survives the turn too");
+      await setFollowedUp(agent.id, order.at(-1)!, true, "u1");
+      assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id).slice(1), order.filter((id) => id !== conv), "marking the oldest visit leaves it last");
+      slipIn(() => deleteConversation(agent.id, conv, "u1"));
+      await talkToAgent(agent.id, { conversationId: conv, messages: [{ role: "user", content: "Still there?" }] });
+      assert.equal(await store.get("conversation", conv), null, "a visit deleted meanwhile is not written back");
+    } finally {
+      store.putIf = putIf;
+    }
+    // A visitor who comes back with a deleted visit's id starts a new one.
+    const back = await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "Back again" }] });
+    assert.notEqual(back.conversationId, first.conversationId);
+    assert.deepEqual((await listConversations(agent.id, "u1")).map((c) => c.id), [back.conversationId]);
+    assert.equal(await clearConversations(agent.id, "u1"), 1);
+    assert.deepEqual(await listConversations(agent.id, "u1"), []);
+
+    await updateAgent(agent.id, { isPublic: false }, "u1");
+    await assert.rejects(publicAgent(agent.id), /not available/);
+    await assert.rejects(talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] }), /not available/);
+    await assert.rejects(updateAgent(agent.id, { isPublic: true }, "u2"), /not found/);
+    await assert.rejects(createAgent(agentSchema.parse({ name: "X", avatarId: "stock_1", voiceId: "nope" }), "u1"), /not available/);
+    await deleteAgent(agent.id, "u1");
+    await assert.rejects(publicAgent(agent.id), /not available/);
+  });
+});
+
+describe("reply ratings", () => {
+  it("lets a visitor rate a reply in their own visit, change or take it back, and keeps it through later turns", async () => {
+    const agent = await createAgent(agentSchema.parse({ name: "Rated", avatarId: "stock_1" }), "u1");
+    const first = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hours?" }] });
+    const at = first.at;
+    assert.ok(at, "a recorded reply is named by its time");
+    const stored = (await getConversation(agent.id, first.conversationId, "u1")).conversation;
+    assert.equal(stored.messages.at(-1)?.at, at);
+    await rateReply(agent.id, { conversationId: first.conversationId, at, rating: "up" });
+    const reply = () => getConversation(agent.id, first.conversationId, "u1").then((r) => r.conversation.messages.at(1));
+    assert.equal((await reply())?.rating, "up");
+    assert.equal((await getConversation(agent.id, first.conversationId, "u1")).conversation.messages[0].rating, undefined, "only the reply");
+    await rateReply(agent.id, { conversationId: first.conversationId, at, rating: "down" });
+    assert.equal((await reply())?.rating, "down");
+    // A later turn keeps the rating; null takes it back.
+    await talkToAgent(agent.id, { conversationId: first.conversationId, messages: [{ role: "user", content: "And Sundays?" }] });
+    assert.equal((await reply())?.rating, "down");
+    await rateReply(agent.id, { conversationId: first.conversationId, at, rating: null });
+    assert.equal("rating" in (await reply())!, false);
+    // Only a reply that is in the visit, of a presenter still shared, under that presenter.
+    await assert.rejects(rateReply(agent.id, { conversationId: first.conversationId, at: "2020-01-01T00:00:00.000Z", rating: "up" }), /not in this conversation/);
+    await assert.rejects(rateReply(agent.id, { conversationId: "conv_nope", at, rating: "up" }), /Conversation not found/);
+    const other = await createAgent(agentSchema.parse({ name: "Other", avatarId: "stock_1" }), "u1");
+    await assert.rejects(rateReply(other.id, { conversationId: first.conversationId, at, rating: "up" }), /Conversation not found/);
+    await updateAgent(agent.id, { isPublic: false }, "u1");
+    await assert.rejects(rateReply(agent.id, { conversationId: first.conversationId, at, rating: "up" }), /not available/);
+    await deleteAgent(other.id, "u1");
+    await deleteAgent(agent.id, "u1");
+  });
+
+  it("names no reply to rate when the turn was not recorded", async () => {
+    const agent = await createAgent(agentSchema.parse({ name: "Gone", avatarId: "stock_1" }), "u1");
+    const mock = new MockScriptProvider();
+    // The presenter is deleted while the reply is being written, so the turn is answered but not kept.
+    setScriptProvider(Object.assign(Object.create(Object.getPrototypeOf(mock)), mock, {
+      chat: async (input: Parameters<MockScriptProvider["chat"]>[0]) => {
+        await deleteAgent(agent.id, "u1");
+        return mock.chat(input);
+      },
+    }));
+    try {
+      const turn = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hello?" }] });
+      assert.ok(turn.reply);
+      assert.equal(turn.at, undefined);
+    } finally {
+      setScriptProvider(undefined);
+    }
+  });
+});
+
+describe("lead capture and list memo", () => {
+  it("stores the visitor on the conversation and notifies the owner's webhook", async () => {
+    const calls: string[] = [];
+    setNotificationFetch(async (_input, init) => {
+      calls.push(String(init?.body));
+      return new Response("ok", { status: 200 });
+    });
+    try {
+      await saveNotifySettings({ url: "https://203.0.113.5/hooks/studio" }, "u1");
+      const agent = await createAgent(agentSchema.parse({ name: "Dana", avatarId: "stock_1", collectEmail: true }), "u1");
+      const turn = await talkToAgent(agent.id, { messages: [{ role: "user", content: "Any open houses?" }] });
+      await assert.rejects(captureLead(agent.id, { conversationId: "conv_nope", email: "a@b.co" }), /Conversation not found/);
+      await captureLead(agent.id, { conversationId: turn.conversationId, email: "sam@example.com", name: "Sam" });
+      const [conv] = await listConversations(agent.id, "u1");
+      assert.deepEqual(conv.visitor, { email: "sam@example.com", name: "Sam" });
+      assert.equal(calls.length, 1);
+      const body = JSON.parse(calls[0]);
+      assert.equal(body.event, "lead.captured");
+      assert.equal(body.data.email, "sam@example.com");
+      assert.equal(body.data.lastMessage, "Any open houses?");
+      await updateAgent(agent.id, { isPublic: false }, "u1");
+      await assert.rejects(captureLead(agent.id, { conversationId: turn.conversationId, email: "x@y.co" }), /not available/);
+    } finally {
+      setNotificationFetch(null);
+    }
+  });
+
+  it("memoises provider lists for the TTL and dedupes concurrent calls", async () => {
+    forgetMemo();
+    let n = 0;
+    const fn = async () => {
+      n += 1;
+      return n;
+    };
+    const [a, b] = await Promise.all([memo("t:x", 1000, fn), memo("t:x", 1000, fn)]);
+    assert.equal(a, 1);
+    assert.equal(b, 1, "concurrent callers share one fetch");
+    assert.equal(await memo("t:x", 1000, fn), 1, "cached within the TTL");
+    forgetMemo("t:");
+    assert.equal(await memo("t:x", 1000, fn), 2, "refetched after forget");
+    await assert.rejects(memo("t:err", 1000, async () => { throw new Error("boom"); }), /boom/);
+    assert.equal(await memo("t:err", 1000, async () => "recovered"), "recovered", "a failure is not cached");
+    assert.ok((await listVoices()).length > 0);
+    forgetMemo();
+  });
+});
+
+describe("script from a web page", () => {
+  const HTML = `<!doctype html><html><head><title>12 Maple St &amp; more</title><style>p{}</style><script>var x = "<p>no</p>";</script></head>
+<body><nav><a href="/">Home</a> <a href="/about">About</a></nav>
+<main><h1>Open house this Saturday</h1><p>This three&#8209;bedroom home sits on a quiet street near the park.</p>
+<p>The kitchen was renovated in 2024 with new appliances &amp; quartz counters. Showings start at 10&nbsp;am.</p></main>
+<footer>Copyright</footer></body></html>`;
+
+  it("extracts the title and readable text, dropping chrome and scripts", () => {
+    const out = extractReadableText(HTML);
+    assert.equal(out.title, "12 Maple St & more");
+    assert.match(out.text, /^Open house this Saturday\n/);
+    assert.match(out.text, /quartz counters/);
+    assert.match(out.text, /10 am/);
+    assert.doesNotMatch(out.text, /Home|About|Copyright|var x|p\{\}/);
+  });
+
+  it("fetches only public HTML pages within limits and feeds the writer", async () => {
+    const fake = (async (input: string | URL | Request, _init?: RequestInit) => {
+      const u = String(input);
+      if (u.endsWith("/listing")) return new Response(HTML, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+      if (u.endsWith("/pdf")) return new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } });
+      if (u.endsWith("/big")) return new Response("x", { status: 200, headers: { "content-type": "text/html", "content-length": "5000000" } });
+      if (u.endsWith("/tiny")) return new Response("<html><body>hi</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+      return new Response("nope", { status: 404 });
+    }) as typeof fetch;
+    const page = await fetchPageText("https://203.0.113.5/listing", fake);
+    assert.equal(page.title, "12 Maple St & more");
+    await assert.rejects(fetchPageText("http://localhost:3000/listing", fake), /public host/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/pdf", fake), /not an HTML page/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/big", fake), /too large/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/tiny", fake), /too little readable text/);
+    await assert.rejects(fetchPageText("https://203.0.113.5/missing", fake), /returned 404/);
+    // A 3xx under redirect: "error" surfaces as "fetch failed" with the reason on `cause`.
+    const redirecting = (async () => { throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") }); }) as typeof fetch;
+    await assert.rejects(fetchPageText("https://203.0.113.5/moved", redirecting), /That address redirects/);
+    // Without an injected client the writer takes the pinned path, which starts with the same host check.
+    await assert.rejects(generateScript(scriptSchema.parse({ url: "http://127.0.0.1/listing", lengthSec: 45 })), /public host/);
+
+    const script = await generateScript(scriptSchema.parse({ url: "https://203.0.113.5/listing", lengthSec: 45 }), LOCAL_OWNER, fake);
+    assert.match(script, /12 Maple St & more/, "topic defaults to the page title");
+    assert.match(script, /quiet street near the park/, "demo writer reads from the page");
+    assert.throws(() => scriptSchema.parse({ topic: "" }), /topic or a page URL/);
+    assert.ok(scriptSchema.parse({ url: "https://example.com/x" }));
+  });
+});
+
+describe("live avatar sessions", () => {
+  it("reports unavailable in demo mode and scopes, caps, and expires sessions with a live provider", async () => {
+    resetLiveSessions();
+    setStreamingProvider(undefined);
+    assert.equal(await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }), null, "mock provider: no live video");
+
+    const spoken: string[] = [];
+    const stopped: string[] = [];
+    let n = 0;
+    const asked: boolean[] = [];
+    const fake: StreamingProvider = {
+      name: "fake",
+      available: true,
+      async createSession({ custom }) {
+        asked.push(custom);
+        n += 1;
+        return { session: { id: `p${n}`, secret: `secret${n}` }, url: "wss://live.example", accessToken: `t${n}` };
+      },
+      async speak(session, text) {
+        spoken.push(`${session.id}:${text}`);
+      },
+      async stop(session) {
+        stopped.push(session.id);
+      },
+      async keepAlive(session) {
+        kept.push(session.id);
+      },
+    };
+    const kept: string[] = [];
+    setStreamingProvider(fake);
+    try {
+      const t0 = 1_000_000;
+      const s = await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0);
+      assert.ok(s && s.sessionId.startsWith("live_") && s.url === "wss://live.example");
+      assert.equal(JSON.stringify(s).includes("secret1"), false, "the provider's session secret stays on the server");
+      assert.equal("speakInRoom" in s!, false);
+      assert.deepEqual(await speakLive(s!.sessionId, "agent_1", "Hello", t0 + 1000), { spoken: true });
+      assert.deepEqual(spoken, ["p1:Hello"]);
+      await keepLiveSession(s!.sessionId, "agent_1", t0 + 1000);
+      assert.deepEqual(kept, ["p1"]);
+      await assert.rejects(keepLiveSession(s!.sessionId, "agent_2", t0 + 1000), /not found/, "another presenter cannot keep it either");
+      assert.deepEqual(liveSessionCall.parse({ keepAlive: true }), { keepAlive: true });
+      assert.deepEqual(liveSessionCall.parse({ text: " Hi " }), { text: "Hi" });
+      assert.equal(liveSessionCall.safeParse({ keepAlive: false }).success, false);
+      await assert.rejects(speakLive(s!.sessionId, "agent_2", "Hi", t0 + 1000), /not found/, "another presenter cannot drive the session");
+      await assert.rejects(speakLive("live_nope", "agent_1", "Hi", t0 + 1000), /not found/);
+
+      for (let i = 1; i < MAX_SESSIONS_PER_SCOPE; i++) await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0);
+      await assert.rejects(openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c1" }, t0), /Too many live sessions/);
+      assert.ok(await openLiveSession({ avatarId: "stock_1", scope: "agent_1", clientKey: "c2" }, t0), "another client is not affected");
+
+      await closeLiveSession(s!.sessionId, "agent_1", t0 + 2000);
+      assert.deepEqual(stopped, ["p1"]);
+      await assert.rejects(speakLive(s!.sessionId, "agent_1", "Hi", t0 + 2000), /not found/, "closed sessions are gone");
+
+      const late = await openLiveSession({ avatarId: "stock_1", scope: "agent_9", clientKey: "c9" }, t0);
+      // A provider that cannot open a session leaves the page on the portrait, its reason kept from the visitor.
+      const failing: StreamingProvider = { ...fake, async createSession() { throw new Error("LiveAvatar /token failed: 402 Out of credits"); } };
+      setStreamingProvider(failing);
+      const quiet = console.error;
+      console.error = () => {};
+      try {
+        assert.equal(await openLiveSession({ avatarId: "stock_1", scope: "agent_7", clientKey: "c7" }, t0), null);
+      } finally {
+        console.error = quiet;
+      }
+      // A provider whose browser says replies in the room only hears that one was said.
+      setStreamingProvider({ ...fake, speaksInRoom: true });
+      const inRoom = await openLiveSession({ avatarId: "stock_1", scope: "agent_6", clientKey: "c6" }, t0);
+      assert.equal(inRoom?.speakInRoom, true);
+      assert.deepEqual(await speakLive(inRoom!.sessionId, "agent_6", "Hi", t0), { spoken: false });
+      setStreamingProvider(fake);
+      // The provider is told when the presenter is one of the app's own portraits.
+      const portrait = await createAvatar({ name: "Dana", imageUrl: `data:image/png;base64,${Buffer.from("png").toString("base64")}` }, "live_owner");
+      await openLiveSession({ avatarId: portrait.id, scope: "agent_8", clientKey: "c8" }, t0);
+      assert.deepEqual([asked[0], asked.at(-1)], [false, true]);
+      const stoppedBefore = stopped.length;
+      await assert.rejects(speakLive(late!.sessionId, "agent_9", "Hi", t0 + SESSION_TTL_MS + 1), /not found/, "idle sessions expire");
+      assert.ok(stopped.length > stoppedBefore, "expired sessions are stopped at the provider, not just forgotten");
+    } finally {
+      setStreamingProvider(undefined);
+      resetLiveSessions();
+    }
+  });
+});
+
+describe("voice cloning", () => {
+  const sample = `data:audio/webm;base64,${Buffer.from("not really audio, but bytes").toString("base64")}`;
+
+  it("clones with the provider, lists the voice first for its owner, renders with it, and deletes", async () => {
+    const voice = await cloneVoice(cloneVoiceSchema.parse({ name: "Dana", samples: [sample], language: "en-US" }), "u1");
+    assert.match(voice.id, /^clone_/);
+    assert.equal(voice.source, "custom");
+    const mine = await listVoices("u1");
+    assert.equal(mine[0].id, voice.id, "cloned voices come first");
+    assert.equal((await listVoices("u2")).some((v) => v.id === voice.id), false, "private to the owner");
+    assert.equal((await listVoices()).some((v) => v.id === voice.id), false, "provider list alone has no clones");
+
+    const video = await createVideo({ title: "V", script: "Hi.", avatarId: "stock_1", voiceId: voice.id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+    assert.equal(video.voiceName, "Dana");
+    await assert.rejects(createVideo({ title: "V", script: "Hi.", avatarId: "stock_1", voiceId: voice.id, aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u2"), /not available/);
+
+    const { updateClonedVoice, updateVoiceSchema } = await import("../services/voices");
+    const renamed = await updateClonedVoice(voice.id, updateVoiceSchema.parse({ name: " Dana (studio) " }), "u1");
+    assert.equal(renamed.name, "Dana (studio)");
+    assert.equal(renamed.language, "en-US", "untouched fields stay");
+    assert.equal((await listVoices("u1"))[0].name, "Dana (studio)");
+    assert.equal((await getVideo(video.id, "u1")).voiceName, "Dana", "rendered videos keep the old name");
+    await assert.rejects(updateClonedVoice(voice.id, { name: "Nope" }, "u2"), /not found/);
+    await assert.rejects(updateClonedVoice(STOCK_VOICES[0].id, { name: "Nope" }, "u1"), /not found/, "provider voices are the provider's");
+    assert.throws(() => updateVoiceSchema.parse({ name: "  " }));
+    await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "x", samples: ["data:image/png;base64,AAAA"] }), "u1"), /audio recordings or files/);
+    assert.throws(() => cloneVoiceSchema.parse({ name: "x", samples: [] }));
+    await assert.rejects(deleteClonedVoice(voice.id, "u2"), /not found/);
+    await deleteClonedVoice(voice.id, "u1");
+    assert.equal((await listVoices("u1")).some((v) => v.id === voice.id), false);
+  });
+
+  it("shared presenters can use a cloned voice", async () => {
+    const voice = await cloneVoice(cloneVoiceSchema.parse({ name: "Dana", samples: [sample], language: "en-GB" }), "u1");
+    const agent = await createAgent(agentSchema.parse({ name: "Dana live", avatarId: "stock_1", voiceId: voice.id }), "u1");
+    assert.equal(agent.voiceLanguage, "en-GB");
+    await assert.rejects(createAgent(agentSchema.parse({ name: "x", avatarId: "stock_1", voiceId: voice.id }), "u2"), /not available/, "another account cannot use it");
+  });
+
+  it("a visitor's turn counts on the stored presenter and writes nothing for one deleted mid-chat", async () => {
+    const { MockScriptProvider } = await import("../providers/script/mock");
+    const proto = MockScriptProvider.prototype as unknown as { chat: (...args: unknown[]) => Promise<string> };
+    const realChat = proto.chat;
+    let during: () => Promise<unknown> = async () => undefined;
+    proto.chat = async function (this: unknown, ...args: unknown[]) {
+      await during();
+      return realChat.apply(this, args);
+    };
+    try {
+      const agent = await createAgent(agentSchema.parse({ name: "Dana", avatarId: "stock_1", isPublic: true }), "u-turn");
+      during = () => updateAgent(agent.id, { name: "Dana (renamed)" }, "u-turn");
+      await talkToAgent(agent.id, { messages: [{ role: "user", content: "Hi" }] });
+      const after = await getAgent(agent.id, "u-turn");
+      assert.equal(after.name, "Dana (renamed)", "an edit that landed during the chat survives the counter write");
+      assert.equal(after.conversations, 1);
+      assert.equal(after.messages, 1);
+
+      const gone = await createAgent(agentSchema.parse({ name: "Gone", avatarId: "stock_1", isPublic: true }), "u-turn");
+      during = () => deleteAgent(gone.id, "u-turn");
+      const turn = await talkToAgent(gone.id, { messages: [{ role: "user", content: "Hi" }] });
+      assert.ok(turn.reply, "the visitor still gets the reply");
+      await assert.rejects(getAgent(gone.id, "u-turn"), /not found/, "the deleted presenter is not brought back");
+      const { getStore } = await import("../store");
+      const rows = (await getStore().list<{ agentId: string }>("conversation", "u-turn")).filter((c) => c.agentId === gone.id);
+      assert.equal(rows.length, 0, "and no transcript is written for it");
+    } finally {
+      proto.chat = realChat;
+    }
+  });
+
+  it("caps cloned voices per account", async () => {
+    for (let i = 0; i < MAX_CLONED_VOICES; i++) await cloneVoice(cloneVoiceSchema.parse({ name: `v${i}`, samples: [sample] }), "u3");
+    await assert.rejects(cloneVoice(cloneVoiceSchema.parse({ name: "one more", samples: [sample] }), "u3"), /At most/);
+  });
+});
+
+describe("brand kit default quality", () => {
+  it("stores a default output quality and rejects unknown values", async () => {
+    await saveBrandKit(brandKitSchema.parse({ primaryColor: "#0f766e", defaultResolution: "720p" }), "u-brand-q");
+    assert.equal((await getBrandKit("u-brand-q"))?.defaultResolution, "720p");
+    assert.equal(brandKitSchema.safeParse({ primaryColor: "#0f766e", defaultResolution: "4k" }).success, false);
+    await deleteBrandKit("u-brand-q");
+  });
+});
+
+describe("retrying a failed render", () => {
+  it("submits the same request as a new video, keeps folder and batch row, and refuses other states", async () => {
+    const { retryVideo, ConflictError, NotFoundError } = await import("../services");
+    const { getStore } = await import("../store");
+    const ok = await createVideo({ title: "Fine", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+    const failed: Video = { ...ok, id: "vid_failed", status: "failed", error: "provider hiccup", providerJobId: undefined, folder: "Q4", description: "Keep me", batchId: "batch_1", rowLabel: "Ann", resolution: "720p", scenes: [{ script: "Hi.", background: ok.background }] };
+    await getStore().put("video", failed);
+
+    // One store write per retry: a provider webhook can arrive as soon as the job exists, so no second put may overwrite it.
+    const store = getStore();
+    const originalPut = store.put.bind(store);
+    let videoPuts = 0;
+    store.put = async (kind, item) => {
+      if (kind === "video") videoPuts += 1;
+      return originalPut(kind, item);
+    };
+    let again: Video;
+    try {
+      again = await retryVideo("vid_failed", "u1");
+    } finally {
+      store.put = originalPut;
+    }
+    assert.equal(videoPuts, 1, "retry writes the new video once");
+    assert.notEqual(again.id, failed.id);
+    assert.equal(again.status, "processing");
+    assert.equal(again.description, "Keep me", "a retry keeps the share-page description");
+    assert.equal(again.title, "Fine");
+    assert.equal(again.resolution, "720p");
+    assert.deepEqual(again.scenes, failed.scenes);
+    assert.equal(again.folder, "Q4");
+    assert.equal(again.batchId, "batch_1");
+    assert.equal(again.rowLabel, "Ann");
+    assert.equal(again.retryOf, "vid_failed");
+    assert.equal((await getVideo("vid_failed", "u1", false)).status, "failed", "the original is kept");
+
+    await assert.rejects(retryVideo(ok.id, "u1"), ConflictError);
+    await assert.rejects(retryVideo("vid_failed", "u2"), NotFoundError);
+  });
+});
+
+describe("account data", () => {
+  it("exports every kind with secrets redacted and deletes everything for the owner only", async () => {
+    await createVideo({ title: "Mine", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+    await createVideo({ title: "Theirs", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u2");
+    await createApiKey("ci", "u1");
+    await saveNotifySettings({ url: "https://203.0.113.5/hooks" }, "u1");
+    await savePrefs({ emailOnComplete: "dana@example.com" }, "u1");
+    await cloneVoice(cloneVoiceSchema.parse({ name: "v", samples: [`data:audio/webm;base64,${Buffer.from("x").toString("base64")}`] }), "u1");
+    const exported = await exportOwnerData("u1");
+    assert.equal(exported.ownerId, "u1");
+    assert.equal((exported.prefs[0] as { emailOnComplete: string }).emailOnComplete, "dana@example.com", "email preferences are personal data");
+    assert.equal(exported.video.length, 1);
+    assert.equal((exported.video[0] as { title: string }).title, "Mine");
+    assert.equal("hash" in exported.apikey[0], false, "key hashes are redacted");
+    assert.equal("secret" in exported.notify[0], false, "webhook secret is redacted");
+    assert.equal(exported.voice.length, 1);
+    const counts = await deleteOwnerData("u1");
+    assert.equal(counts.video, 1);
+    assert.equal(counts.apikey, 1);
+    assert.equal(counts.voice, 1);
+    assert.equal(counts.prefs, 1);
+    assert.deepEqual(await listVideos("u1"), []);
+    assert.equal((await listVideos("u2")).length, 1, "other owners are untouched");
+    assert.equal((await exportOwnerData("u1")).video.length, 0);
+  });
+});
+
+describe("render result emails", () => {
+  it("emails the owner on completion and failure when an address is set, and stays quiet otherwise", async () => {
+    const mock = new MockEmailProvider();
+    setEmailProvider(mock);
+    try {
+      const video = await createVideo({ title: "Tour <b>", script: "Hi.", avatarId: "stock_1", voiceId: "stock_voice_1", aspect: "16:9", background: { type: "color", value: "#fff" }, captions: false, speed: 1 }, "u1");
+      await notifyVideoTransition(video, { ...video, status: "completed", videoUrl: "https://cdn/x.mp4", durationSec: 12 });
+      assert.equal(mock.sent.length, 0, "no address, no email");
+      await savePrefs({ emailOnComplete: "dana@example.com" }, "u1");
+      await notifyVideoTransition(video, { ...video, status: "completed", videoUrl: "https://cdn/x.mp4", durationSec: 12 });
+      assert.equal(mock.sent.length, 1);
+      assert.equal(mock.sent[0].to, "dana@example.com");
+      assert.match(mock.sent[0].subject, /is ready/);
+      assert.match(mock.sent[0].text, /\/videos\/vid_/);
+      assert.match(mock.sent[0].html, /Tour &lt;b&gt;/, "html escapes the title");
+      assert.equal(await emailVideoResult({ ...video, status: "failed", error: "Provider quota exceeded" }), true);
+      assert.match(mock.sent[1].subject, /could not be rendered/);
+      assert.match(mock.sent[1].text, /Provider quota exceeded/);
+      await savePrefs({}, "u1");
+      assert.equal(await emailVideoResult({ ...video, status: "completed" }), false, "turned off");
+      await notifyVideoTransition({ ...video, status: "completed" }, { ...video, status: "completed" });
+      assert.equal(mock.sent.length, 2, "no transition, no email");
+    } finally {
+      setEmailProvider(undefined);
+    }
+  });
+});

@@ -1,0 +1,302 @@
+// Importing a text or Markdown document as scenes.
+// Run with: npm test
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { MAX_SCRIPT_CHARS, decodeScript, legacyEncodingFor, scenesFromText } from "../script-import";
+import { videoRequestSchema } from "../services";
+import { MAX_SCENES } from "../types";
+
+/** Whether the server would take the imported scenes as a video. */
+const renders = (scenes: string[]) =>
+  videoRequestSchema.safeParse({ title: "Imported", avatarId: "stock_1", voiceId: "stock_voice_1", scenes: scenes.map((script) => ({ script, background: { type: "color", value: "#fff" } })) }).success;
+
+describe("scenesFromText", () => {
+  it("gives a plain document one scene per paragraph, lines of a paragraph joined", () => {
+    const doc = "﻿Welcome to the team.\r\nWe are glad you are here.\r\n\r\n\r\nYour first week starts Monday.\n";
+    assert.deepEqual(scenesFromText(doc), { scenes: ["Welcome to the team. We are glad you are here.", "Your first week starts Monday."], truncated: false });
+  });
+
+  it("splits at breaks and headings, keeps a section's paragraphs together, and offers the title", () => {
+    const doc = ["# Onboarding: week one", "", "## Hello", "Hi, I'm **Ava**.", "", "Here is the plan.", "---", "- Read the [handbook](https://x.test/h).", "- Meet your `buddy`.", "", "## Wrap up", "> See you *soon*!"].join("\n");
+    assert.deepEqual(scenesFromText(doc), {
+      title: "Onboarding: week one",
+      scenes: ["Hi, I'm Ava.\n\nHere is the plan.", "Read the handbook. Meet your buddy.", "See you soon!"],
+      // The headings that start scenes name them; the section after --- has none.
+      names: ["Hello", undefined, "Wrap up"],
+      truncated: false,
+    });
+    // A title alone does not divide the document: its paragraphs are still a scene each.
+    assert.deepEqual(scenesFromText("# My talk\n\nFirst point.\n\nSecond point.\n\nThird point."), { title: "My talk", scenes: ["First point.", "Second point.", "Third point."], truncated: false });
+    // Underlined headings and front matter; a line above --- is script, not a heading, so it is never lost.
+    assert.deepEqual(scenesFromText("---\ntitle: Demo\nauthor: Me\n---\nWelcome\n=======\n\nHello there.\n\nThanks for watching\n-------\nThe plan.\n\n- Item one\n---\nAnother."), {
+      title: "Welcome",
+      scenes: ["Hello there.\n\nThanks for watching", "The plan.\n\nItem one", "Another."],
+      truncated: false,
+    });
+    // Front matter needs YAML keys, and plain text has none.
+    assert.deepEqual(scenesFromText("---\nNote: this is the intro.\n---\nScene two.").scenes, ["Note: this is the intro.", "Scene two."]);
+    assert.deepEqual(scenesFromText("---\ntitle: Demo\n---\nScene two.", { markdown: false }).scenes, ["title: Demo", "Scene two."]);
+    // Breaks spelled with spaces, comments, fences, link definitions, tables, and escapes.
+    assert.deepEqual(scenesFromText("One.\n\n* * *\n\nTwo.\n- - -\nThree.").scenes, ["One.", "Two.", "Three."]);
+    assert.deepEqual(
+      scenesFromText("Read the [guide][g]. <!-- speaker note -->\n\n```js\nconsole.log(1)\n```\n\n| Plan | Price |\n|---|---:|\n| Pro | $10 |\n\nCost is 5 \\* 2, not \\*bold\\*.\n\n[g]: https://example.com/guide").scenes,
+      ["Read the guide.", "console.log(1)", "Plan, Price. Pro, $10.", "Cost is 5 * 2, not *bold*."],
+    );
+    // Speaker labels are script, not link definitions; a real definition (a URL, maybe a title) is not spoken.
+    assert.deepEqual(scenesFromText("[NARRATOR]: Welcome to the show.\n\n[HOST]: Thanks for having me.\n[1]: First, we begin.\n[docs]: https://x.test/d \"Docs\"").scenes, [
+      "[NARRATOR]: Welcome to the show.",
+      "[HOST]: Thanks for having me. [1]: First, we begin.",
+    ]);
+    // Code in a fence is read as written: its # is no heading or title, its --- no break, its ** no emphasis.
+    assert.deepEqual(scenesFromText("```bash\n# install deps\nnpm i\n```\n\nFirst para.\n\nSecond para.\n\n~~~py\n---\ndef f(*args, **kwargs):\n    return __name__\n~~~"), {
+      scenes: ["# install deps npm i", "First para.", "Second para.", "--- def f(*args, **kwargs): return __name__"],
+      truncated: false,
+    });
+    // More Markdown: nested parentheses in a link, quoted lists, matched emphasis only, entities, strikethrough, footnotes, task boxes, escapes, bare rules.
+    assert.deepEqual(
+      scenesFromText("[Mercury](https://en.wikipedia.org/wiki/Mercury_(planet)) today.\n\n> - quoted item\n\nPass _foo and bar* together, ~~old~~ new &amp; fine&nbsp;now[^1].\n\n- [ ] Call Sam\n- [x] Book room\n\nPrice \\$5 \\& more.\n\n=====\n\nAfter the rule.").scenes,
+      ["Mercury today.\n\nquoted item\n\nPass _foo and bar* together, old new & fine now.\n\nCall Sam Book room\n\nPrice $5 & more.", "After the rule."],
+    );
+    assert.equal(scenesFromText("# Learn C#\n\nHi.").title, "Learn C#");
+  });
+
+  it("reads ordinary prose as written: comparisons, addresses, numbers, code, and plain-text files", () => {
+    const prose = ["Margins grew from <1% to >5% this year.", "If x < 5 and y > 3 we stop. Keep a <b and c> d. If x<y and y>z we stop.", "Write to <help@example.com> or <https://example.com/help>.", "We sold\n100. That was the goal.", "Call `__init__` first, see <b>this</b>."].join("\n\n");
+    assert.deepEqual(scenesFromText(prose).scenes, [
+      "Margins grew from <1% to >5% this year.",
+      "If x < 5 and y > 3 we stop. Keep a <b and c> d. If x<y and y>z we stop.",
+      "Write to help@example.com or https://example.com/help.",
+      "We sold 100. That was the goal.",
+      "Call __init__ first, see this.",
+    ]);
+    // A list may follow a paragraph line directly; a wrapped number is still not a list.
+    assert.deepEqual(scenesFromText("Here are the steps:\n- one\n- two\n* three\n\nSteps:\n1. Open\n2. Save").scenes, ["Here are the steps: one two three", "Steps: Open Save"]);
+    // Plain text is not Markdown: nothing is taken out.
+    assert.deepEqual(scenesFromText("# 1 rule\n\n- **Never** give up.", { markdown: false }).scenes, ["# 1 rule", "- **Never** give up."]);
+    assert.deepEqual(scenesFromText("Use snake_case names. [pause 2s] Then go on.").scenes, ["Use snake_case names. [pause 2s] Then go on."]);
+  });
+
+  it("keeps a pause-only paragraph with its neighbour, and a pause-only section as a silent scene", () => {
+    assert.deepEqual(scenesFromText("Hello there.\n\n[pause 2s]\n\nWelcome back.").scenes, ["Hello there. [pause 2s]", "Welcome back."]);
+    assert.deepEqual(scenesFromText("[pause]\n\nHello.").scenes, ["[pause] Hello."]);
+    assert.deepEqual(scenesFromText("[pause 2s]"), { scenes: [], truncated: false });
+    // A section of only pauses, set apart by breaks, is a silent scene of its own when it lasts one to sixty seconds.
+    assert.deepEqual(scenesFromText("Hello.\n\n---\n\n[pause 3s]\n\n---\n\nBye.").scenes, ["Hello.", "[pause 3s]", "Bye."]);
+    assert.deepEqual(scenesFromText("Hello.\n\n---\n\n[pause 0.5s]\n\n---\n\nBye.").scenes, ["Hello. [pause 0.5s]", "Bye."], "too short for a silent scene");
+    assert.deepEqual(scenesFromText("[pause 3s]\n\n---\n\n[pause 2s]").scenes, [], "nothing but silence");
+    assert.deepEqual(scenesFromText("\n# Title only\n---\n\n"), { scenes: [], title: "Title only", truncated: false });
+  });
+
+  it("packs more paragraphs than a video has scenes, with nothing lost or reordered", () => {
+    const many = Array.from({ length: 45 }, (_, i) => `Paragraph ${i + 1}.`).join("\n\n");
+    const packed = scenesFromText(many);
+    assert.ok(packed.scenes.length <= MAX_SCENES);
+    assert.equal(packed.truncated, false);
+    assert.equal(packed.scenes.join("\n\n"), many);
+    assert.ok(renders(packed.scenes));
+  });
+
+  it("keeps a long document within what a video takes, cut at a sentence end, and says so", () => {
+    const sentence = "This sentence is exactly forty-four chars. ";
+    const para = sentence.repeat(16).trim();
+    const doc = Array.from({ length: 10 }, () => para).join("\n\n");
+    const r = scenesFromText(doc);
+    assert.equal(r.truncated, true);
+    assert.ok(r.scenes.join("\n\n").length <= MAX_SCRIPT_CHARS);
+    assert.ok(r.scenes.join("\n\n").length > MAX_SCRIPT_CHARS - para.length, "the room left is used");
+    assert.ok(r.scenes.every((s) => s.endsWith(".")));
+    assert.ok(renders(r.scenes), "the server takes what was imported");
+    // One paragraph longer than a whole video, and a pause marker is never cut in half.
+    const words = Array.from({ length: 1200 }, (_, i) => (i % 50 === 49 ? "[pause 2s]" : "word")).join(" ");
+    const one = scenesFromText(words);
+    assert.equal(one.truncated, true);
+    assert.ok(renders(one.scenes));
+    assert.ok(!/\[pause$|^2s\]/.test(one.scenes[0]));
+    // A cut never leaves a fragment: not half a pause marker, not a word or two.
+    const nearlyFull = `${"a".repeat(4988)}.`;
+    assert.deepEqual(scenesFromText(`${nearlyFull}\n\n[pause 2s] Hello world.`).scenes, [nearlyFull]);
+    assert.deepEqual(scenesFromText(`${"b".repeat(4995)}.\n\nwords that will not fit here at all`).scenes, [`${"b".repeat(4995)}.`]);
+    // A section's paragraph end or a quoted sentence end is a place to cut.
+    const firstPart = `${"First part goes on. ".repeat(160).trim()}`;
+    const section = scenesFromText(`${firstPart}\n\n${"Second part goes on and on ".repeat(120)}\n\n---\n\nEnd.`);
+    assert.deepEqual(section.scenes, [firstPart]);
+    assert.ok(scenesFromText(`${"He said \"stop.\" ".repeat(400)}`).scenes[0].endsWith('"stop."'));
+    // A huge document is read as quickly as a short one, unclosed emphasis and links included.
+    for (const doc of [`${"c".repeat(4995)}.\n\n${"long text ".repeat(90_000)}`, "a **b c **d e ".repeat(70_000), "__init and ".repeat(90_000), "[docs](https://x.y/a and ".repeat(40_000), "# \n".repeat(300_000), "[pause]\n\n".repeat(100_000)]) {
+      const started = Date.now();
+      const r = scenesFromText(doc);
+      assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms for ${doc.slice(0, 30)}`);
+      if (r.scenes.length) assert.ok(renders(r.scenes));
+    }
+    // An early short sentence does not use up the cut: an unpunctuated transcript is kept to the room left.
+    const transcript = scenesFromText(`Hi. ${"word ".repeat(2000)}`).scenes;
+    assert.ok(transcript[0].length > MAX_SCRIPT_CHARS - 50, String(transcript[0].length));
+    // More sections than a video has scenes are packed together, so text that fits is all kept.
+    const sections = scenesFromText(Array.from({ length: MAX_SCENES + 3 }, (_, i) => `Section ${i + 1}.`).join("\n\n---\n\n"));
+    assert.equal(sections.scenes.length, MAX_SCENES);
+    assert.equal(sections.scenes.join("\n\n"), Array.from({ length: MAX_SCENES + 3 }, (_, i) => `Section ${i + 1}.`).join("\n\n"));
+    assert.equal(sections.truncated, false);
+    assert.ok(renders(sections.scenes));
+  });
+
+  it("always gives scenes the server takes, whatever the document", () => {
+    // A seeded mix of paragraphs, long runs, pauses, headings, breaks, and lists.
+    let seed = 7;
+    const rand = (n: number) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) % n);
+    const pieces = ["Hello there.", "[pause 2s]", "# Part", "## Section", "---", "- item", "1. step", "word ".repeat(300), "x".repeat(900), "A sentence. ".repeat(80), "", ""];
+    for (let n = 0; n < 300; n++) {
+      const doc = Array.from({ length: 1 + rand(60) }, () => pieces[rand(pieces.length)]).join("\n");
+      const r = scenesFromText(doc, { markdown: rand(4) > 0 });
+      if (r.scenes.length) assert.ok(renders(r.scenes), doc.slice(0, 200));
+      assert.ok(r.scenes.length <= MAX_SCENES && r.scenes.join("\n\n").length <= MAX_SCRIPT_CHARS);
+    }
+  });
+
+  it("reads scripts as people write them: speaker replies, chat-wrapped Markdown, footnotes, CJK, Docs exports", () => {
+    // Every line of a two-voice script, one-word replies included.
+    assert.deepEqual(scenesFromText("# Episode 4\n\n[HOST]: Welcome back to the show.\n[GUEST]: Thanks.\n[HOST]: So, ready?\n[GUEST]: Absolutely.\n[HOST]: 10:30am, e.g. now.").scenes, [
+      "[HOST]: Welcome back to the show. [GUEST]: Thanks. [HOST]: So, ready? [GUEST]: Absolutely. [HOST]: 10:30am, e.g. now.",
+    ]);
+    assert.deepEqual(scenesFromText("[HOST]: Great.\n\n[GUEST]: Agreed.").scenes, ["[HOST]: Great.", "[GUEST]: Agreed."]);
+    assert.deepEqual(scenesFromText("Hi.\n\n[ref]: www.example.com\n[a]: ./notes.md\n[b]: /docs\n[c]: #top\n[d]: example.org/x \"T\"").scenes, ["Hi."]);
+    // A script a chat assistant wrapped in a ```markdown fence is read as Markdown.
+    assert.deepEqual(scenesFromText("```markdown\n# Scene 1\nHello **world**.\n\n# Scene 2\nBye.\n```"), { title: "Scene 1", scenes: ["Hello world.", "Bye."], truncated: false });
+    // Inline code at the start of a line is no fence, nor is a fence that never closes.
+    assert.deepEqual(scenesFromText("```npm i``` and go.\n\n## Next\nThen **this**.").scenes, ["npm i and go.", "Then this."]);
+    assert.deepEqual(scenesFromText("```\n# Title\nHello *there*."), { title: "Title", scenes: ["Hello there."], truncated: false });
+    // Footnote definitions (with their continuation) are not spoken.
+    assert.deepEqual(scenesFromText("Sales grew 20%.[^1]\n\n[^1]: Source: annual report 2024.\n    More detail.\n\nThe end.").scenes, ["Sales grew 20%.", "The end."]);
+    // Bold that holds an asterisk, and emphasis wrapped across lines.
+    assert.deepEqual(scenesFromText("**Step 1: open *Settings***\n\n**5 * 3 = 15** is math.\n\nThis is **very\nimportant** now.").scenes, ["Step 1: open Settings", "5 * 3 = 15 is math.", "This is very important now."]);
+    // Chinese and Japanese without spaces are cut at a full stop (or between characters), never dropped.
+    for (const sentence of ["这是一个很长的句子，我们在这里讨论视频脚本的导入功能。", "これは動画の台本を読み込む機能についての長い文章です。"]) {
+      const r = scenesFromText(sentence.repeat(220));
+      assert.equal(r.truncated, true);
+      assert.ok(r.scenes[0].length > MAX_SCRIPT_CHARS / 2 && r.scenes[0].endsWith(sentence.at(-1)!));
+      assert.ok(renders(r.scenes));
+    }
+    assert.ok(scenesFromText("字".repeat(9000)).scenes[0].length > MAX_SCRIPT_CHARS - 10);
+    // Google Docs image placeholders and their (huge) definitions are not spoken and do not use up the reading.
+    const docs = `Hello there.\n\n![][image1]\n\n![](data:image/png;base64,${"A".repeat(24_000)})\n\nBye now.\n\n[image1]: <data:image/png;base64,${"B".repeat(30_000)}>`;
+    assert.deepEqual(scenesFromText(docs), { scenes: ["Hello there.", "Bye now."], truncated: false });
+    // A short sentence keeps its place when only a little room is left.
+    const nearly = `${"Plenty of prose here. ".repeat(220).trim()}\n\nShort one. this sentence keeps going ${"and on ".repeat(60)}without ending`;
+    assert.ok(scenesFromText(nearly).scenes.at(-1)!.endsWith("Short one."));
+    // Many unclosed comments are read quickly.
+    const started = Date.now();
+    scenesFromText("<!-- ".repeat(200_000));
+    assert.ok(Date.now() - started < 1500);
+  });
+
+  it("decodes a file as a word processor saved it: UTF-8, UTF-16 with its mark, or Windows-1252", () => {
+    const text = "Café – “quoted” ✓";
+    assert.equal(decodeScript(new TextEncoder().encode(text)), text);
+    const le = new Uint8Array([0xff, 0xfe, ...Array.from(text).flatMap((c) => { const n = c.charCodeAt(0); return [n & 0xff, n >> 8]; })]);
+    assert.equal(decodeScript(le), text);
+    const be = new Uint8Array([0xfe, 0xff, ...Array.from(text).flatMap((c) => { const n = c.charCodeAt(0); return [n >> 8, n & 0xff]; })]);
+    assert.equal(decodeScript(be), text);
+    // "Café – “quoted”" in Windows-1252, which is not valid UTF-8.
+    assert.equal(decodeScript(new Uint8Array([0x43, 0x61, 0x66, 0xe9, 0x20, 0x96, 0x20, 0x93, 0x71, 0x75, 0x6f, 0x74, 0x65, 0x64, 0x94])), "Café – “quoted”");
+  });
+
+  it("keeps pause markers, chat lead-ins, callouts, entities, and one-word calls to action", () => {
+    // A chat answer: a lead-in, the script in a ```markdown fence, a sign-off. Only the script is read, its heading the title.
+    assert.deepEqual(
+      scenesFromText("Here's your script:\n\n```markdown\n# Product Launch\n\n## Scene 1\n**HOST:** Welcome to *our* launch.\n\n## Scene 2\n- First point\n```\n\nLet me know if you want changes."),
+      { title: "Product Launch", scenes: ["HOST: Welcome to our launch.", "First point"], truncated: false },
+    );
+    // A code block inside the script's fence, and a long text around it (which is then kept).
+    const tutorial = "## Scene 1\n**HOST:** Run:\n```bash\nnpm install\n```\n## Scene 2\n**HOST:** Now *start* the server.\n## Scene 3\n- Open the browser";
+    assert.deepEqual(scenesFromText(`Here's your script:\n\`\`\`markdown\n${tutorial}\n\`\`\`\n`).scenes, ["HOST: Run: npm install", "HOST: Now start the server.", "Open the browser"]);
+    const lead = Array.from({ length: 5 }, (_, i) => `Lead line ${i + 1}.`).join("\n\n");
+    assert.deepEqual(scenesFromText(`${lead}\n\n\`\`\`md\n${tutorial}\n\`\`\``).scenes.slice(-3), ["HOST: Run: npm install", "HOST: Now start the server.", "Open the browser"]);
+    assert.deepEqual(scenesFromText("````markdown\n# Launch\nHello **there**.\n````").scenes, ["Hello there."]);
+    // Front matter inside a whole-document fence.
+    assert.deepEqual(scenesFromText("```markdown\n---\ntitle: Launch\nduration: 60s\n---\n\n# Launch\n\nHello there.\n```"), { title: "Launch", scenes: ["Hello there."], truncated: false });
+    // Pause markers next to brackets are kept.
+    assert.deepEqual(scenesFromText("Ready? [pause][pause] Go!\n\n[HOST][pause 2s] Welcome back.\n\nNext [pause 1.5s](beat) line.").scenes, ["Ready? [pause][pause] Go!", "[HOST][pause 2s] Welcome back.", "Next [pause 1.5s](beat) line."]);
+    // Notion and Obsidian callouts, more entities.
+    assert.deepEqual(scenesFromText("<aside>💡 Tip here.</aside>\n\n> [!NOTE]\n> Remember this.\n\nWe&#x27;re at the caf&eacute; &copy; 2026 &euro;5 &#128512;").scenes, ["💡 Tip here.", "Remember this.", "We're at the café © 2026 €5 😀"]);
+    // A reply that is only a domain or a name is script; a definition with a path or scheme is not.
+    assert.deepEqual(scenesFromText("[HOST]: acme.com\n\n[GUEST]: Mr.Smith\n\n[HOST]: #1 (drumroll)\n\n[x]: https://acme.com\n[y]: acme.com/docs").scenes, ["[HOST]: acme.com", "[GUEST]: Mr.Smith", "[HOST]: #1 (drumroll)"]);
+    // Definitions of files, of anchors, and of any label the document refers to are not spoken.
+    assert.deepEqual(scenesFromText("![Logo][logo] Hello.\n\nSee the [site][site].\n\n[logo]: logo.png\n[r]: report.pdf \"Annual report\"\n[site]: example.com\n[p1]: #1-intro").scenes, ["Logo Hello.", "See the site."]);
+    // Images embedded in angle brackets, and one cut short, which must not swallow the prose after it.
+    assert.deepEqual(scenesFromText(`Intro text.\n\n![Chart](<data:image/png;base64,${"A".repeat(20_000)}>)\n\nOutro.`).scenes, ["Intro text.", "Chart", "Outro."]);
+    assert.deepEqual(scenesFromText("Start.\n\n![Chart](data:image/png;base64,AAAA\n\nOur sales (in dollars) rose.").scenes.at(-1), "Our sales (in dollars) rose.");
+    // Quadratic inputs stay fast.
+    for (const doc of ["![".repeat(60_000), "![a](data:".repeat(12_000), "![a](data:x ".repeat(12_000), "```\n".repeat(60_000), "~~~js\n".repeat(60_000)]) {
+      const started = Date.now();
+      scenesFromText(doc);
+      assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
+    }
+  });
+
+  it("keeps a UTF-8 file with a stray byte as UTF-8, and reads a legacy file in the language's code page", () => {
+    const utf8 = new TextEncoder().encode("大家好 Café “quoted” we’re");
+    const stray = new Uint8Array([...utf8, 0x92, ...new TextEncoder().encode(" more")]);
+    assert.equal(decodeScript(stray), "大家好 Café “quoted” we’re� more");
+    // "Привет" in Windows-1251.
+    assert.equal(decodeScript(new Uint8Array([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]), legacyEncodingFor("ru-RU")), "Привет");
+    assert.deepEqual(["ru-RU", "zh-CN", "zh-TW", "ja", "en-US", "pl", "sr-Latn-RS"].map(legacyEncodingFor), ["windows-1251", "gbk", "big5", "shift_jis", "windows-1252", "windows-1250", "windows-1250"]);
+    // A UTF-8 file that already holds � characters is UTF-8, and so is a short English one with a stray byte.
+    const held = "Today we\ufffdre talking budgets — and it\ufffds fun 😀.";
+    assert.equal(decodeScript(new TextEncoder().encode(held)), held);
+    const short = new Uint8Array([...new TextEncoder().encode("Say “go”"), 0x92, 0x21]);
+    assert.equal(decodeScript(short), "Say “go”\ufffd!");
+    // A Western file read on a Japanese system falls back to Windows-1252: "We’re live — “today”."
+    const western = new Uint8Array([0x57, 0x65, 0x92, 0x72, 0x65, 0x20, 0x6c, 0x69, 0x76, 0x65, 0x20, 0x97, 0x20, 0x93, 0x74, 0x6f, 0x64, 0x61, 0x79, 0x94, 0x2e]);
+    assert.equal(decodeScript(western, "shift_jis"), "We’re live — “today”.");
+    // A real Shift_JIS or GBK file cut off mid-character keeps its text, with one � where it was cut.
+    const sjis = [0x82, 0xb1, 0x82, 0xf1, 0x82, 0xc9, 0x82, 0xbf, 0x82, 0xcd, 0x81, 0x41, 0x8a, 0x46, 0x82, 0xb3, 0x82, 0xf1, 0x81, 0x42];
+    assert.equal(decodeScript(new Uint8Array([...sjis, 0x82]), "shift_jis"), "こんにちは、皆さん。\ufffd");
+    const gbk = [0xb4, 0xf3, 0xbc, 0xd2, 0xba, 0xc3, 0xa3, 0xac, 0xbb, 0xb6, 0xd3, 0xad, 0xa1, 0xa3];
+    assert.equal(decodeScript(new Uint8Array([...gbk, 0xb4]), "gbk"), "大家好，欢迎。\ufffd");
+    // A Western file stays Western whatever the code page: curly quotes before a letter make valid double-byte
+    // characters, so a Word export has few bad bytes, but its high bytes stand alone rather than in runs.
+    const cp1252 = (text: string) => new Uint8Array([...text].map((c) => ({ "’": 0x92, "—": 0x97, "…": 0x85, "é": 0xe9, "“": 0x93, "”": 0x94 })[c] ?? c.charCodeAt(0)));
+    const word = "Welcome back! Today we’re talking about what’s next… It’s time — we’re live.\r\n".repeat(6);
+    for (const page of ["shift_jis", "gbk", "big5", "euc-kr"]) {
+      assert.equal(decodeScript(cp1252(word), page), word, page);
+      for (const short of ["Café", "Hello everyone, and welcome…", "He said “hi”"]) assert.equal(decodeScript(cp1252(short), page), short, `${page}: ${short}`);
+    }
+    // A single-byte page keeps its letters around a pasted emoji, whose bytes it reads as control characters.
+    const polish = [0x44, 0x7a, 0x69, 0x65, 0xf1, 0x20, 0x64, 0x6f, 0x62, 0x72, 0x79, 0x2c, 0x20, 0x7a, 0x61, 0x6c, 0x6f, 0x67, 0x75, 0x6a, 0x20, 0x73, 0x69, 0xea, 0x2e, 0x20, 0x84, 0x4e, 0x6f, 0x77, 0x79, 0x94];
+    assert.ok(decodeScript(new Uint8Array([...polish, 0x20, ...new TextEncoder().encode("😀")]), "windows-1250").startsWith("Dzień dobry, zaloguj się. „Nowy”"));
+    // So does a longer one holding a pasted UTF-8 emoji.
+    const emoji = new Uint8Array([...sjis, ...sjis, ...sjis, ...new TextEncoder().encode("😀"), ...sjis]);
+    assert.ok(decodeScript(emoji, "shift_jis").startsWith("こんにちは、皆さん。"));
+  });
+
+  it("reads chat answers with several fences, example fences, titled images, and short replies", () => {
+    // Two versions to choose from: both are read, without their fence lines.
+    const versions = ["Here are two versions.", "", "**Version A (energetic):**", "", "```markdown", "**HOST:** Hey everyone, welcome back!", "```", "", "**Version B (calm):**", "", "```markdown", "**HOST:** Hello, and welcome.", "```", "", "Which one do you prefer?"].join("\n");
+    const two = scenesFromText(versions).scenes.join("\n");
+    assert.ok(two.includes("HOST: Hey everyone, welcome back!") && two.includes("HOST: Hello, and welcome."), two);
+    assert.ok(!two.includes("```") && !two.includes("**"), two);
+    // A script followed by a code block in the sign-off: the script's close is its own, and no fence is spoken.
+    const signOff = ["Here's your script:", "", "```markdown", "# Launch", "", "We ship today.", "```", "", "To turn it into captions, run:", "", "```bash", "npx captions script.md", "```"].join("\n");
+    const signed = scenesFromText(signOff).scenes.join("\n");
+    assert.ok(signed.includes("We ship today.") && !signed.includes("```"), signed);
+    // A bare code block inside the script does not end it, and a script fence left open runs to the end.
+    const bare = scenesFromText(["```markdown", "Open a terminal and type:", "```", "npm start", "```", "Then the app opens.", "```"].join("\n")).scenes.join("\n");
+    assert.ok(bare.includes("Open a terminal") && bare.includes("npm start") && bare.includes("Then the app opens."), bare);
+    const open = scenesFromText(["Here you go:", "```markdown", "**HOST:** Welcome to the show!", "```bash", "npm i", "```", "**HOST:** That's it."].join("\n")).scenes.join("\n");
+    assert.ok(open.includes("HOST: Welcome to the show!") && open.includes("HOST: That's it.") && !open.includes("```") && !open.includes("**"), open);
+    // A code block in the lead-in is not part of the script.
+    const leadIn = scenesFromText(["```", "npm i", "```", "Then read:", "```markdown", "# Launch", "", "Welcome to the launch.", "```"].join("\n"));
+    assert.deepEqual(leadIn, { scenes: ["Welcome to the launch."], title: "Launch", truncated: false });
+    // A fence that holds only a heading is an example in the prose, which is the script.
+    const example = "In this video I'll show you how to make a heading. Type a hash, a space, and your text:\n\n```markdown\n# My Heading\n```\n\nThat's all there is to it.";
+    const shown = scenesFromText(example).scenes.join("\n");
+    assert.ok(shown.includes("how to make a heading") && shown.includes("That's all there is to it."), shown);
+    // An embedded image with a title leaves its alt text, and what follows it is kept.
+    for (const title of [' "Q3 sales"', " 'Q3 sales'", " (Q3 sales)"]) {
+      const doc = `Intro.\n\n![Chart](data:image/png;base64,${"iVBOR".repeat(6000)}${title})\n\nOutro.`;
+      assert.deepEqual(scenesFromText(doc), { scenes: ["Intro.", "Chart", "Outro."], truncated: false }, title);
+    }
+    // A label used as a reference elsewhere still keeps its short replies.
+    const replies = scenesFromText("[Scene 1][HOST]: Welcome to the show!\n\n[GUEST]: Thanks for having me.\n\n[HOST]: Absolutely!\n\n[HOST]: (laughs)").scenes.join("\n");
+    assert.ok(replies.includes("Absolutely!") && replies.includes("(laughs)"), replies);
+  });
+});

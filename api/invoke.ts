@@ -7,10 +7,10 @@
 // which crashed the Vercel function runtime (FUNCTION_INVOCATION_FAILED).
 //
 // If MISSION_CONTROL_TOKEN is set, requests must carry a valid mc_auth
-// cookie or Authorization: Bearer header (see api/services/auth.ts).
+// cookie or Authorization: Bearer header (see api/_services/auth.ts).
 
 import { getToolList, runTool } from "./server.js";
-import { getAuthState } from "./services/auth.js";
+import { getAuthState } from "./_services/auth.js";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {

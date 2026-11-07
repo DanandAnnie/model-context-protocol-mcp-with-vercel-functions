@@ -1,0 +1,330 @@
+// The Video Agent: one prompt in, a whole video out (HeyGen's Video Agent). Used by API routes only.
+import { z } from "zod";
+import { getAvatarProvider, getScriptProvider } from "../providers";
+import type { VideoPlan } from "../providers/types";
+import { LOCAL_OWNER } from "../owner-id";
+import { NotFoundError, ValidationError } from "../errors";
+import { stripPauses } from "../pauses";
+import { fetchPageText } from "../webpage";
+import type { FetchLike } from "../safe-fetch";
+import { MAX_DIRECTED_BRIEF, MAX_DIRECTED_MEDIA, MAX_DOCUMENT_CHARS, MAX_SCENES, type AgentStyle, type DirectedMedia, type AspectRatio, type Avatar, type Background, type CaptionStyle, type Resolution, type SceneLayout, type Video } from "../types";
+import { getAvatar, listAvatars } from "./avatars";
+import { getBrandKit } from "./brand";
+import { listVoices } from "./voices";
+import { createVideo, enforceRenderLimit, videoRequestSchema } from "./videos";
+import { forgetMemo, memo } from "../cache";
+import { footageIdSchema } from "./footage";
+import { shootIdSchema, shootPhotoSchema } from "./shoots";
+import { LIST_TTL_MS } from "./shared";
+
+/** What a video holds: its scenes' scripts together, joined as the editor joins them. */
+const MAX_SCRIPT = 5000;
+/** The planner is asked for about this many scenes at most; a video holds more, but an agent's plan rarely needs them. */
+const MAX_PLANNED_SCENES = 10;
+
+/** One of the account's pictures, clips, or shoot photos for HeyGen's agent to use, named as it is listed. */
+const mediaSchema = z.discriminatedUnion(
+  "kind",
+  [
+    z.object({ kind: z.literal("picture"), id: z.string().regex(/^bd_[A-Za-z0-9]{1,64}$/, "Unknown picture") }).strict(),
+    z.object({ kind: z.literal("clip"), id: footageIdSchema }).strict(),
+    // Its id bounded as a clip's is, so a malformed one is refused as such rather than read as a deleted shoot.
+    shootPhotoSchema.extend({ kind: z.literal("photo"), shootId: shootIdSchema }),
+  ],
+  "Choose a picture, a clip, or a photo shoot's photo",
+);
+const mediaKey = (m: z.infer<typeof mediaSchema>) => (m.kind === "photo" ? `photo:${m.shootId}:${m.photo}` : `${m.kind}:${m.id}`);
+
+export const videoAgentSchema = z.object({
+  prompt: z.string().trim().min(3, "Describe the video in a few words").max(10_000),
+  /** A public web page the agent writes from, as HeyGen's agent reads attached files. */
+  url: z.string().trim().url().max(2000).optional(),
+  /** An attached document's words (read in the browser), which the agent writes from as it does from a page. */
+  document: z
+    .object({
+      name: z.string().trim().min(1).max(200),
+      text: z.string().trim().min(1, "The attached document has no text").max(MAX_DOCUMENT_CHARS, `An attached document is read up to ${MAX_DOCUMENT_CHARS.toLocaleString("en-US")} characters`),
+    })
+    .optional(),
+  /** Presenter and voice; the brand kit's defaults (then the first ones) when omitted. */
+  avatarId: z.string().min(1).optional(),
+  voiceId: z.string().min(1).optional(),
+  /** "auto" takes the planner's choice (portrait for social formats). */
+  orientation: z.enum(["auto", "landscape", "portrait", "square"]).default("auto"),
+  lengthSec: z.number().int().min(15).max(300).default(60),
+  language: z.string().trim().min(2).max(40).default("English"),
+  /**
+   * "generate" renders straight away; "plan" returns the draft to review in the editor first; "direct" hands the brief
+   * to HeyGen's own Video Agent, which writes, casts, and renders the whole video itself.
+   */
+  mode: z.enum(["generate", "plan", "direct"]).default("generate"),
+  /** Where a "direct" video is filed (the folder of the one asked again); the other modes leave it to the editor. */
+  folder: z.string().trim().max(40).optional(),
+  /** A "direct" video stops at HeyGen's storyboard for review and answers on its page before it renders. */
+  review: z.boolean().optional(),
+  /** One of HeyGen's curated styles (`GET /api/video-agent/styles`) its agent composes a "direct" video in. */
+  styleId: z.string().regex(/^[A-Za-z0-9_.:-]{1,100}$/, "Unknown style").optional(),
+  /** The account's pictures, b-roll clips, and photo shoot photos HeyGen's agent may use in a "direct" video. */
+  media: z
+    .array(mediaSchema)
+    .max(MAX_DIRECTED_MEDIA, `HeyGen's agent takes up to ${MAX_DIRECTED_MEDIA} pictures and clips`)
+    .refine((all) => new Set(all.map(mediaKey)).size === all.length, "The same picture or clip is chosen twice")
+    .optional(),
+});
+export type VideoAgentInput = z.infer<typeof videoAgentSchema>;
+
+/** A plan made ready for the editor or the renderer: scenes, presenter, voice, and settings. */
+export interface VideoAgentDraft {
+  title: string;
+  scenes: { script: string; background: Background; layout?: SceneLayout }[];
+  avatarId: string;
+  voiceId: string;
+  aspect: AspectRatio;
+  resolution: Resolution;
+  captions: boolean;
+  /** The brand kit's caption style, when it has one. */
+  captionStyle?: CaptionStyle;
+}
+
+const ASPECTS: Record<Exclude<VideoAgentInput["orientation"], "auto">, AspectRatio> = { landscape: "16:9", portrait: "9:16", square: "1:1" };
+
+/** Text up to `max` characters, cut after the last sentence end that fits (else the last word). */
+function cut(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const head = text.slice(0, max);
+  const end = Math.max(...[". ", "! ", "? "].map((p) => head.lastIndexOf(p)));
+  if (end > max / 2) return head.slice(0, end + 1);
+  // Between words, and never inside a pause marker the cut would leave half of ("[pause", "[ pause 2").
+  return head.replace(/\s+\S*$/, "").replace(/\s*\[\s*(?:pause(?:\s+\d{0,2}(?:[.,]\d{0,2})?\s*s?)?\s*)?$/i, "").trim();
+}
+
+/**
+ * The planner's scenes as a video takes them: words beyond pause markers, at most the planned-scene count, and
+ * every scene that fits in the script a video holds (a first scene longer than that is cut at a sentence end).
+ */
+export function fitPlan(plan: VideoPlan): VideoPlan["scenes"] {
+  const out: VideoPlan["scenes"] = [];
+  let used = 0;
+  for (const scene of plan.scenes) {
+    const script = scene.script.replace(/[ \t]+/g, " ").trim();
+    if (!stripPauses(script).trim()) continue;
+    if (out.length >= Math.min(MAX_PLANNED_SCENES, MAX_SCENES)) break;
+    const room = MAX_SCRIPT - used - (out.length ? 2 : 0);
+    if (script.length > room) {
+      if (out.length) break;
+      // A first scene longer than a whole video is cut; one that leaves only pauses gives way to the next.
+      const kept = cut(script, room);
+      if (!stripPauses(kept).trim()) continue;
+      out.push({ ...scene, script: kept });
+      break;
+    }
+    out.push({ ...scene, script });
+    used += script.length + (out.length > 1 ? 2 : 0);
+  }
+  return out;
+}
+
+/** The presenter asked for, else the brand kit's, else the first one listed. */
+async function presenter(avatarId: string | undefined, kitAvatarId: string | undefined, ownerId: string): Promise<Avatar> {
+  if (avatarId) return getAvatar(avatarId, ownerId);
+  if (kitAvatarId) {
+    const kit = await getAvatar(kitAvatarId, ownerId).catch((err) => {
+      if (err instanceof NotFoundError) return undefined;
+      throw err;
+    });
+    if (kit) return kit;
+  }
+  const [first] = await listAvatars(ownerId);
+  if (!first) throw new ValidationError("No presenter is available to present the video");
+  return first;
+}
+
+/**
+ * What the agent writes from: the attached document first (the user chose it for this video), then the page; named
+ * when there are both, so they can be told apart.
+ */
+async function sourcesOf(input: VideoAgentInput, fetchImpl?: FetchLike): Promise<string | undefined> {
+  let page: string | undefined;
+  if (input.url) {
+    try {
+      page = (await fetchPageText(input.url, fetchImpl)).text;
+    } catch (err) {
+      throw new ValidationError(err instanceof Error ? err.message : "The page could not be read");
+    }
+  }
+  const doc = input.document?.text;
+  return doc && page ? `From the attached document "${input.document!.name}":\n${doc}\n\nFrom the web page ${input.url}:\n${page}` : doc || page;
+}
+
+/** Plans a video from a prompt and makes it ready to render, with the owner's brand kit applied. */
+export async function planVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<VideoAgentDraft> {
+  noStyle(input);
+  const source = await sourcesOf(input, fetchImpl);
+  const kit = await getBrandKit(ownerId);
+  const avatar = await presenter(input.avatarId, kit?.defaultAvatarId, ownerId);
+  const voices = await listVoices(ownerId);
+  // A voice asked for must exist; otherwise the presenter's own (when it was chosen), the kit's, or the first.
+  if (input.voiceId && !voices.some((v) => v.id === input.voiceId)) throw new ValidationError(`Voice ${input.voiceId} is not available`);
+  const candidates = [input.voiceId, ...(input.avatarId ? [avatar.defaultVoiceId] : []), kit?.defaultVoiceId, avatar.defaultVoiceId];
+  const voice = candidates.map((id) => id && voices.find((v) => v.id === id)).find(Boolean) || voices[0];
+  if (!voice) throw new ValidationError("No voice is available to narrate the video");
+
+  const plan = await getScriptProvider().plan({ prompt: input.prompt, lengthSec: input.lengthSec, language: input.language, ...(source ? { source } : {}), ...(kit?.writingStyle ? { style: kit.writingStyle } : {}) });
+  const scenes = fitPlan(plan);
+  if (!scenes.length) throw new ValidationError("The video agent could not plan a video from that prompt. Try describing it in more detail.");
+  const background: Background = kit?.defaultBackground ?? (kit ? { type: "color", value: kit.primaryColor } : { type: "color", value: "#f1f5f9" });
+  return {
+    title: plan.title.replace(/\s+/g, " ").trim().slice(0, 120) || "Untitled video",
+    scenes: scenes.map((sc) => ({ script: sc.script, background, ...(sc.framing === "closeUp" ? { layout: { scale: 1, x: 0, y: 0, framing: "closeUp" as const } } : {}) })),
+    avatarId: avatar.id,
+    voiceId: voice.id,
+    // Left to the agent: a plan for a vertical format is 9:16, a prompt asking for a wide one 16:9; otherwise the
+    // brand kit's format, else landscape.
+    aspect:
+      input.orientation !== "auto"
+        ? ASPECTS[input.orientation]
+        : plan.orientation === "portrait"
+          ? "9:16"
+          : asksForLandscape(input.prompt)
+            ? "16:9"
+            : (kit?.defaultAspect ?? "16:9"),
+    resolution: kit?.defaultResolution ?? "1080p",
+    // Agent videos are watched on mute as often as not: captions on unless the kit says otherwise.
+    captions: kit?.captionsByDefault ?? true,
+    ...(kit?.captionStyle ? { captionStyle: kit.captionStyle } : {}),
+  };
+}
+
+/** Whether a prompt names a wide format itself ("a widescreen YouTube explainer"), which no brand default overrides. */
+export function asksForLandscape(prompt: string): boolean {
+  return /\b(landscape|widescreen|wide[- ]screen|horizontal|youtube|16\s*:\s*9)\b/i.test(prompt);
+}
+
+/** Plans and renders in one step, like HeyGen's one-shot "generate" mode. */
+export async function generateAgentVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<{ video: Video; draft: VideoAgentDraft }> {
+  noStyle(input);
+  // Before the page fetch and the planner call, so an owner at the monthly limit is not charged for a plan.
+  await enforceRenderLimit(ownerId);
+  const draft = await planVideo(input, ownerId, fetchImpl);
+  // The kit's caption style rides with the plan for the editor; a video rendered without captions keeps none.
+  const { captionStyle, ...rest } = draft;
+  const video = await createVideo(videoRequestSchema.parse({ ...rest, ...(draft.captions && captionStyle ? { captionStyle } : {}) }), ownerId);
+  return { video, draft };
+}
+
+/**
+ * Whether a request names a vertical format itself: a platform's vertical format ("a TikTok", "Instagram Reels",
+ * "YouTube Shorts") or the shape ("vertical", "9:16"), not words that only sound like one ("customer stories").
+ */
+export function asksForPortrait(prompt: string): boolean {
+  return shapeAsked(prompt) === "portrait";
+}
+
+/** The shape a request names, by the shape itself or by a platform (see `asksForPortrait`); none when it names neither. */
+function shapeAsked(prompt: string): "portrait" | "landscape" | undefined {
+  // The shape named outright decides: vertical first ("a portrait video, not landscape"), then wide.
+  if (/\b(vertical|portrait\s+(?:video|format|orientation|mode)|9\s*:\s*16)\b/i.test(prompt)) return "portrait";
+  if (/\b(landscape|widescreen|wide[- ]screen|horizontal|16\s*:\s*9)\b/i.test(prompt)) return "landscape";
+  // Else the platform named first: "a TikTok promoting our YouTube channel" is vertical, "a YouTube video about our
+  // TikTok strategy" wide.
+  const vertical = /\b(tik\s?toks?|(?:instagram|ig|facebook)\s+(?:reels?|stor(?:y|ies))|reels?\s+video|youtube[\s-]+shorts?)\b/i.exec(prompt);
+  const wide = /\byoutube\b(?![\s-]+shorts?\b)/i.exec(prompt);
+  if (vertical && (!wide || vertical.index < wide.index)) return "portrait";
+  return wide ? "landscape" : undefined;
+}
+
+/** Fewest characters of a page or document worth sending; less is no source at all. */
+const MIN_SOURCE_ROOM = 500;
+
+/** Said in the brief when pictures or clips are attached, as HeyGen advises naming attachments in the prompt. */
+const MEDIA_NOTE = "Use the attached pictures and clips where they fit.";
+
+/**
+ * The brief HeyGen's agent gets: the length and language, the request, then the sources, cut to fit what HeyGen takes.
+ * A request too long to leave the length and language (or the sources asked for) their room is refused, never cut.
+ */
+function briefOf(input: VideoAgentInput, source: string | undefined): string {
+  const asks = `Length: about ${input.lengthSec} seconds. Language: ${input.language}.\n\n${input.prompt}${input.media?.length ? `\n\n${MEDIA_NOTE}` : ""}`;
+  if (asks.length > MAX_DIRECTED_BRIEF) throw new ValidationError(`HeyGen's Video Agent takes up to ${MAX_DIRECTED_BRIEF.toLocaleString("en-US")} characters with the length and language; shorten the request by ${(asks.length - MAX_DIRECTED_BRIEF).toLocaleString("en-US")}`);
+  if (!source) return asks;
+  const lead = "\n\nWrite from these sources, using only their facts:\n";
+  const room = MAX_DIRECTED_BRIEF - asks.length - lead.length;
+  if (room < MIN_SOURCE_ROOM) throw new ValidationError(`The request leaves no room for the ${input.document ? "attached document" : "page"} in HeyGen's ${MAX_DIRECTED_BRIEF.toLocaleString("en-US")}-character brief; shorten the request, or remove the ${input.document && input.url ? "document and page" : input.document ? "document" : "page"}`);
+  return `${asks}${lead}${cut(source, room)}`;
+}
+
+/**
+ * Hands the request to HeyGen's own Video Agent (its one-shot mode), which writes the script, chooses the presenter,
+ * voice, and visuals (the ones named here, when named), and renders. The page and document are read here and folded
+ * into the brief. Counted like any render; HeyGen makes landscape or portrait videos only.
+ */
+export async function directAgentVideo(input: VideoAgentInput, ownerId: string = LOCAL_OWNER, fetchImpl?: FetchLike): Promise<Video> {
+  if (input.orientation === "square") throw new ValidationError("HeyGen's Video Agent makes landscape or portrait videos; choose one of those, or let it choose");
+  // Before the page is read, so a renderer without the agent refuses without fetching anything.
+  const provider = getAvatarProvider();
+  if (!provider.startDirected) throw new ValidationError(`HeyGen's Video Agent is not available with the ${provider.name} renderer`);
+  const style = input.styleId ? (await listAgentStyles()).find((s) => s.id === input.styleId) : undefined;
+  if (input.styleId && !style) throw new ValidationError("HeyGen no longer offers that style; choose another, or none");
+  await enforceRenderLimit(ownerId);
+  // The request is checked before the page is read: its own length, and the room it leaves for the sources asked for.
+  briefOf(input, input.url || input.document ? "-" : undefined);
+  const source = await sourcesOf(input, fetchImpl);
+  const brief = briefOf(input, source);
+  // Left to the agent, the shape is the one the request asks for, else the style's own, else landscape.
+  const orientation = input.orientation === "landscape" || input.orientation === "portrait" ? input.orientation : (shapeAsked(input.prompt) ?? (style?.aspect === "9:16" ? "portrait" : "landscape"));
+  const title = input.prompt.replace(/\s+/g, " ").trim();
+  const video = await createVideo(
+    {
+      title: title.length <= 80 ? title : `${title.slice(0, 79).replace(/\s+\S*$/, "")}…`,
+      // HeyGen writes the script: none is kept here, so nothing is captioned or subtitled from it.
+      script: "",
+      avatarId: input.avatarId ?? "",
+      voiceId: input.voiceId ?? "",
+      aspect: orientation === "portrait" ? "9:16" : "16:9",
+      resolution: "1080p",
+      background: { type: "color", value: "#000000" },
+      captions: false,
+      speed: 1,
+      directed: {
+        brief,
+        prompt: input.prompt,
+        orientation,
+        ...(input.orientation === "auto" ? { autoOrientation: true as const } : {}),
+        lengthSec: input.lengthSec,
+        language: input.language,
+        ...(input.url ? { url: input.url } : {}),
+        ...(input.document ? { documentName: input.document.name } : {}),
+        ...(style ? { styleId: style.id, styleName: style.name } : {}),
+        ...(input.review ? { review: true as const } : {}),
+        // Named once checked, as the video starts.
+        ...(input.media?.length ? { media: input.media.map((m): DirectedMedia => ({ ...m, name: "" })) } : {}),
+      },
+    },
+    ownerId,
+    undefined,
+    true,
+    input.folder ? { folder: input.folder } : {},
+  );
+  // A start refused while a style was named may be HeyGen retiring it: the next listing asks HeyGen afresh.
+  if (style && video.status === "failed") forgetMemo("agentstyles:");
+  return video;
+}
+
+/** A style is HeyGen's agent's own; this studio's planner has none to apply, so it refuses one rather than ignoring it. */
+function noStyle(input: VideoAgentInput): void {
+  if (input.styleId) throw new ValidationError("A style is for HeyGen's Video Agent; choose it to make the video, or leave the style out");
+  if (input.review) throw new ValidationError("Reviewing a storyboard is for HeyGen's Video Agent; this studio's agent lets you review its plan in the editor instead");
+  if (input.media?.length) throw new ValidationError("Pictures and clips are for HeyGen's Video Agent; choose it to make the video, or leave them out");
+}
+
+/** Whether the renderer's Video Agent offers curated styles. */
+export function agentStylesAvailable(): boolean {
+  return typeof getAvatarProvider().listAgentStyles === "function";
+}
+
+/** The curated styles HeyGen's Video Agent composes in, memoised per renderer for a few minutes; none without them. */
+export async function listAgentStyles(): Promise<AgentStyle[]> {
+  const p = getAvatarProvider();
+  if (!p.listAgentStyles) return [];
+  return memo(`agentstyles:${p.name}`, LIST_TTL_MS, () => p.listAgentStyles!());
+}

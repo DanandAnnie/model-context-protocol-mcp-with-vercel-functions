@@ -2270,3 +2270,17 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - **Panel.** Tab order runs Copy link, Open, QR code, Stop sharing, the title, the order, then the note. Tabbing past the last control closes the panel. No console errors or failed requests showed on any page.
   - **Fixed.** On a 375×667 phone the panel opened with its title, order, and note fields below the bottom of the screen: the panel ended at 836 pixels. It is now brought into view once its contents load, and nothing moves where it already fits.
   - **Tests.** The QR e2e test now opens the panel on a 375×667 phone and checks that the whole panel and Save note are on screen. Without the fix, the panel ends 169 pixels below the screen.
+- A button on a shared folder's page (`e8df25c`).
+  - **What it does.** The Share folder panel has a "Button on the page" section with a label (up to 40 characters) and a link, plus Save button and Remove button. The shared folder's public page shows the button above the videos, in the brand kit's colour as on a video's share page, and it opens the link in a new tab. For example, "Book a showing" can send visitors to a scheduling page. `PATCH /api/collections/:id` takes `{ "cta": { "label", "url" } }`, or `null` to take it off, alongside the title, note, and order (editors only). `GET /api/collections` lists it. Viewers of a workspace see the button's text and link as a line in the panel.
+  - **Safe links.** The link must start with http:// or https://, so `javascript:` and `data:` links are refused, as are links with spaces. The page's link carries `rel="noreferrer noopener"`. A refused link is explained in the panel's status line rather than in a browser bubble. Saving it changes nothing. The button's messages are now plain words for video share pages and the library's bulk button too: "Give the button some text", "Keep the button text to 40 characters", and "Keep the link to 2000 characters".
+  - **Kept straight.** The button is written under the same per-folder turn-taking as the title, note, order, and open counts, and follows the link through a rename. A typed button survives the panel closing and opening again.
+  - **Panel height.** With the button the panel can be taller than a phone's screen. It is now capped at the screen's height, below the phone's sticky top bar, and scrolls inside itself.
+  - **Review findings fixed before commit.**
+    - On a phone the panel's top could sit under the sticky top bar, where touch could not reach it.
+    - The height checks in the e2e test proved little.
+    - The button test did not check that a refused link saved nothing.
+    - The docs said the button sits under the heading, when it comes above the videos.
+  - **Tests.**
+    - A new unit test covers setting the button (trimmed), the title, note, and order being left alone, and a rename. It also covers refused links (`www.…` and `javascript:`) with their message, an empty or 41-character label, another account being refused, and clearing.
+    - A new e2e test covers a refused link (saving nothing), saving with Enter, the visitor's button (text, link, new tab, rel), and the API value. It ends by removing the button, with focus back on its text.
+    - The QR e2e test now checks on a 375×667 phone that the panel stays clear of the top bar and fits the screen. It also checks that the panel scrolls inside itself with the code open. This check fails on the earlier panel.

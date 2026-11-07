@@ -2026,3 +2026,27 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Space on the shortcuts switch played the video.** The checkbox that turns the letter, number, and `<` `>` shortcuts off counted as neither a text field nor a control. Space on it started the video and left the box as it was. Space now belongs to every control that presses or ticks with it: buttons, links, disclosures, checkboxes, radios, and their ARIA kin.
   - **Review.** An independent review of the fix found nothing blocking and confirmed that only Space consults the control test. It checked every focusable thing on the page and the embed, and found that the e2e step fails without the fix. Its comment nits were taken.
   - **Tests.** The keyboard shortcuts e2e test presses Space on the switch twice. It checks that the switch is unticked and then ticked again, and that the video stays paused.
+- Resume where you left off on the share page (`839e5e7`). A viewer who comes back to a share link can carry on from where they stopped.
+  - **The offer.** Opening a plain share link again shows "You stopped at 1:05 last time." under the player, with two buttons:
+    - **Resume from 1:05** seeks there, plays, and moves the keyboard to the player.
+    - **Start over** forgets the place and moves the keyboard to the player.
+
+    Pressing play without choosing either takes the offer away, and it does not come back that visit. If a button of the offer had the keyboard, the keyboard moves to the player.
+  - **What is kept.** The place is kept in the viewer's own browser for 30 days, for up to 50 videos (the most recent).
+    - It is saved as the video plays (every five seconds), and again on pause, at the end, and when the page is left. Only a visit where the viewer played moves it: opening the page and leaving keeps the last place.
+    - A place is kept from ten seconds in and not in the last ten, where the video counts as watched and the next visit starts it over. A shorter video's limits are a quarter in and its last 15%, so a twelve-second clip keeps places from 0:03 to 0:10.
+  - **Where.** Only on the share page itself, and only on a plain link. Embeds, links that start at a time (`?t=`), section links (`end=`), and autoplaying links (`?autoplay=1`) say where or how to watch already, so they offer nothing and leave the kept place alone.
+  - **Review.** An independent review raised three correctness bugs, one accessibility point, one minor point, and a weak test check, all fixed:
+    - An offer the viewer had dismissed could come back when the video's length loaded late, as on iOS or after the email gate.
+    - Playing that began before the page's script took over was never saved.
+    - An autoplaying link's muted playback removed the offer and overwrote the kept place.
+    - Pressing K while a button of the offer had the keyboard dropped focus to the page.
+    - Start over now also moves the player back to the start.
+    - The e2e test now waits for the video's length before checking that a link offers nothing.
+  - **Tests.** Unit tests cover:
+    - the limits, both for a long video and scaled for a short one;
+    - clearing near the end or on starting over;
+    - expiry, and the 50-video cap;
+    - reading only well-formed kept places.
+
+    The e2e test checks that seeking without playing keeps nothing, and that a place is kept after playing and offered on reload as a named group. It checks that Resume seeks, plays, and focuses the player, and that Start over clears the place and goes back to the start. It also checks that K pressed on the offer plays with the keyboard on the player, that a place near the end is not kept, and that `?t=`, section links, autoplaying links, and embeds offer nothing.

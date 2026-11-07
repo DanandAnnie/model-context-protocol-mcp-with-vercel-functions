@@ -2113,3 +2113,32 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - No console or HTTP errors appeared.
 
   One thing looked wrong but was the test machine: the downloaded file of the accented title was named "download". That happens because the machine has no UTF-8 locale. Headless Chromium then cannot write a non-ASCII file name and falls back. With a UTF-8 locale, the same file keeps its full name, accents and dash included. The app needed no change.
+- Mini player on the share page (`c741a8f`). A viewer who scrolls down to read the transcript can keep watching.
+  - **When.** Once the video is playing and less than a third of the player's place on the page shows, the player pins small to the bottom-right corner.
+    - Its place on the page keeps its room, so nothing below jumps up.
+    - The same player moves, so playback, captions, the speed, and the keyboard carry on.
+    - It stays in the corner when paused, at the video's end, or at a section link's end note, ready to play again. It goes back when its place shows again (that place being a third in view) or when the viewer closes it.
+  - **Size.** At most 360 pixels wide for a landscape video and 220 for an upright or square one, and never more than half the screen's height. The ↑ and ✕ buttons therefore stay on screen on a landscape phone or a short window.
+    - While it is pinned, the page gains room at its foot, so the last transcript lines and the footer can still be scrolled out from under it.
+  - **Buttons.** "Back to the video" (↑) scrolls back to the player and puts the keyboard on it, at once when the viewer prefers reduced motion. "Close the mini player" (✕) pauses the video and puts the player back. A closed mini player comes again the next time the place has been seen and the video plays away from it.
+    - If the keyboard was on either button when the mini player goes, it moves to the video rather than being dropped.
+  - **Not there.** Embeds, which are only the player, have no mini player. Neither does a video in picture-in-picture, which already plays outside the page.
+  - **Embeds and the page.** The player now sits in a frame inside its place. Sizes, rounding, the watermark, and the email gate's focus are unchanged.
+  - **Review.** An independent review found five bugs and a test race, all fixed:
+    - A tall mini player could push its buttons off a short screen.
+    - The mini player covered the end of the page on a phone for good.
+    - The keyboard was dropped when the buttons went.
+    - The mini player vanished at a section's end note, at the video's end, or on pause.
+    - Picture-in-picture pinned an empty box.
+    - The test now asks for reduced motion, so scrolling back is instant.
+  - **Tests.** The e2e test, at 480×420 pixels, covers:
+    - that a paused video stays in place when scrolled away;
+    - that a playing one pins to the corner, within half the screen, its place keeping its height and room added at the page's foot;
+    - that ↑ brings it back with the keyboard on the player;
+    - that ✕ pauses it and keeps it in place;
+    - that it follows again after being seen;
+    - that a pause keeps it in the corner;
+    - that ✕ from the keyboard leaves the keyboard on the video;
+    - that an embed has no mini player.
+
+    All 44 share-page, embed, and video-shape tests pass with the new frame.

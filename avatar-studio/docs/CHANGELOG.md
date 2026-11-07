@@ -2305,3 +2305,20 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Finally it covers an unknown link and a folder emptied of its videos.
     - The button e2e test now has a visitor click twice: the first click counts and the second does not, and the panel then shows "Button clicked once, last on …".
     - It also covers a cross-site click counting nothing, an unknown link answering 404, and a click after the button came off counting nothing with the count kept.
+- A way back to a shared folder from its videos (`23f21d3`).
+  - **What it does.** A viewer who opens a video from a shared folder's page sees "← Back to “Spring listings”" above the video's title on its share page. The link returns them to the folder's page, so a buyer browsing a realtor's listings can move from one video to the next without the back button. The label is the folder page's heading: its title, or the folder's name.
+  - **How the page knows.** The folder's page notes its share in the viewer's own browser: a `folder_visit` cookie, sent only to `/share` pages on this site, kept for an hour, `SameSite=Lax`, and `Secure` over https. The video's address stays the plain `/share/:id`, so forwarding a video never forwards the folder.
+  - **When no link shows.**
+    - The noted share must exist, belong to the video's owner, and show the video's folder. A made-up, stale, or malformed value adds nothing to the page and reveals nothing.
+    - A video opened from another folder's page, or from a link someone forwarded, gets no link.
+    - After the share is stopped, or after the folder is merged into another shared folder, the old share links nowhere.
+    - A plain rename keeps the link, because the share follows the folder.
+    - The embed view never shows it.
+  - **Review findings fixed before commit.**
+    - The first version carried the folder's share id in the video's address (`?from=col_…`). Forwarding that address would have handed out the folder's secret link. The id now lives in a cookie instead.
+    - The API notes described the link's position and the embed case loosely.
+    - The tests did not cover a rename keeping the link or a merge ending it.
+  - **Tests.**
+    - A new unit test covers the link and its heading, another folder's share, another owner's video, made-up and malformed ids, a video with no folder, a rename, a merge, and a stopped share.
+    - A new e2e test opens a video from the folder's page and follows the link back.
+    - It also checks that the card's address is the bare `/share/:id`, that a fresh browser given the same address (with or without `?from=`) gets no link, that opening another folder's page replaces the way back, and that a stopped share removes it.

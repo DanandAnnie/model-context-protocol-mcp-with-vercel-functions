@@ -2411,3 +2411,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - An e2e test copies the embed code from the panel. It checks that the folder page may be framed but the studio and its API may not.
     - It frames the snippet on a page and checks the heading, cards, and button with no header or Play all, and that the open is counted as embedded.
     - It then opens a card in a new tab with no back link or next video, and checks that the page itself keeps its header and Play all.
+- QA pass 44: Play all and a shared folder's page on a website, in a browser (`38a12fa`).
+  - **Checked and working.**
+    - **Copy embed code.** It works from the keyboard. It sits right after Copy link in the tab order, keeps focus, and says "Embed code copied. Paste it into your website's HTML; its videos open in a new tab." The copied iframe names the page's heading.
+    - **On a website.** Pasted into a page, the iframe fills the width on desktop and on a 375-pixel phone with nothing scrolling sideways. A phone scrolls the folder's cards within the frame.
+    - **The folder's page.** Tab order runs the site name, "Play all 3 videos", the owner's button, then the cards. On a phone the two buttons sit side by side.
+    - No console errors or failed requests showed.
+  - **Fixed.** Play all stood 2 pixels taller than the owner's button beside it (its border on top of the same padding), so the pair sat unevenly. They are now the same height and level.
+  - **Tests.** The Play all e2e test checks that the two buttons match in height and line up. The old padding is 2 pixels off, so it fails against the check's half-pixel limit.

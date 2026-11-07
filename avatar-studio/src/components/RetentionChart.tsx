@@ -29,8 +29,10 @@ export function RetentionChart({ video }: { video: Pick<Video, "retention"> }) {
   const barW = (W - GAP * (BARS - 1)) / BARS;
   const end = r.shares[BARS - 1];
   return (
-    <span className="inline-flex flex-col gap-1" data-testid="retention" data-started={r.started}>
-      <span className="inline-flex flex-wrap items-center gap-2">
+    // Right-aligned as a whole, as the other values on the video page are, so the bars, the lines under them, and the
+    // table share one edge at every width.
+    <span className="inline-flex flex-col items-end gap-1 text-right" data-testid="retention" data-started={r.started}>
+      <span className="inline-flex flex-wrap items-center justify-end gap-2">
         <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="shrink-0" role="img" aria-label={`Retention: of ${r.started} viewers who started, ${end}% reached the end`}>
           <line x1="0" y1={H - 0.5} x2={W} y2={H - 0.5} stroke="#e2e8f0" strokeWidth="1" />
           {r.shares.map((share, i) => {
@@ -57,7 +59,7 @@ export function RetentionChart({ video }: { video: Pick<Video, "retention"> }) {
       )}
       <details className="text-xs">
         <summary className="cursor-pointer text-slate-500 hover:text-slate-700">Retention table</summary>
-        <table className="mt-1 text-left text-slate-600" data-testid="retention-table">
+        <table className="ml-auto mt-1 text-left text-slate-600" data-testid="retention-table">
           <thead>
             <tr>
               <th scope="col" className="pr-4 font-medium">Reached</th>

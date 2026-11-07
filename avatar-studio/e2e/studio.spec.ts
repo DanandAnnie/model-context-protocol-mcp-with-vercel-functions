@@ -14942,6 +14942,10 @@ test("the video page shows how far share-page viewers got, tenth by tenth", asyn
   await expect(table.getByRole("row")).toHaveCount(12);
   await expect(table.getByRole("row", { name: /Started/ })).toContainText("4");
   await expect(table.getByRole("row", { name: /The end/ })).toContainText("25%");
+  // The bars, the line about where most left, the table's toggle, and the table share the row's right edge.
+  const edges = await retention.evaluate((el) => [...el.querySelectorAll("svg, [data-testid=retention-drop], summary, table")].map((e) => Math.round(e.getBoundingClientRect().right)));
+  expect(edges).toHaveLength(4);
+  expect(new Set(edges).size).toBe(1);
   // The library's analytics file carries the same figures, one column per tenth.
   const sheet = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${encodeURIComponent(title)}`)).text());
   const row = sheet.rows.find((r) => r.id === v.id)!;

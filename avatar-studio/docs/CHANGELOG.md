@@ -2322,3 +2322,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A new unit test covers the link and its heading, another folder's share, another owner's video, made-up and malformed ids, a video with no folder, a rename, a merge, and a stopped share.
     - A new e2e test opens a video from the folder's page and follows the link back.
     - It also checks that the card's address is the bare `/share/:id`, that a fresh browser given the same address (with or without `?from=`) gets no link, that opening another folder's page replaces the way back, and that a stopped share removes it.
+- QA pass 42: a shared folder's button, its click count, and the way back from a video, in a browser (`3adfc7e`).
+  - **Checked and working.**
+    - **Setting the button.** "ftp://…" and "example.com/book" are both refused with "The link must start with http:// or https://", and focus stays in the link field. The label stops at 40 characters. Pressing Enter in the link field saves the button. The status line then says "Button saved. The folder's page shows “Book a showing”." and the panel shows "Button not clicked yet."
+    - **Visiting.** The button comes right after the site's name in the tab order, ahead of the videos, and screen readers hear "(opens in a new tab)". It opens a new tab with `noreferrer noopener`. One click is counted, and the panel then shows "Button clicked once, last on …".
+    - **The way back.** On the video's page the back link comes right after the site's name in the tab order. Pressing Enter on it returns to the folder's page. The cookie is limited to `/share`, `SameSite=Lax`, and lasts an hour.
+    - **On a phone.** The panel fits within the screen with Save button reachable, and neither the folder's page nor the video's page scrolls sideways. No console errors or failed requests showed, apart from the two refused links.
+  - **Fixed.** On a 375-pixel phone, a long folder heading wraps over two or three lines in the back link, and its "←" sat beside the middle line. It now starts the first line.
+  - **Tests.** The back-link e2e test now gives the folder a 78-character heading and opens the video at 375×667. It checks that the link wraps and that the arrow is level with its first line. With the old layout the arrow sat 10 pixels lower, and the test fails.

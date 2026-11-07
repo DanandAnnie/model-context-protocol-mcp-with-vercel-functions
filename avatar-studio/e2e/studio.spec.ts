@@ -14703,3 +14703,61 @@ test("a share page offers to resume where the viewer left off, in this browser",
   }
   expect(await kept()).toBe(5);
 });
+
+test("a share page's transcript can be searched, with each place marked and stepped through", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Find ${Date.now().toString(36)}`, { script: "First we open the doors. Then the team opens every room. Finally we open the gate and hand over the keys." });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/share/${v.id}`);
+  const transcript = page.getByTestId("share-transcript");
+  const box = page.getByRole("searchbox", { name: "Search the transcript" });
+  const count = page.getByTestId("share-transcript-count");
+  const marks = transcript.locator("mark");
+  const currentMark = transcript.locator('mark[aria-current="true"]');
+  const player = page.getByTestId("share-player");
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect(count).toHaveText("");
+  await expect(marks).toHaveCount(0);
+  // Every place, ignoring case and accents ("opens" too), the first one current; the box describes itself with the count.
+  await box.fill("ÓPEN");
+  await expect(count).toHaveText("1 of 3");
+  await expect(box).toHaveAttribute("aria-describedby", "share-transcript-count");
+  await expect(marks).toHaveCount(3);
+  await expect(currentMark).toHaveCount(1);
+  await expect(currentMark).toHaveText("open");
+  await expect(marks.nth(0)).toHaveAttribute("aria-current", "true");
+  // Enter steps on, Shift+Enter back, both going round; the arrow buttons do the same.
+  await box.press("Enter");
+  await expect(count).toHaveText("2 of 3");
+  await expect(marks.nth(1)).toHaveAttribute("aria-current", "true");
+  await expect(marks.nth(1)).toHaveText("open");
+  await box.press("Enter");
+  await box.press("Enter");
+  await expect(count).toHaveText("1 of 3");
+  await box.press("Shift+Enter");
+  await expect(count).toHaveText("3 of 3");
+  await page.getByRole("button", { name: "Next match" }).click();
+  await expect(count).toHaveText("1 of 3");
+  await page.getByRole("button", { name: "Previous match" }).click();
+  await expect(count).toHaveText("3 of 3");
+  // The line holding a match still plays the video from there.
+  await expect(transcript.getByRole("button").filter({ has: page.locator('mark[data-match="2"]') })).toHaveCount(1);
+  // Typing in the box is not taken for the player's shortcuts (K plays, M mutes).
+  await box.fill("");
+  await box.pressSequentially("keys");
+  await expect(count).toHaveText("1 of 1");
+  await box.press("k");
+  await box.press("m");
+  expect(await player.evaluate((el: HTMLVideoElement) => ({ paused: el.paused, muted: el.muted }))).toEqual({ paused: true, muted: false });
+  await expect(box).toHaveValue("keyskm");
+  // Nothing found: said so, and nothing to step through.
+  await box.fill("tuesday");
+  await expect(count).toHaveText("No matches");
+  await expect(marks).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Next match" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Previous match" })).toBeDisabled();
+  // Escape clears the search, keeping the keyboard in the box.
+  await box.press("Escape");
+  await expect(box).toHaveValue("");
+  await expect(box).toBeFocused();
+  await expect(count).toHaveText("");
+});

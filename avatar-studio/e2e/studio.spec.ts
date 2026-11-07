@@ -4209,6 +4209,9 @@ test("a shared folder's panel shows a QR code of its link, named after the page'
   await page.setViewportSize({ width: 375, height: 667 });
   await page.getByRole("button", { name: "Share folder" }).click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  // The whole panel, its title, order and note fields included, is brought on screen as it opens.
+  await expect(panel.getByRole("button", { name: "Save note" })).toBeInViewport();
+  await expect(panel).toBeInViewport({ ratio: 1 });
   await toggle.click();
   await expect(region.getByRole("img", { name: "QR code for the folder link" })).toBeInViewport();
   // Stopping and sharing again starts with the code hidden: a new link is not shown unasked.

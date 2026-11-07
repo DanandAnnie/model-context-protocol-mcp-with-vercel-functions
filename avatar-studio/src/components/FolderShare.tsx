@@ -135,6 +135,12 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   useLayoutEffect(() => {
     if (open) place();
   });
+  // Once its contents arrive the panel is taller than its first line; on a phone its fields can start below the
+  // bottom of the screen, so the whole panel is brought into view (nothing moves when it is already on screen).
+  const loaded = shared !== undefined;
+  useEffect(() => {
+    if (open && loaded) panelRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open, loaded]);
   // A resize re-renders it, which places it again.
   const [, setResized] = useState(0);
   useEffect(() => {

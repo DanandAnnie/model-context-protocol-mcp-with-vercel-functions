@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -256,7 +256,34 @@ describe("shared folders", () => {
     assert.equal("note" in saved, false);
     assert.equal((await listCollections(owner))[0].order, undefined);
     await assert.rejects(updateCollection(collection.id, { order: "random" }, owner), (err: Error) => err instanceof ValidationError && err.message === "The order is newest, oldest, or title");
-    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a note, an order, or both");
+    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a title, a note, or an order");
     await assert.rejects(updateCollection(collection.id, { order: "title" }, "someone_else"), NotFoundError);
+  });
+
+  it("heads the page with its title, one line, kept apart from the note and order and through a rename", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    await updateCollection(collection.id, { note: "Spring", order: "oldest" }, owner);
+    const set = await updateCollection(collection.id, { title: "  Spring\r\n listings\t\u0007tour  " }, owner);
+    assert.deepEqual([set.title, set.note, set.order], ["Spring listings tour", "Spring", "oldest"], "a title alone leaves the note and order");
+    await recordCollectionView(collection.id);
+    await renameFolder({ from: "Listings", to: "Sold" }, owner);
+    const [listed] = await listCollections(owner);
+    assert.deepEqual([listed.folder, listed.title, listed.views], ["Sold", "Spring listings tour", 1]);
+    assert.equal((await updateCollection(collection.id, { note: "Summer" }, owner)).title, "Spring listings tour", "a note alone leaves the title");
+    await assert.rejects(updateCollection(collection.id, { title: "x".repeat(COLLECTION_TITLE_MAX + 1) }, owner), (err: Error) => err instanceof ValidationError && err.message === `Keep the title to ${COLLECTION_TITLE_MAX} characters`);
+    assert.equal((await updateCollection(collection.id, { title: ` ${"t".repeat(COLLECTION_TITLE_MAX)} ` }, owner)).title?.length, COLLECTION_TITLE_MAX);
+    await assert.rejects(updateCollection(collection.id, { title: "Mine now" }, "someone_else"), NotFoundError);
+    // The limit is on the tidied title: a double space closed up brings 101 characters to 100.
+    assert.equal((await updateCollection(collection.id, { title: `${"t".repeat(50)}  ${"u".repeat(49)}` }, owner)).title?.length, COLLECTION_TITLE_MAX);
+    // Zero-width spaces, a C1 line break (U+0085), and direction overrides become spaces; a joined emoji keeps its joiner.
+    assert.equal((await updateCollection(collection.id, { title: "Open\u200Bhouse\u0085tour \u202Eflip\u202C 👩\u200D👧" }, owner)).title, "Open house tour flip 👩\u200D👧");
+    // Nothing visible is no title: the folder's name comes back. The same holds for a note.
+    assert.equal("title" in (await updateCollection(collection.id, { title: "\u200B\u2060\uFEFF" }, owner)), false);
+    await updateCollection(collection.id, { title: "Spring listings tour" }, owner);
+    assert.equal("note" in (await updateCollection(collection.id, { note: "\u200B\n\u200B" }, owner)), false);
+    const cleared = await updateCollection(collection.id, { title: " \n " }, owner);
+    assert.equal("title" in cleared, false);
+    assert.equal((await collectionPage(collection.id)).collection.title, undefined);
   });
 });

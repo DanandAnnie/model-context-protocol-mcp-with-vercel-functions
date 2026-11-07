@@ -4,7 +4,7 @@ import { Share2 } from "lucide-react";
 import { api, formatDate } from "@/lib/client";
 
 type Order = "newest" | "oldest" | "title";
-type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; note?: string | null; order?: Order };
+type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order };
 
 /** The page's orders as the panel names them (the server's COLLECTION_ORDERS). */
 const ORDERS: { value: Order; label: string; saved: string }[] = [
@@ -13,6 +13,8 @@ const ORDERS: { value: Order; label: string; saved: string }[] = [
   { value: "title", label: "Title A–Z", saved: "by title, A to Z" },
 ];
 
+/** The longest heading the folder's page shows (the server's COLLECTION_TITLE_MAX). */
+const TITLE_MAX = 100;
 /** The longest note the folder's page shows (the server's COLLECTION_NOTE_MAX). */
 const NOTE_MAX = 500;
 
@@ -30,6 +32,10 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const [pageNote, setPageNote] = useState("");
   // Typed and not saved yet: the panel closing (Escape, a click elsewhere) and opening again keeps the draft.
   const draftDirty = useRef(false);
+  // The page's heading as typed, kept the same way; empty shows the folder's name.
+  const [pageTitle, setPageTitle] = useState("");
+  const titleDirty = useRef(false);
+  const titleFieldRef = useRef<HTMLInputElement>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [shift, setShift] = useState(0);
@@ -41,8 +47,22 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const [pendingOrder, setPendingOrder] = useState<Order | null>(null);
   const orderSaving = useRef(false);
   const queuedOrder = useRef<Order | null>(null);
-  // A note save and an order save can be under way together; whichever reply is the newer write is the one kept.
-  const keepFresher = (next: Shared) => setShared((prev) => (prev && prev.id === next.id && (prev.updatedAt ?? "") > (next.updatedAt ?? "") ? prev : next));
+  // A text save and an order save can be under way together; whichever reply is the newer write is the one kept. The
+  // newest reply is also remembered, so a lookup that read the store before that write landed cannot bring back what
+  // it replaced (the panel closed and opened again while a save was under way).
+  const lastSaved = useRef<Shared | null>(null);
+  const newer = (a: Shared | null | undefined, b: Shared) => !!a && a.id === b.id && (a.updatedAt ?? "") > (b.updatedAt ?? "");
+  const keepFresher = (next: Shared) => {
+    if (!newer(lastSaved.current, next)) lastSaved.current = next;
+    setShared((prev) => (newer(prev, next) ? prev : next));
+  };
+  // After a save, focus goes back to its field only if it was lost (the save button turned disabled under it); a
+  // reader who moved on to another control meanwhile is left there.
+  const refocus = (field: HTMLElement | null) =>
+    setTimeout(() => {
+      const at = document.activeElement as HTMLElement | null;
+      if (!at || at === document.body || (at as HTMLButtonElement).disabled) field?.focus();
+    }, 0);
   // The folder shown now: a reply that arrives after the library moved to another folder is dropped.
   const current = useRef(folder);
   current.current = folder;
@@ -55,6 +75,9 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setNote("");
     draftDirty.current = false;
     setPageNote("");
+    titleDirty.current = false;
+    setPageTitle("");
+    lastSaved.current = null;
     queuedOrder.current = null;
     setPendingOrder(null);
   }, [folder]);
@@ -69,9 +92,11 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     api<{ collections: Shared[] }>("/api/collections")
       .then((r) => {
         if (!live) return;
-        const found = r.collections.find((c) => c.folder === folder) ?? null;
+        const listed = r.collections.find((c) => c.folder === folder) ?? null;
+        const found = listed && newer(lastSaved.current, listed) ? lastSaved.current : listed;
         setShared(found);
         if (!draftDirty.current) setPageNote(found?.note ?? "");
+        if (!titleDirty.current) setPageTitle(found?.title ?? "");
       })
       .catch((e: Error) => {
         if (!live) return;
@@ -132,6 +157,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       if (current.current !== asked) return;
       setShared(r.collection);
       setPageNote(r.collection.note ?? "");
+      setPageTitle(r.collection.title ?? "");
       setNote("Folder shared. Anyone with the link can see its videos whose own links can be sent.");
     } catch (e) {
       setNote((e as Error).message);
@@ -149,8 +175,11 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       await api(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "DELETE" });
       if (current.current !== asked) return;
       setShared(null);
+      lastSaved.current = null;
       draftDirty.current = false;
       setPageNote("");
+      titleDirty.current = false;
+      setPageTitle("");
       setNote("The folder's link no longer works.");
     } catch (e) {
       setNote((e as Error).message);
@@ -170,14 +199,33 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       keepFresher(r.collection);
       draftDirty.current = false;
       setPageNote(r.collection.note ?? "");
-      setNote(r.collection.note ? "Note saved. The folder's page shows it under the name." : "Note taken off the folder's page.");
+      setNote(r.collection.note ? "Note saved. The folder's page shows it under its heading." : "Note taken off the folder's page.");
     } catch (e) {
       setNote((e as Error).message);
     } finally {
       setBusy(false);
-      // Save note is disabled once the note is saved (and while it saves), which would leave focus nowhere; it goes
-      // back to the note, after the field stops being read-only.
-      setTimeout(() => noteFieldRef.current?.focus(), 0);
+      // Save note is disabled once the note is saved (and while it saves), which would leave focus nowhere.
+      refocus(noteFieldRef.current);
+    }
+  };
+
+  const saveTitle = async () => {
+    if (!shared) return;
+    setBusy(true);
+    setNote("");
+    try {
+      const asked = folder;
+      const r = await api<{ collection: Shared }>(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "PATCH", body: JSON.stringify({ title: pageTitle }) });
+      if (current.current !== asked) return;
+      keepFresher(r.collection);
+      titleDirty.current = false;
+      setPageTitle(r.collection.title ?? "");
+      setNote(r.collection.title ? `Title saved. The folder's page is headed “${r.collection.title}”.` : `Title taken off. The folder's page is headed “${folder}”, the folder's name.`);
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+      refocus(titleFieldRef.current);
     }
   };
 
@@ -300,6 +348,53 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                 )}
               </div>
               {canEdit ? (
+                <form
+                  className="mt-3"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!busy && pageTitle.trim() !== (shared.title ?? "")) void saveTitle();
+                  }}
+                >
+                  <label htmlFor="folder-share-page-title" className="font-medium text-slate-700">
+                    Title on the page
+                  </label>
+                  <div className="mt-1 flex gap-2">
+                    <input
+                      ref={titleFieldRef}
+                      id="folder-share-page-title"
+                      value={pageTitle}
+                      maxLength={TITLE_MAX}
+                      placeholder={folder}
+                      onChange={(e) => {
+                        titleDirty.current = true;
+                        setPageTitle(e.target.value);
+                      }}
+                      // Not while a save is under way: its reply would replace what was typed meanwhile.
+                      readOnly={busy}
+                      aria-describedby="folder-share-page-title-hint"
+                      className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1"
+                      data-testid="folder-share-page-title"
+                    />
+                    <button
+                      type="submit"
+                      disabled={busy || pageTitle.trim() === (shared.title ?? "")}
+                      className="shrink-0 rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Save title
+                    </button>
+                  </div>
+                  <span id="folder-share-page-title-hint" className="mt-1 block text-slate-500">
+                    The page&apos;s heading. Leave it empty to show the folder&apos;s name.
+                  </span>
+                </form>
+              ) : (
+                shared.title && (
+                  <p className="mt-2 text-slate-600" data-testid="folder-share-page-title-text">
+                    Title on the page: {shared.title}
+                  </p>
+                )
+              )}
+              {canEdit ? (
                 <div className="mt-3">
                   <label htmlFor="folder-share-order" className="font-medium text-slate-700">
                     Order on the page
@@ -344,7 +439,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                   />
                   <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
                     <span id="folder-share-page-note-hint" className="text-slate-500">
-                      Shown to viewers under the folder&apos;s name. {pageNote.length}/{NOTE_MAX}
+                      Shown to viewers under the page&apos;s heading. {pageNote.length}/{NOTE_MAX}
                     </span>
                     <button
                       type="button"

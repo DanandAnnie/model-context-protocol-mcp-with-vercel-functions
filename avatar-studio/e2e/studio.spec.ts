@@ -3997,7 +3997,7 @@ test("a shared folder's page shows the owner's note under its name, as plain tex
   await expect(save).toBeDisabled();
   const typed = "Videos for <b>12 Oak St</b>\nOpen house on Saturday.";
   await field.fill(typed);
-  await expect(page.getByText(`Shown to viewers under the folder's name. ${typed.length}/500`)).toBeVisible();
+  await expect(page.getByText(`Shown to viewers under the page's heading. ${typed.length}/500`)).toBeVisible();
   // Closing the panel before saving keeps the draft for when it opens again.
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Share folder" }).click();
@@ -4005,7 +4005,7 @@ test("a shared folder's page shows the owner's note under its name, as plain tex
   // Saved from the keyboard: the button turns disabled, and focus goes back to the note rather than to nowhere.
   await save.focus();
   await page.keyboard.press("Enter");
-  await expect(page.getByTestId("folder-share-note")).toHaveText("Note saved. The folder's page shows it under the name.");
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Note saved. The folder's page shows it under its heading.");
   await expect(save).toBeDisabled();
   await expect(field).toBeFocused();
   // A visitor sees it under the name, with its line break and its angle brackets as typed.
@@ -4084,6 +4084,55 @@ test("a shared folder's page lists its videos in the order the owner picks", asy
   const bad = await page.request.patch(`/api/collections/${collection.id}`, { data: { order: "random" } });
   expect(bad.status()).toBe(400);
   expect((await bad.json()).error).toBe("The order is newest, oldest, or title");
+  await visitor.close();
+});
+
+test("a shared folder's page is headed by the owner's title, or by the folder's name without one", async ({ page, browser }) => {
+  const tag = `Titled ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, "Porch tour");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect(collection.title).toBeNull();
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const field = page.getByLabel("Title on the page");
+  await expect(field).toHaveValue("");
+  await expect(field).toHaveAttribute("placeholder", tag);
+  const save = page.getByRole("button", { name: "Save title" });
+  await expect(save).toBeDisabled();
+  const typed = "Spring <b>listings</b> tour";
+  await field.fill(`  ${typed} `);
+  // Closing the panel before saving keeps the draft.
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Share folder" }).click();
+  await expect(field).toHaveValue(`  ${typed} `);
+  // Enter in the field saves it, and the field shows the title as kept.
+  await field.press("Enter");
+  await expect(page.getByTestId("folder-share-note")).toHaveText(`Title saved. The folder's page is headed “${typed}”.`);
+  await expect(field).toHaveValue(typed);
+  await expect(save).toBeDisabled();
+  expect((await (await page.request.get("/api/collections")).json()).collections.find((c: { id: string }) => c.id === collection.id).title).toBe(typed);
+  // A visitor sees the title, angle brackets as typed, as the heading, in the tab's title, and in link previews.
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  await expect(guest.getByTestId("collection-title")).toHaveText(typed);
+  await expect(guest.getByTestId("collection-title").locator("b")).toHaveCount(0);
+  expect((await guest.title()).startsWith(`${typed} · `)).toBe(true);
+  await expect(guest.locator('meta[property="og:title"]')).toHaveAttribute("content", typed);
+  // Too long is refused in words; an empty title brings back the folder's name.
+  const tooLong = await page.request.patch(`/api/collections/${collection.id}`, { data: { title: "x".repeat(101) } });
+  expect(tooLong.status()).toBe(400);
+  expect((await tooLong.json()).error).toBe("Keep the title to 100 characters");
+  // Clearing by mouse: Save title turns disabled under the pointer, so focus goes back to the field.
+  await field.fill("");
+  await save.click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText(`Title taken off. The folder's page is headed “${tag}”, the folder's name.`);
+  await expect(field).toBeFocused();
+  await guest.reload();
+  await expect(guest.getByTestId("collection-title")).toHaveText(tag);
   await visitor.close();
 });
 

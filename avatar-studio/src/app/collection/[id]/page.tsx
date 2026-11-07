@@ -20,26 +20,27 @@ const load = cache(async (id: string) => {
   }
 });
 
-/** The folder's name under the brand's; kept out of search results, as the link is meant for the people it is sent to. */
+/** The page's heading (its title, else the folder's name) under the brand's; kept out of search results, as the link is meant for the people it is sent to. */
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const page = await load(id);
   if (!page) return { title: "Not found", robots: { index: false, follow: false } };
   const brand = await getBrandKit(page.collection.ownerId);
   const siteName = brand?.name || "Avatar Studio";
+  const heading = page.collection.title || page.collection.folder;
   const count = page.total === 1 ? "1 video" : `${page.total} videos`;
   // The owner's note says what the page is better than a count, where there is one.
   const description = page.collection.note ? Array.from(page.collection.note.replace(/\s+/g, " ")).slice(0, 200).join("") : `${count} from ${siteName}`;
   return {
-    title: `${page.collection.folder} · ${siteName}`,
+    title: `${heading} · ${siteName}`,
     description,
     robots: { index: false, follow: false },
-    openGraph: { title: page.collection.folder, description, siteName, type: "website" },
+    openGraph: { title: heading, description, siteName, type: "website" },
   };
 }
 
 /**
- * A shared folder's public page: the folder's name and a card for each of its videos whose share link can be sent now,
+ * A shared folder's public page: its heading (the owner's title, else the folder's name) and a card for each of its videos whose share link can be sent now,
  * in the order its owner chose (newest first unless set), each opening that video's own share page (which asks for a password or an email where its owner set
  * one). Not found once the owner stops sharing the folder.
  */
@@ -75,7 +76,7 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
         )}
       </header>
       <section className="mx-auto max-w-5xl px-6 pb-16">
-        <h1 className="text-xl font-semibold" data-testid="collection-title">{collection.folder}</h1>
+        <h1 className="text-xl font-semibold" data-testid="collection-title">{collection.title || collection.folder}</h1>
         {collection.note && (
           <p className="mt-2 max-w-2xl whitespace-pre-line text-sm text-slate-300" data-testid="collection-note">
             {collection.note}

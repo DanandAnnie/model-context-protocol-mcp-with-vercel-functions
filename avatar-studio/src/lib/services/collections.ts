@@ -24,7 +24,9 @@ export interface Collection {
   /** How often the public page was opened (one per visitor per window; see the view route). */
   views?: number;
   lastViewedAt?: string;
-  /** The owner's words for viewers, shown under the folder's name on the public page (plain text). */
+  /** The heading of the public page in place of the folder's name (one line of plain text); none shows the name. */
+  title?: string;
+  /** The owner's words for viewers, shown under the page's heading (plain text). */
   note?: string;
   /** How the page lists the videos; none is newest first. */
   order?: CollectionOrder;
@@ -43,21 +45,25 @@ export interface CollectionVideo {
 
 export const collectionSchema = z.object({ folder: z.string().trim().min(1).max(MAX_FOLDER_NAME) });
 
+/** The longest heading a shared folder's page shows. */
+export const COLLECTION_TITLE_MAX = 100;
 /** The longest note a shared folder's page shows. */
 export const COLLECTION_NOTE_MAX = 500;
 /** How a shared folder's page can list its videos: newest made first (the default), oldest first, or by title. */
 export const COLLECTION_ORDERS = ["newest", "oldest", "title"] as const;
 export type CollectionOrder = (typeof COLLECTION_ORDERS)[number];
 /**
- * A change to a shared folder's page: its note (an empty one, or only spaces, takes it off), its order, or both. A
- * field left out is left as it is.
+ * A change to a shared folder's page: its title and its note (an empty one, or one with nothing visible, takes it off),
+ * its order, or any of them together. A field left out is left as it is. The title's and the note's lengths are checked
+ * by updateCollection once they are tidied, so spaces that tidying removes do not count against them.
  */
 export const collectionUpdateSchema = z
   .object({
-    note: z.string().trim().max(COLLECTION_NOTE_MAX, `Keep the note to ${COLLECTION_NOTE_MAX} characters`).optional(),
+    title: z.string().optional(),
+    note: z.string().optional(),
     order: z.enum(COLLECTION_ORDERS, { error: "The order is newest, oldest, or title" }).optional(),
   })
-  .refine((v) => v.note !== undefined || v.order !== undefined, { error: "Send a note, an order, or both" });
+  .refine((v) => v.title !== undefined || v.note !== undefined || v.order !== undefined, { error: "Send a title, a note, or an order" });
 
 /**
  * One write at a time per share, in this process: a page view's read-then-write cannot land after the share was
@@ -138,24 +144,43 @@ export async function stopSharingFolder(id: string, ownerId: string = LOCAL_OWNE
   for (const c of await sharesOf(ownerId)) if (c.folder === share.folder) await removeShare(c.id);
 }
 
+// Control characters (C0 and C1, line breaks and tabs among them), zero-width spaces, direction marks and overrides,
+// the word joiner, and the byte-order mark: never wanted in a one-line heading. The zero-width joiner (U+200D) stays,
+// as emoji sequences use it.
+const TITLE_STRIP = /[\p{Cc}\u200B\u200C\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/gu;
+/** Something a reader can see: a letter, digit, mark, punctuation, or symbol (emoji included). */
+const hasVisible = (s: string) => /[\p{L}\p{N}\p{M}\p{P}\p{S}]/u.test(s);
+
 /**
- * Changes a shared folder's page: its note and its order (see collectionUpdateSchema). The note is plain text: line
- * breaks are kept (Windows ones become plain), spaces at the ends of lines go, and runs of more than one blank line
- * are closed up. Newest first is the default, so it is stored as no order. Written under the share's lock, so a page
- * view counted meanwhile is kept.
+ * Changes a shared folder's page: its title, its note, and its order (see collectionUpdateSchema). The title is one
+ * line: control characters (line breaks and tabs among them), zero-width spaces, and direction marks become spaces, and
+ * any run of spaces becomes one. The note is plain text: line breaks are kept (Windows ones become plain), spaces at
+ * the ends of lines go, and runs of more than one blank line are closed up. Either is checked against its limit once
+ * tidied, and either with nothing visible left is taken off. Newest first is the default, so it is stored as no order.
+ * Written under the share's lock, so a page view counted meanwhile is kept.
  */
 export async function updateCollection(id: string, input: z.input<typeof collectionUpdateSchema> | unknown, ownerId: string = LOCAL_OWNER): Promise<Collection> {
   const parsed = collectionUpdateSchema.safeParse(input);
   // Said plainly to an API client too, not only as a schema issue.
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid change");
   const { order } = parsed.data;
-  const note = parsed.data.note
-    ?.replace(/\r\n?/g, "\n")
+  let title = parsed.data.title?.replace(TITLE_STRIP, " ").replace(/\s+/g, " ").trim();
+  let note = parsed.data.note
+    ?.trim()
+    .replace(/\r\n?/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n");
+  if (title && title.length > COLLECTION_TITLE_MAX) throw new ValidationError(`Keep the title to ${COLLECTION_TITLE_MAX} characters`);
+  if (note && note.length > COLLECTION_NOTE_MAX) throw new ValidationError(`Keep the note to ${COLLECTION_NOTE_MAX} characters`);
+  if (title !== undefined && !hasVisible(title)) title = "";
+  if (note !== undefined && !hasVisible(note)) note = "";
   return withShareLock(id, async () => {
     const share = owned(await getStore().get<Collection>("collection", id), ownerId, `Shared folder ${id}`);
     const next: Collection = { ...share, updatedAt: nowIso() };
+    if (title !== undefined) {
+      if (title) next.title = title;
+      else delete next.title;
+    }
     if (note !== undefined) {
       if (note) next.note = note;
       else delete next.note;

@@ -19,14 +19,15 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 }
 
 /**
- * Changes the folder's page: `{ "note" }` (up to 500 characters; empty takes it off), `{ "order" }` (newest, oldest, or
- * title), or both. Editors only.
+ * Changes the folder's page: `{ "title" }` (its heading, up to 100 characters; empty shows the folder's name again),
+ * `{ "note" }` (up to 500 characters; empty takes it off), `{ "order" }` (newest, oldest, or title), or any of them
+ * together. Editors only.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const owner = await requireEditor();
     const { id } = await ctx.params;
-    // The service checks the body, so a note that is too long is answered in words.
+    // The service checks the body, so a title or note that is too long is answered in words.
     const collection = await updateCollection(id, await readJson(req), owner);
     return json({ collection: collectionJson(collection, publicOrigin(req)) });
   } catch (err) {

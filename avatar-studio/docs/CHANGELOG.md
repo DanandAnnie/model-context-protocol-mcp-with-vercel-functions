@@ -2419,3 +2419,27 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - No console errors or failed requests showed.
   - **Fixed.** Play all stood 2 pixels taller than the owner's button beside it (its border on top of the same padding), so the pair sat unevenly. They are now the same height and level.
   - **Tests.** The Play all e2e test checks that the two buttons match in height and line up. The old padding is 2 pixels off, so it fails against the check's half-pixel limit.
+- Search on a shared folder's page (`93fab00`).
+  - **What it does.** A folder page listing six videos or more has a search box over the titles of the videos it lists. A realtor's folder of thirty listings can be narrowed to "oak street" or "3 bed" without scrolling.
+  - **Matching.**
+    - Every word typed must appear in the title, in any order, so "oak 3 bed" finds "3 bed on Oak Street".
+    - Case and accents are set aside: "cafe" finds "Café", "lodz" finds "Łódź", and "strasse" finds "Straße". A decomposed accent matches a composed one, and a Greek final sigma reads as any other.
+    - The page says "2 of 6 videos" as the search narrows, and "No video here matches your search." with a Clear search button when nothing does. Escape or Clear search empties the box, and focus stays in it.
+  - **Kept in the address.**
+    - Once typing pauses, the search goes into the page's address as `?q=`, with no new history entry, so Back still leaves the page in one step.
+    - Back from a video opened from its card, from Play all, or from Up next comes back to the same search, and a link copied with it opens on it.
+    - The embedded view searches too, keeping `?embed=1` beside the search.
+    - A folder of five videos or fewer offers no search and lists every video, whatever the address says.
+  - **Play all** still plays the whole folder, in the page's order.
+  - **Review findings fixed before commit.**
+    - Back after Play all or Up next lost the search. Those moves stay within the app, and Back restored the page from the router's cache, rendered before the search. The box now reads the search from the router's address.
+    - The address was rewritten on every key press. Safari refuses rapid history writes, which would have broken the page. The address now follows the search once typing pauses, and a refused write leaves the page working.
+    - The box's length limit and the address counted characters differently, so an emoji search was cut at 50. Both now count 100 characters as a person does.
+    - Letters with no separable accent (ł, ø, đ, ß) and the Greek final sigma did not match their plain forms.
+    - The empty state repeated the search on the page, so a crafted link could put any words on a branded page. It no longer does.
+    - The Escape and Back test steps could pass with the code broken.
+  - **Tests.**
+    - Unit tests cover word order, case, accents both ways, decomposed accents, unaccented letters, final sigma, fullwidth letters, a search of accents alone, and the 100-character cut by character.
+    - An e2e test searches a six-video folder by part of a word, by two words, and without accents. It checks the count, the empty state with Clear search, and Escape (sent so the browser itself does not act on it).
+    - It checks Back after Play all and after a card, a link with a search, the embedded view's address, and that a folder down to five offers no search.
+    - Run against the code before review, the test fails at Back after Play all.

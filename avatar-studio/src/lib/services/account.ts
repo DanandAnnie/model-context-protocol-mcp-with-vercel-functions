@@ -16,7 +16,7 @@ import { dropInstantVoice, wordsRowId } from "./voice-changer";
 import { dropAgentBrand } from "./agent-brand";
 import type { AgentBrandKit } from "../types";
 
-const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot", "agentbrand"] as const;
+const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot", "agentbrand", "collection"] as const;
 /**
  * Cover rows hold image bytes; the export describes each cover from its video (`cover.mimeType`, `cover.bytes`) instead
  * of loading them. Clip audio is never listed (each `clip` row names its own `clipaudio_<id>` row), so the export and
@@ -104,10 +104,11 @@ export async function exportOwnerData(ownerId: string = LOCAL_OWNER, { inviteAdd
 }
 
 /**
- * Kinds in deletion order: keys first so no script keeps writing while the rest goes, then voices (cloned and instant),
+ * Kinds in deletion order: keys first so no script keeps writing while the rest goes, shared folders' public pages next
+ * so none stays up if a later step fails, then voices (cloned and instant),
  * whose provider call is the step most likely to fail, so a failure stops the run before anything else is lost.
  */
-const DELETE_ORDER = ["apikey", "voice", "instantvoice", ...OWNER_KINDS.filter((k) => k !== "apikey" && k !== "voice" && k !== "instantvoice")] as const;
+const DELETE_ORDER = ["apikey", "collection", "voice", "instantvoice", ...OWNER_KINDS.filter((k) => k !== "apikey" && k !== "collection" && k !== "voice" && k !== "instantvoice")] as const;
 
 /**
  * Deletes everything stored under an owner id (cloned voices are removed at the provider too). Returns counts per kind.

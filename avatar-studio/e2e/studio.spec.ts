@@ -3848,6 +3848,57 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   await expect(page.locator("button[title='Rename']")).toHaveText("Renamed video");
 });
 
+test("a shared folder is one page of its sendable videos that follows a rename and stops when unshared", async ({ page, browser }) => {
+  const tag = `Openhouse ${Date.now().toString(36)}`;
+  const listed = await createVideoViaApi(page, "Kitchen tour");
+  const hidden = await createVideoViaApi(page, "Unfinished cut");
+  for (const v of [listed, hidden]) {
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  }
+  // A video whose own link is switched off is not listed.
+  expect((await page.request.patch(`/api/videos/${hidden.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  expect((await page.request.post("/api/collections", { data: { folder: `No such ${tag}` } })).status()).toBe(400);
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  const shareButton = page.getByRole("button", { name: "Share folder" });
+  await shareButton.click();
+  const panel = page.getByTestId("folder-share-panel");
+  await expect(panel).toBeVisible();
+  await panel.getByRole("button", { name: "Share this folder" }).click();
+  const url = await page.getByTestId("folder-share-url").inputValue();
+  expect(url).toMatch(/\/collection\/col_[0-9a-f]{20}$/);
+  // Escape closes the panel back onto its button; opening it again finds the same link.
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
+  await expect(shareButton).toBeFocused();
+  await shareButton.click();
+  await expect(page.getByTestId("folder-share-url")).toHaveValue(url);
+  // Someone without a session opens it: the folder's name, the listed video, and a way to its share page.
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(url);
+  await expect(guest.getByTestId("collection-title")).toHaveText(tag);
+  await expect(guest.getByTestId("collection-count")).toHaveText("1 video");
+  await expect(guest.getByTestId("collection-video")).toHaveCount(1);
+  await expect(guest.getByTestId("collection-video")).toContainText("Kitchen tour");
+  await guest.getByTestId("collection-video").click();
+  await expect(guest).toHaveURL(new RegExp(`/share/${listed.id}$`));
+  // Renaming the folder keeps the link, under the new name.
+  expect((await page.request.post("/api/videos/folders", { data: { from: tag, to: `${tag} sold` } })).status()).toBe(200);
+  await guest.goto(url);
+  await expect(guest.getByTestId("collection-title")).toHaveText(`${tag} sold`);
+  // Stop sharing from the library: the link then answers not found.
+  await page.reload();
+  await page.getByLabel("Folder", { exact: true }).selectOption(`${tag} sold`);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  page.once("dialog", (d) => d.accept());
+  await page.getByRole("button", { name: "Stop sharing" }).click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("The folder's link no longer works.");
+  expect((await guest.goto(url))?.status()).toBe(404);
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
+import { dropEmptyShares, followFolderRename } from "./collections";
 import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
 export { videoNeeds, videoPresenters, videoVoices };
@@ -474,6 +475,8 @@ export async function createVideo(req: VideoRequest, ownerId: string = LOCAL_OWN
   // A render the provider started counts against its month, even once deleted; a failed start does not. Counted
   // before the video is stored, so a failure webhook that finds the video finds it already counted.
   if (base.status !== "failed") await countRender(base, ownerId);
+  // A video landing in a folder that holds none yet: a link left from an earlier folder of that name goes first.
+  if (base.folder) await dropEmptyShares(ownerId, [base.folder]);
   return getStore().put("video", base);
 }
 
@@ -822,7 +825,9 @@ export function purgeDue(video: Video, now: number): boolean {
 }
 
 /** Removes a video and its side records for good. */
-async function purgeVideo(id: string, ownerId: string): Promise<void> {
+async function purgeVideo(id: string, ownerId: string, { dropShares = true, folder = undefined as string | undefined | null } = {}): Promise<void> {
+  // The caller usually holds the record already; read it only when it did not say.
+  if (folder === undefined) folder = (await getStore().get<Video>("video", id))?.folder ?? null;
   // Side records first and the video row last: a failure part-way leaves the video listed, so the
   // next listing retries the whole purge (every remove is idempotent) instead of orphaning a record.
   await clearShareLock(id);
@@ -834,6 +839,8 @@ async function purgeVideo(id: string, ownerId: string): Promise<void> {
   await clearLipsyncs(id, ownerId);
   await clearMusicJobs(id, ownerId);
   await getStore().remove("video", id);
+  // The last video of a shared folder gone for good takes the folder's link with it (a batch of purges does it once).
+  if (folder && dropShares) await dropEmptyShares(ownerId, [folder]);
 }
 
 /**
@@ -854,9 +861,13 @@ const purging = new Map<string, Promise<void>>();
 function purgeDueVideos(ownerId: string, due: Video[]): Promise<void> {
   const running = purging.get(ownerId);
   if (running) return running;
-  const run = Promise.allSettled(due.slice(0, PURGE_PER_LIST).map((v) => purgeVideo(v.id, ownerId)))
-    .then((results) => {
+  const batch = due.slice(0, PURGE_PER_LIST);
+  const run = Promise.allSettled(batch.map((v) => purgeVideo(v.id, ownerId, { dropShares: false, folder: v.folder ?? null })))
+    .then(async (results) => {
       for (const r of results) if (r.status === "rejected") console.error(`purge failed for a trashed video of ${ownerId}:`, r.reason);
+      // Once for the batch: a shared folder the purge emptied loses its link.
+      const folders = [...new Set(batch.map((v) => v.folder).filter((f): f is string => !!f))];
+      if (folders.length) await dropEmptyShares(ownerId, folders);
     })
     .finally(() => purging.delete(ownerId));
   purging.set(ownerId, run);
@@ -910,20 +921,24 @@ export async function emptyTrash(input: z.infer<typeof emptyTrashSchema>, ownerI
     throw new ConflictError(`The trash now holds ${shown === 1 ? "1 video" : `${shown} videos`}, not ${input.expected}; look at it again before emptying it`);
   }
   let done = 0;
+  const emptied = new Set<string>();
   for (const video of trashed.slice(0, EMPTY_TRASH_MAX)) {
     if (now() - started > EMPTY_TRASH_DEADLINE_MS) break;
     try {
       const purged = await withCounterLock(video.id, async () => {
         const stored = await getStore().get<Video>("video", video.id);
         if (!stored?.deletedAt || (stored.ownerId ?? LOCAL_OWNER) !== ownerId) return null;
-        await purgeVideo(video.id, ownerId);
+        await purgeVideo(video.id, ownerId, { dropShares: false, folder: stored.folder ?? null });
         return stored;
       });
+      if (purged?.folder) emptied.add(purged.folder);
       if (purged && !purgeDue(purged, started)) done += 1;
     } catch (err) {
       console.error(`emptying the trash of ${ownerId} failed for one video:`, err);
     }
   }
+  // Once for the whole run: a shared folder whose last videos were in the trash loses its link.
+  if (emptied.size) await dropEmptyShares(ownerId, [...emptied]);
   // The deletes are done; a failed recount must not turn them into an error (or cost the activity line).
   let remaining = Math.max(0, shown - done);
   try {
@@ -1165,7 +1180,7 @@ function renamedScenes(scenes: Scene[] | undefined, renames: Map<number, string 
   });
 }
 
-export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER, internal: { batchTitle?: string } = {}): Promise<Video> {
+export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSchema>, ownerId: string = LOCAL_OWNER, internal: { batchTitle?: string; keepShares?: boolean } = {}): Promise<Video> {
   const existing = owned(await getStore().get<Video>("video", id), ownerId, `Video ${id}`);
   // A trashed video past its retention is gone (see getVideo); writing it would only feed the purge.
   if (purgeDue(existing, Date.now())) throw new NotFoundError(`Video ${id} not found`);
@@ -1242,11 +1257,16 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
     (patch.shareCta !== undefined && JSON.stringify(patch.shareCta ?? null) !== JSON.stringify(existing.shareCta ?? null));
   // The names go onto the scenes as stored when the write happens, and whether one changes is judged against them too,
   // so a request that read the scenes earlier neither writes back the names it saw nor misjudges the approval.
-  return putKeepingCounters(next, {
+  // A video landing in a folder that holds none yet: a link left from an earlier folder of that name goes first.
+  if (next.folder && next.folder !== existing.folder && !internal.keepShares) await dropEmptyShares(ownerId, [next.folder]);
+  const saved = await putKeepingCounters(next, {
     ...(patch.starred !== undefined ? { starred: patch.starred } : {}),
     dropApproval: (stored) => publicChange || (!!renames && [...renames].some(([i, name]) => stored.scenes?.[i]?.name !== name)),
     ...(renames ? { scenes: (stored) => renamedScenes(stored, renames) } : {}),
   });
+  // A video moved out of a shared folder may have been its last: the folder's link goes with it (a rename handles its own).
+  if (existing.folder && existing.folder !== saved.folder && !internal.keepShares) await dropEmptyShares(ownerId, [existing.folder]);
+  return saved;
 }
 
 // ---------------------------------------------------------------------------
@@ -1509,6 +1529,10 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
   let done = 0;
   // Checked once, before any video is written, rather than relying on the first video's write to refuse it.
   if (input.action === "cover" && input.cover) readCover(input.cover);
+  // Shared folders' links are settled once for the whole run rather than per video: the destination of a move before
+  // anything lands in it (a link left from an earlier folder of that name goes), the folders it left at the end.
+  const left = new Set<string>();
+  if (input.action === "move" && input.folder) await dropEmptyShares(ownerId, [input.folder]);
   for (const id of Array.from(new Set(input.ids))) {
     const existing = await getStore().get<Video>("video", id);
     // A trashed video past its retention is as good as gone, so it is reported rather than restored, moved, or written.
@@ -1518,8 +1542,13 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     }
     if (input.action === "delete") await deleteVideo(id, ownerId);
     else if (input.action === "restore") await restoreVideo(id, ownerId);
-    else if (input.action === "purge") await purgeVideo(id, ownerId);
-    else if (input.action === "move") await updateVideo(id, { folder: input.folder }, ownerId);
+    else if (input.action === "purge") {
+      if (existing.folder) left.add(existing.folder);
+      await purgeVideo(id, ownerId, { dropShares: false, folder: existing.folder ?? null });
+    } else if (input.action === "move") {
+      if (existing.folder && existing.folder !== input.folder) left.add(existing.folder);
+      await updateVideo(id, { folder: input.folder }, ownerId, { keepShares: true });
+    }
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
     else if (input.action === "password" || input.action === "settings" || input.action === "star" || input.action === "cta" || input.action === "cover") {
       try {
@@ -1556,6 +1585,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     }
     done += 1;
   }
+  if (left.size) await dropEmptyShares(ownerId, [...left]);
   return input.action === "schedule" || input.action === "expire" ? { done, missing, refused } : { done, missing };
 }
 
@@ -1573,17 +1603,30 @@ export const folderRenameSchema = z.object({
 export async function renameFolder(input: z.infer<typeof folderRenameSchema>, ownerId: string = LOCAL_OWNER): Promise<{ moved: number }> {
   if (input.from === input.to) return { moved: 0 };
   const now = Date.now();
-  const videos = (await getStore().list<Video>("video", ownerId)).filter((v) => v.folder === input.from && !purgeDue(v, now));
+  const all = await getStore().list<Video>("video", ownerId);
+  const videos = all.filter((v) => v.folder === input.from && !purgeDue(v, now));
+  // Read before the move: a rename onto a folder that already held videos is a merge, which a shared link does not follow.
+  const targetHeldVideos = !!input.to && all.some((v) => v.folder === input.to && !purgeDue(v, now));
   let moved = 0;
+  let followed = false;
   for (const v of videos) {
     try {
-      await updateVideo(v.id, { folder: input.to }, ownerId);
+      await updateVideo(v.id, { folder: input.to }, ownerId, { keepShares: true });
       moved += 1;
+      // A shared folder's link follows its videos as soon as the first has moved (to the new name, or it stops on a
+      // merge or removal), so a rename cut short and retried still counts the target as the plain new name it was.
+      if (!followed) {
+        await followFolderRename(input.from, input.to, ownerId, targetHeldVideos);
+        followed = true;
+      }
     } catch (err) {
       // Deleted for good between the listing and its turn: nothing to rename, carry on with the rest.
       if (!(err instanceof NotFoundError)) throw err;
     }
   }
+  // Nothing moved: the old name held no video, so any share of it is left over and is dropped below, never carried.
+  // Anything the rename emptied (the old name) drops its link now.
+  await dropEmptyShares(ownerId, [input.from]);
   return { moved };
 }
 
@@ -2003,6 +2046,8 @@ async function createStudioTemplateVideo(req: VideoRequest & { studioTemplate: N
  * so it is not rendered twice there.
  */
 async function startReserved(base: Video, ownerId: string, keyed: boolean, send: () => Promise<{ providerJobId: string; agentSessionId?: string }>, onStarted?: () => void): Promise<Video> {
+  // A video landing in a folder that holds none yet: a link left from an earlier folder of that name goes first.
+  if (base.folder) await dropEmptyShares(ownerId, [base.folder]);
   if (keyed) {
     if (!(await getStore().insert("video", base))) {
       const held = await getStore().get<Video>("video", base.id);

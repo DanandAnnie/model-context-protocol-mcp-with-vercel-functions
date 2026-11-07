@@ -9,6 +9,7 @@ import { useMobileNav } from "@/components/MobileNav";
 import { fileToCover } from "@/lib/image-upload";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
+import { FolderShare } from "@/components/FolderShare";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { freshVideoIds, readSeenMark } from "@/lib/comment-list";
@@ -1238,6 +1239,7 @@ function VideosInner() {
           )}
           {folder !== "all" && folder !== "unfiled" && !trash && (
             <span className="flex gap-1" data-testid="folder-actions">
+              <FolderShare folder={folder} canEdit={canEdit} />
               <button type="button" onClick={() => manageFolder(false)} disabled={folderBusy} aria-label="Rename folder" title="Rename this folder" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
                 <FolderPen className="h-4 w-4" />
               </button>

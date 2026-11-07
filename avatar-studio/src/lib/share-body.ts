@@ -14,6 +14,8 @@ import type { AspectRatio, BrandKit, CaptionStyle, Video, WatermarkCorner } from
 
 export interface ShareBody {
   videoId: string;
+  /** The video's title, as the page shows it (the transcript's copy and download are named after it). */
+  title: string;
   /** The share link at the site's own address (as the studio's copy buttons and oEmbed write it), without a query. */
   shareUrl: string;
   status: Video["status"];
@@ -56,6 +58,7 @@ export function shareBodyFor(video: Video, brand: BrandKit | null): ShareBody {
   const logoSrc = publicLogoSrc(brand, `/api/videos/${encodeURIComponent(video.id)}/logo`);
   return {
     videoId: video.id,
+    title: video.title,
     shareUrl: `${config.appUrl.replace(/\/$/, "")}/share/${encodeURIComponent(video.id)}`,
     status: video.status,
     aspect: video.aspect,

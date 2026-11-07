@@ -14761,3 +14761,41 @@ test("a share page's transcript can be searched, with each place marked and step
   await expect(box).toBeFocused();
   await expect(count).toHaveText("");
 });
+
+test("a share page's transcript is copied or downloaded as text, with times or without", async ({ page }) => {
+  const title = `Saved words ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title, { script: "First we open the doors. Then the team walks you through every room. Finally we hand over the keys." });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const { cues } = (await (await page.request.get(`/api/videos/${v.id}/captions?format=json`)).json()) as { cues: Array<{ startMs: number; text: string }> };
+  const stamp = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+  const words = (t: string) => t.replace(/\s+/g, " ").trim();
+  const withTimes = `${title}\n\n${cues.map((c) => `${stamp(c.startMs)}  ${words(c.text)}`).join("\n")}\n`;
+  const wordsOnly = `${title}\n\n${cues.map((c) => words(c.text)).join("\n")}\n`;
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.goto(`/share/${v.id}`);
+  const saveGroup = page.getByRole("group", { name: "Save the transcript" });
+  const status = page.getByTestId("share-transcript-saved");
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect(saveGroup.getByRole("checkbox", { name: "Times" })).toBeChecked();
+  // Copied with each line's time, under the video's title.
+  await saveGroup.getByRole("button", { name: "Copy transcript" }).click();
+  await expect(status).toHaveText("Transcript copied.");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(withTimes);
+  // Downloaded as a text file named after the video.
+  const [file] = await Promise.all([page.waitForEvent("download"), saveGroup.getByRole("button", { name: "Download .txt" }).click()]);
+  expect(file.suggestedFilename()).toBe(`${title} transcript.txt`);
+  const chunks: Buffer[] = [];
+  for await (const chunk of (await file.createReadStream())!) chunks.push(chunk as Buffer);
+  expect(Buffer.concat(chunks).toString("utf8")).toBe(withTimes);
+  await expect(status).toHaveText("Transcript downloaded.");
+  // The words alone, without the times.
+  await saveGroup.getByRole("checkbox", { name: "Times" }).uncheck();
+  // The message was about the text before: it goes, and comes again for the new copy.
+  await expect(status).toHaveText("");
+  await saveGroup.getByRole("button", { name: "Copy transcript" }).click();
+  await expect(status).toHaveText("Transcript copied.");
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(wordsOnly);
+  // Not in an embed, which has no transcript.
+  await page.goto(`/share/${v.id}?embed=1`);
+  await expect(page.getByRole("button", { name: "Copy transcript" })).toHaveCount(0);
+});

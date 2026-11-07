@@ -98,7 +98,7 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
       {!embed && body.chapters && body.chapters.length > 1 && <ShareChapters playerId={SHARE_PLAYER_ID} chapters={body.chapters} />}
       {/* Once there is a video, the script is its transcript: the caption lines (corrected ones when an editor saved them), each playing from its time. */}
       {embed ? null : body.transcripts ? (
-        <ShareTranscript playerId={SHARE_PLAYER_ID} transcripts={body.transcripts} />
+        <ShareTranscript playerId={SHARE_PLAYER_ID} transcripts={body.transcripts} title={body.title} />
       ) : body.script ? (
         <p className="mt-6 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{body.script}</p>
       ) : null}

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { shareTrackId } from "@/lib/share-player";
 import { formatTimestamp } from "@/lib/text";
 import { TRANSCRIPT_QUERY_MAX, findInTranscript, markLine, matchesByLine, stepMatch } from "@/lib/transcript-search";
+import { transcriptFileName, transcriptText } from "@/lib/share-transcript-file";
 
 type Cue = { startMs: number; endMs: number; text: string };
 
@@ -11,15 +12,18 @@ type Cue = { startMs: number; endMs: number; text: string };
  * and the line being spoken is marked as the video plays (scrolled into view inside the list only, so
  * the page itself never jumps). It follows the subtitle track the viewer picks in the player: a
  * translated track shows that language's lines, anything else the script's. A search box over it finds a word or
- * phrase in the lines shown (ignoring case and accents), marks each place, and steps through them.
+ * phrase in the lines shown (ignoring case and accents), marks each place, and steps through them. The lines shown can
+ * be copied or saved as text, with their times or without, built here from what the page holds.
  */
-export function ShareTranscript({ playerId, transcripts }: { playerId: string; transcripts: Array<{ language?: string; code?: string; cues: Cue[] }> }) {
+export function ShareTranscript({ playerId, transcripts, title }: { playerId: string; transcripts: Array<{ language?: string; code?: string; cues: Cue[] }>; title: string }) {
   const [which, setWhich] = useState(0);
   const [active, setActive] = useState(-1);
   const list = useRef<HTMLOListElement>(null);
   const shown = transcripts[which] ?? transcripts[0];
   const cues = shown.cues;
   const [query, setQuery] = useState("");
+  const [times, setTimes] = useState(true);
+  const [saved, setSaved] = useState("");
   const [current, setCurrent] = useState(-1);
   const matches = useMemo(() => findInTranscript(cues.map((c) => c.text), query), [cues, query]);
   const byLine = useMemo(() => matchesByLine(matches), [matches]);
@@ -107,6 +111,37 @@ export function ShareTranscript({ playerId, transcripts }: { playerId: string; t
     setCurrent((c) => stepMatch(c, matches.length, back));
   }
 
+  const asText = () => transcriptText(cues, { title, language: shown.language, times });
+  // Said anew each time (cleared first, so a repeated "copied" is heard again), and cleared when the text it was about
+  // changes (Times, or another language).
+  const tell = (message: string) => {
+    setSaved("");
+    requestAnimationFrame(() => setSaved(message));
+  };
+  useEffect(() => setSaved(""), [times, which]);
+
+  async function copyText() {
+    try {
+      await navigator.clipboard.writeText(asText());
+      tell("Transcript copied.");
+    } catch {
+      tell("Could not copy: your browser did not allow it. Download it instead.");
+    }
+  }
+
+  function download() {
+    const url = URL.createObjectURL(new Blob([asText()], { type: "text/plain;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = transcriptFileName(title, shown.language);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // After the browser has taken the file.
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    tell("Transcript downloaded.");
+  }
+
   function playFrom(startMs: number) {
     const el = document.getElementById(playerId) as HTMLVideoElement | null;
     if (!el) return;
@@ -118,9 +153,26 @@ export function ShareTranscript({ playerId, transcripts }: { playerId: string; t
 
   return (
     <section className="mt-6" aria-labelledby="share-transcript-title">
-      <h2 id="share-transcript-title" className="mb-2 text-sm font-semibold text-slate-200">
-        Transcript{shown.language ? ` · ${shown.language}` : ""}
-      </h2>
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 id="share-transcript-title" className="text-sm font-semibold text-slate-200">
+          Transcript{shown.language ? ` · ${shown.language}` : ""}
+        </h2>
+        <div role="group" aria-label="Save the transcript" className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+          <label className="flex items-center gap-1 text-slate-400">
+            <input type="checkbox" checked={times} onChange={(e) => setTimes(e.target.checked)} className="accent-slate-300" />
+            Times
+          </label>
+          <button type="button" onClick={copyText} className="rounded-md border border-slate-700 px-2 py-1 text-slate-200 hover:bg-slate-800">
+            Copy transcript
+          </button>
+          <button type="button" onClick={download} className="rounded-md border border-slate-700 px-2 py-1 text-slate-200 hover:bg-slate-800">
+            Download .txt
+          </button>
+        </div>
+        <span role="status" className="w-full text-xs text-slate-400 empty:hidden" data-testid="share-transcript-saved">
+          {saved}
+        </span>
+      </div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <input
           type="search"

@@ -2284,3 +2284,24 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A new unit test covers setting the button (trimmed), the title, note, and order being left alone, and a rename. It also covers refused links (`www.…` and `javascript:`) with their message, an empty or 41-character label, another account being refused, and clearing.
     - A new e2e test covers a refused link (saving nothing), saving with Enter, the visitor's button (text, link, new tab, rel), and the API value. It ends by removing the button, with focus back on its text.
     - The QR e2e test now checks on a 375×667 phone that the panel stays clear of the top bar and fits the screen. It also checks that the panel scrolls inside itself with the code open. This check fails on the earlier panel.
+- Clicks on a shared folder's button (`bf0971b`).
+  - **What it does.** The shared folder's page counts clicks on its button. The Share folder panel shows "Button not clicked yet." or "Button clicked 3 times, last on …" under the opens line. A realtor can see whether "Book a showing" is being used, not just whether the page was opened. `GET /api/collections` and the `PATCH` reply carry `ctaClicks` and `lastCtaClickAt`.
+  - **How clicks are counted.** The button sends one beacon as it opens the link (`POST /api/collections/:id/cta`, public). A middle-click that opens the link in another tab counts too. The beacon is sent alongside the link, so a failed beacon never stops the link from opening.
+    - One click counts per visitor per folder per 10 minutes, at most 300 per folder in that window.
+    - A request a browser marks as coming from another site counts nothing, and is answered without looking at the folder.
+    - More than 30 beacons from one visitor, or 3,000 on one folder (counted together with its open beacons), are turned away with a 429 before they queue.
+    - A page without a button counts nothing, and the owner's videos are not read for it.
+    - A link that is not shared, or a button on a folder that holds no video, is a 404.
+    - The count is kept when the button changes or comes off, and it follows the link through a rename.
+  - **Kept straight.** A click is written under the same per-folder turn-taking as opens, saves, and renames, so a click and an open at the same moment are both kept.
+  - **Review findings fixed before commit.**
+    - The click beacon had its own per-folder ceiling on beacons. A flood could therefore queue twice as much on the folder's turn as opens alone. It now shares the open beacon's ceiling.
+    - A page without a button read the owner's videos before counting nothing.
+    - Middle-clicks went uncounted.
+    - The tests did not check each beacon's reply, a cross-site click, a dead link, a click after the button came off, or that the visitor's window is never asked when nothing could count.
+  - **Tests.**
+    - A new unit test covers no button (counting nothing without asking the visitor's window) and a counted click.
+    - It also covers a closed window, a click and an open at the same moment, a rename keeping the count, and the button coming off with the count kept.
+    - Finally it covers an unknown link and a folder emptied of its videos.
+    - The button e2e test now has a visitor click twice: the first click counts and the second does not, and the panel then shows "Button clicked once, last on …".
+    - It also covers a cross-site click counting nothing, an unknown link answering 404, and a click after the button came off counting nothing with the count kept.

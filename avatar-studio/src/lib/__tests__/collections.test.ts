@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -309,5 +309,31 @@ describe("shared folders", () => {
     const cleared = await updateCollection(collection.id, { cta: null }, owner);
     assert.equal("cta" in cleared, false);
     assert.equal((await collectionPage(collection.id)).collection.cta, undefined);
+  });
+
+  it("counts clicks on the page's button, only while it has one and its page shows, behind the visitor's window", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    // The visitor's window is asked only for a click that would count: never for a page without a button or a dead link.
+    const untouched = () => assert.fail("the visitor's window was asked");
+    assert.deepEqual(await recordCollectionCtaClick(collection.id, untouched), { clicks: 0, counted: false }, "no button, nothing to count");
+    await updateCollection(collection.id, { cta: { label: "Book", url: "https://example.com" } }, owner);
+    const at = Date.parse("2026-11-07T12:00:00Z");
+    assert.deepEqual(await recordCollectionCtaClick(collection.id, () => true, at), { clicks: 1, counted: true });
+    assert.deepEqual(await recordCollectionCtaClick(collection.id, () => false, at), { clicks: 1, counted: false }, "a closed window counts nothing");
+    // A view and a click at the same moment are both kept; a rename carries the count.
+    await Promise.all([recordCollectionView(collection.id), recordCollectionCtaClick(collection.id, () => true, at + 1000)]);
+    await renameFolder({ from: "Listings", to: "Sold" }, owner);
+    const [listed] = await listCollections(owner);
+    assert.deepEqual([listed.ctaClicks, listed.lastCtaClickAt, listed.views], [2, "2026-11-07T12:00:01.000Z", 1]);
+    // Taking the button off keeps the count but counts no more.
+    await updateCollection(collection.id, { cta: null }, owner);
+    assert.deepEqual(await recordCollectionCtaClick(collection.id, untouched), { clicks: 2, counted: false });
+    await assert.rejects(recordCollectionCtaClick("col_missing", untouched), NotFoundError);
+    await updateCollection(collection.id, { cta: { label: "Book", url: "https://example.com" } }, owner);
+    // A folder that holds no video any more has no page to click on.
+    await deleteVideo("v1", owner);
+    await emptyTrash({ expected: 1 }, owner);
+    await assert.rejects(recordCollectionCtaClick(collection.id, untouched), NotFoundError);
   });
 });

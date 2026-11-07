@@ -33,6 +33,9 @@ export interface Collection {
   order?: CollectionOrder;
   /** A call-to-action button above the videos (its text and where it goes, http or https), as on a video's share page. */
   cta?: { label: string; url: string };
+  /** Clicks on the page's button (one per visitor per window; see the cta route), kept when the button changes. */
+  ctaClicks?: number;
+  lastCtaClickAt?: string;
 }
 
 /** One video as a collection page shows it: what its own share page would preview, and no more. */
@@ -247,6 +250,25 @@ export function recordCollectionView(id: string, gate: () => boolean = () => tru
     const views = (collection.views ?? 0) + 1;
     await getStore().put("collection", { ...collection, views, lastViewedAt: new Date(now).toISOString() });
     return { views, counted: true };
+  });
+}
+
+/**
+ * Counts a click on a shared folder's button. Public, like recordCollectionView: an unknown share is a NotFoundError;
+ * a page without a button (taken off since the visitor loaded it) counts nothing, answered before the owner's videos
+ * are read; and a button on a share whose folder holds no video is a NotFoundError. `gate` is the route's per-visitor
+ * window, asked only for a click that would count.
+ */
+export function recordCollectionCtaClick(id: string, gate: () => boolean = () => true, now = Date.now()): Promise<{ clicks: number; counted: boolean }> {
+  return withShareLock(id, async () => {
+    const collection = await getStore().get<Collection>("collection", id);
+    if (!collection) throw new NotFoundError("Collection not found");
+    if (!collection.cta) return { clicks: collection.ctaClicks ?? 0, counted: false };
+    if (!foldersHeld(await videosOf(collection.ownerId), now).has(collection.folder)) throw new NotFoundError("Collection not found");
+    if (!gate()) return { clicks: collection.ctaClicks ?? 0, counted: false };
+    const clicks = (collection.ctaClicks ?? 0) + 1;
+    await getStore().put("collection", { ...collection, ctaClicks: clicks, lastCtaClickAt: new Date(now).toISOString() });
+    return { clicks, counted: true };
   });
 }
 

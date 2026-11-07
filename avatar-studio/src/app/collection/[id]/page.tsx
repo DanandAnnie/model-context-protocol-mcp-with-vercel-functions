@@ -6,6 +6,7 @@ import { Lock, Play, Sparkles } from "lucide-react";
 import { NotFoundError, collectionPage, getBrandKit } from "@/lib/services";
 import { formatSeconds, isDarkHex } from "@/lib/client";
 import { publicLogoSrc } from "@/lib/brand-logo";
+import { CollectionCta } from "@/components/CollectionCta";
 import { CollectionViewBeacon } from "@/components/CollectionViewBeacon";
 
 export const dynamic = "force-dynamic";
@@ -98,17 +99,7 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
         {collection.cta && (
           // The owner's button, in the brand's colour as on a video's share page; it opens in a new tab.
           <div className="mt-4">
-            <a
-              href={collection.cta.url}
-              target="_blank"
-              rel="noreferrer noopener"
-              data-testid="collection-cta"
-              className="inline-flex max-w-full items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm [overflow-wrap:anywhere] hover:opacity-90"
-              style={{ background: accent ?? "#4f46e5", color: isDarkHex(accent ?? "#4f46e5") ? "#fff" : "#0f172a" }}
-            >
-              {collection.cta.label}
-              <span className="sr-only"> (opens in a new tab)</span>
-            </a>
+            <CollectionCta collectionId={collection.id} label={collection.cta.label} url={collection.cta.url} background={accent ?? "#4f46e5"} dark={isDarkHex(accent ?? "#4f46e5")} />
           </div>
         )}
         {videos.length > 0 && (

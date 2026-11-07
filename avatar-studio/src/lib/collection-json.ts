@@ -14,5 +14,7 @@ export function collectionJson(c: Collection, origin: string) {
     note: c.note ?? null,
     order: c.order ?? "newest",
     cta: c.cta ?? null,
+    ctaClicks: c.ctaClicks ?? 0,
+    lastCtaClickAt: c.lastCtaClickAt ?? null,
   };
 }

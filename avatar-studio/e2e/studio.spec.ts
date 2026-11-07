@@ -4271,6 +4271,22 @@ test("a shared folder's page can carry a button the owner sets, in a new tab, an
   await expect(cta).toHaveAttribute("target", "_blank");
   await expect(cta).toHaveAttribute("rel", "noreferrer noopener");
   expect((await (await page.request.get("/api/collections")).json()).collections.find((c: { id: string }) => c.id === collection.id).cta).toEqual({ label: "Book a showing", url: "https://example.com/book?home=12" });
+  // The panel says the button has not been clicked; a visitor's two clicks count once, and the panel says so.
+  await expect(panel.getByTestId("folder-share-cta-clicks")).toHaveText("Button not clicked yet.");
+  await visitor.route("https://example.com/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>Booking</title>" }));
+  for (const counted of [true, false]) {
+    const beacon = guest.waitForResponse((r) => r.url().endsWith(`/api/collections/${collection.id}/cta`));
+    const [tab] = await Promise.all([visitor.waitForEvent("page"), cta.click()]);
+    expect(await (await beacon).json()).toEqual({ clicks: 1, counted });
+    await tab.close();
+  }
+  // A page from another site cannot count clicks, and a link that shows nothing answers not found.
+  expect(await (await page.request.post(`/api/collections/${collection.id}/cta`, { headers: { "sec-fetch-site": "cross-site" } })).json()).toEqual({ counted: false });
+  expect((await page.request.post("/api/collections/col_00000000000000000000/cta")).status()).toBe(404);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Share folder" }).click();
+  await expect(panel.getByTestId("folder-share-cta-clicks")).toHaveText(/^Button clicked once, last on .+\.$/);
+  expect((await (await page.request.get("/api/collections")).json()).collections.find((c: { id: string }) => c.id === collection.id).ctaClicks).toBe(1);
   // Taken off again; focus goes back to the button's text.
   await panel.getByRole("button", { name: "Remove button" }).click();
   await expect(page.getByTestId("folder-share-note")).toHaveText("Button taken off the folder's page.");
@@ -4279,6 +4295,8 @@ test("a shared folder's page can carry a button the owner sets, in a new tab, an
   await guest.reload();
   await expect(guest.getByTestId("collection-title")).toHaveText(tag);
   await expect(guest.getByTestId("collection-cta")).toHaveCount(0);
+  // A click sent after the button came off counts nothing, and the count is kept.
+  expect(await (await guest.request.post(`/api/collections/${collection.id}/cta`)).json()).toEqual({ clicks: 1, counted: false });
   await visitor.close();
 });
 

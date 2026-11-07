@@ -2345,3 +2345,27 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A second unit test checks the 100-video limit with 101 videos.
     - Each was checked to fail when the page's order, the folder check, or the limit is taken out.
     - An e2e test follows the card through a three-video folder and reorders it by title. It also switches one video off and checks that someone sent the address alone sees no card.
+- Up next: a folder's videos play one after another (`d4d394b`).
+  - **What it does.** When a video opened from a shared folder's page plays through to its end, a panel at the top of the screen counts down five seconds to the folder's next video and names it. Then it opens that video, which starts playing by itself where the browser allows sound; where it does not, the viewer presses play. A buyer can sit back and watch a realtor's listings in the order the folder's page shows them.
+  - **Staying in control.** Cancel, Escape, or playing the video again stops the countdown and leaves the "Next in" card as it was. Play now skips the wait. While the next page loads, the panel says "Opening…".
+  - **When it does not start.**
+    - A video dragged to its end while paused, even after some watching, does not start it.
+    - Nor does a looping video, the last video of the folder, a video whose address was sent on its own, or an embed.
+  - **Kept out of the way.** The panel sits at the top of the screen, clear of the mini player pinned to a bottom corner. A player in fullscreen or picture-in-picture is brought back to the page first, so the countdown is seen.
+  - **For screen readers.** The countdown is announced once ("Up next: …, in 5 seconds. Press Escape to stay on this video."), not every second.
+  - **Starting the next video.** The page that moves on leaves a note in the browser tab saying which video to start. The note is used once and counts for 30 seconds only, so a note left behind never starts a later visit. Starting the video asks the player to play at once, not after waiting for its data, which some phones never load until asked.
+  - **Review findings fixed before commit.**
+    - The panel sat where the mini player is pinned, and ran unseen in fullscreen.
+    - The countdown was announced every second.
+    - Dragging to the end after watching a little started it.
+    - A note left behind could start a later visit.
+    - Waiting for data before playing could stall on some phones.
+    - A looping section could flash the countdown.
+    - Nothing showed while the next page loaded.
+    - The test did not check Escape kept the page, or that a reload stayed paused.
+  - **Tests.**
+    - An e2e test plays a folder's video to its end and checks that the countdown names the next video, at the top of the screen, announced once.
+    - It checks that Cancel and Escape each keep the page for longer than the countdown, and that playing again stops it.
+    - It checks that, left to run, the next video opens and plays by itself.
+    - It also covers the last video, a reload, a stale note, and an address sent alone.
+    - Dragging to the end (never played, and after watching a little) is checked with the `ended` event some browsers fire for it, and the check was confirmed to fail under the earlier rule.

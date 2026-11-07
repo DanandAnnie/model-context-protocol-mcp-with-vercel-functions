@@ -6,6 +6,7 @@ import { Lock, Play, Sparkles } from "lucide-react";
 import { NotFoundError, collectionPage, getBrandKit } from "@/lib/services";
 import { formatSeconds } from "@/lib/client";
 import { publicLogoSrc } from "@/lib/brand-logo";
+import { CollectionViewBeacon } from "@/components/CollectionViewBeacon";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,7 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
   const logoSrc = videos[0] ? publicLogoSrc(brand, `/api/videos/${encodeURIComponent(videos[0].id)}/logo`) : brand?.logoUrl?.startsWith("data:") ? undefined : brand?.logoUrl;
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
+      <CollectionViewBeacon collectionId={collection.id} />
       {accent && <div className="h-1.5" style={{ background: accent }} aria-hidden />}
       <header className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
         {brand && (brand.name || logoSrc) ? (

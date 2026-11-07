@@ -5,7 +5,15 @@ import { collectionSchema, listCollections, shareFolder, type Collection } from 
 
 export const dynamic = "force-dynamic";
 
-const withUrl = (c: Collection, origin: string) => ({ id: c.id, folder: c.folder, url: `${origin.replace(/\/$/, "")}/collection/${c.id}`, createdAt: c.createdAt, updatedAt: c.updatedAt });
+const withUrl = (c: Collection, origin: string) => ({
+  id: c.id,
+  folder: c.folder,
+  url: `${origin.replace(/\/$/, "")}/collection/${c.id}`,
+  createdAt: c.createdAt,
+  updatedAt: c.updatedAt,
+  views: c.views ?? 0,
+  lastViewedAt: c.lastViewedAt ?? null,
+});
 
 /** The shared folders of the account or workspace, each with its public link. */
 export async function GET(req: Request) {

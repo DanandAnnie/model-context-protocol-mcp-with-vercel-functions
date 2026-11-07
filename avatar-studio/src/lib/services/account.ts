@@ -14,6 +14,7 @@ import { publicDelivery } from "../notifications";
 import { dropMusicRender } from "./music";
 import { dropInstantVoice, wordsRowId } from "./voice-changer";
 import { dropAgentBrand } from "./agent-brand";
+import { removeShare } from "./collections";
 import type { AgentBrandKit } from "../types";
 
 const OWNER_KINDS = ["video", "avatar", "translation", "brand", "apikey", "notify", "prefs", "plan", "agent", "conversation", "voice", "template", "sharelock", "cover", "comment", "activity", "clip", "videolead", "backdrop", "portrait", "highlight", "cleanup", "lipsync", "lookpack", "twin", "music", "instantvoice", "voicechange", "footage", "shoot", "agentbrand", "collection"] as const;
@@ -157,7 +158,9 @@ export async function deleteOwnerData(ownerId: string = LOCAL_OWNER, opts: { bil
         if (kind === "agentbrand" && !(await dropAgentBrand(item as AgentBrandKit))) {
           throw new ConflictError("The renderer would not delete your HeyGen brand kit just now, so the account was kept (anything removed before it stays removed); try again in a moment, or ask the operator if this repeats");
         }
-        await getStore().remove(kind, item.id);
+        // A shared folder goes under its lock, so a page view in flight cannot write it back.
+        if (kind === "collection") await removeShare(item.id);
+        else await getStore().remove(kind, item.id);
         removed.add(item.id);
       }
     }

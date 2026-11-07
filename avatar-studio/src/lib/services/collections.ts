@@ -21,6 +21,9 @@ export interface Collection {
   folder: string;
   createdAt: string;
   updatedAt: string;
+  /** How often the public page was opened (one per visitor per window; see the view route). */
+  views?: number;
+  lastViewedAt?: string;
 }
 
 /** One video as a collection page shows it: what its own share page would preview, and no more. */
@@ -35,6 +38,24 @@ export interface CollectionVideo {
 }
 
 export const collectionSchema = z.object({ folder: z.string().trim().min(1).max(MAX_FOLDER_NAME) });
+
+/**
+ * One write at a time per share, in this process: a page view's read-then-write cannot land after the share was
+ * removed (bringing it back) or renamed (moving it back), nor two views count as one. The same in-process limit as the
+ * video counters applies across server instances.
+ */
+const shareQueue = new Map<string, Promise<unknown>>();
+function withShareLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const run = (shareQueue.get(id) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.catch(() => undefined);
+  shareQueue.set(id, tail);
+  void tail.then(() => {
+    if (shareQueue.get(id) === tail) shareQueue.delete(id);
+  });
+  return run;
+}
+/** Removes a share under its lock, so a page view in flight cannot write it back. Every removal goes through here. */
+export const removeShare = (id: string) => withShareLock(id, () => getStore().remove("collection", id));
 
 const sharesOf = async (ownerId: string) => (await getStore().list<Collection>("collection", ownerId)).filter((c) => c.ownerId === ownerId);
 const videosOf = async (ownerId: string) => (await getStore().list<Video>("video", ownerId)).filter((v) => v.ownerId === ownerId);
@@ -57,7 +78,7 @@ export async function dropEmptyShares(ownerId: string, folders?: string[]): Prom
     const shares = (await sharesOf(ownerId)).filter((c) => !folders || folders.includes(c.folder));
     if (!shares.length) return;
     const held = foldersHeld(await videosOf(ownerId), Date.now());
-    for (const c of shares) if (!held.has(c.folder)) await getStore().remove("collection", c.id);
+    for (const c of shares) if (!held.has(c.folder)) await removeShare(c.id);
   } catch (err) {
     console.error(`could not drop the empty shared folders of ${ownerId}:`, err);
   }
@@ -94,7 +115,7 @@ export async function shareFolder(input: z.infer<typeof collectionSchema>, owner
  */
 export async function stopSharingFolder(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const share = owned(await getStore().get<Collection>("collection", id), ownerId, `Shared folder ${id}`);
-  for (const c of await sharesOf(ownerId)) if (c.folder === share.folder) await getStore().remove("collection", c.id);
+  for (const c of await sharesOf(ownerId)) if (c.folder === share.folder) await removeShare(c.id);
 }
 
 /**
@@ -109,12 +130,35 @@ export async function followFolderRename(from: string, to: string, ownerId: stri
   const carry = !!to && !targetHeldVideos;
   // A name that held no video has no live share; any left over from an earlier folder of that name goes (whether or not
   // this folder is shared), so it can neither publish the renamed videos nor stand beside the link being carried.
-  if (carry) for (const c of shares) if (c.folder === to) await getStore().remove("collection", c.id);
+  if (carry) for (const c of shares) if (c.folder === to) await removeShare(c.id);
   const moving = shares.filter((c) => c.folder === from);
   for (const c of moving) {
-    if (carry) await getStore().put("collection", { ...c, folder: to, updatedAt: nowIso() });
-    else await getStore().remove("collection", c.id);
+    if (!carry) {
+      await removeShare(c.id);
+      continue;
+    }
+    // Read again under the lock, so a view counted since the listing is carried along, not written over.
+    await withShareLock(c.id, async () => {
+      const current = await getStore().get<Collection>("collection", c.id);
+      if (current) await getStore().put("collection", { ...current, folder: to, updatedAt: nowIso() });
+    });
   }
+}
+
+/**
+ * Counts an open of a shared folder's public page. Public: no owner check. A share whose folder holds no video (its
+ * page answers not found) is a NotFoundError and counts nothing. `gate` is the route's per-visitor window, asked only
+ * for a page that shows, so a visit to a dead link does not use up the visitor's slot.
+ */
+export function recordCollectionView(id: string, gate: () => boolean = () => true, now = Date.now()): Promise<{ views: number; counted: boolean }> {
+  return withShareLock(id, async () => {
+    const collection = await getStore().get<Collection>("collection", id);
+    if (!collection || !foldersHeld(await videosOf(collection.ownerId), now).has(collection.folder)) throw new NotFoundError("Collection not found");
+    if (!gate()) return { views: collection.views ?? 0, counted: false };
+    const views = (collection.views ?? 0) + 1;
+    await getStore().put("collection", { ...collection, views, lastViewedAt: new Date(now).toISOString() });
+    return { views, counted: true };
+  });
 }
 
 /**

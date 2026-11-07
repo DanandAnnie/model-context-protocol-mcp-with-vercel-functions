@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, renameFolder, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -158,5 +158,64 @@ describe("shared folders", () => {
     await stopSharingFolder(collection.id, owner);
     await assert.rejects(collectionPage(collection.id), NotFoundError);
     assert.deepEqual(await listCollections(owner), []);
+  });
+
+  it("counts opens of the public page, keeps them through a rename, and counts nothing for a dead link", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const at = Date.parse("2026-11-05T09:30:00Z");
+    assert.deepEqual(await recordCollectionView(collection.id, () => true, at), { views: 1, counted: true });
+    // A visitor still inside the route's window: shown, not counted.
+    assert.deepEqual(await recordCollectionView(collection.id, () => false, at + 1000), { views: 1, counted: false });
+    // Opens at once are each counted (one write at a time per share).
+    await Promise.all([1, 2, 3].map((n) => recordCollectionView(collection.id, () => true, at + n)));
+    let [listed] = await listCollections(owner);
+    assert.equal(listed.views, 4);
+    assert.equal(listed.lastViewedAt, new Date(at + 3).toISOString());
+    // A rename carries the counts with the link.
+    await renameFolder({ from: "Listings", to: "Sold" }, owner);
+    [listed] = await listCollections(owner);
+    assert.equal(listed.folder, "Sold");
+    assert.equal(listed.views, 4);
+    // A view still reading the folder's videos as the link is stopped never brings it back: the stop waits its turn.
+    const store = getStore() as MemoryStore;
+    const realList = store.list.bind(store);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let entered!: () => void;
+    const inView = new Promise<void>((r) => (entered = r));
+    store.list = (async (kind: Parameters<typeof realList>[0], ownerId?: string) => {
+      if (kind === "video") {
+        store.list = realList;
+        entered();
+        await held;
+      }
+      return realList(kind, ownerId);
+    }) as unknown as typeof store.list;
+    const view = recordCollectionView(collection.id, () => true);
+    await inView;
+    const stop = stopSharingFolder(collection.id, owner);
+    // Let the stop read the share and queue its removal behind the view.
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    assert.equal((await view).views, 5);
+    await stop;
+    assert.equal(await getStore().get("collection", collection.id), null, "the stopped link stays gone");
+    let gateAsked = false;
+    await assert.rejects(
+      recordCollectionView(collection.id, () => (gateAsked = true)),
+      NotFoundError,
+    );
+    assert.equal(gateAsked, false, "a dead link does not use up a visitor's slot");
+  });
+
+  it("does not count an open of a share whose folder holds no video", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    // Emptied behind the link's back (a write that drops it would have run in the app).
+    await getStore().put("video", made("v1", { folder: "Other" }));
+    await assert.rejects(recordCollectionView(collection.id), NotFoundError);
+    const stored = await getStore().get<{ views?: number }>("collection", collection.id);
+    assert.equal(stored?.views, undefined);
   });
 });

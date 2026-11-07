@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
-import { api } from "@/lib/client";
+import { api, formatDate } from "@/lib/client";
 
-type Shared = { id: string; folder: string; url: string };
+type Shared = { id: string; folder: string; url: string; views?: number; lastViewedAt?: string | null };
 
 /**
  * The library's "Share folder" control for the folder it shows: a public page listing the folder's videos whose
@@ -193,6 +193,9 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
           ) : shared ? (
             <>
               <p className="mt-1 text-slate-500">One page lists the folder&apos;s videos whose own links can be sent now, newest first.</p>
+              <p className="mt-1 text-slate-600" data-testid="folder-share-views">
+                {!shared.views ? "Not opened yet." : `Opened ${shared.views === 1 ? "once" : `${shared.views} times`}${shared.lastViewedAt ? `, last on ${formatDate(shared.lastViewedAt)}` : ""}.`}
+              </p>
               <input readOnly value={shared.url} aria-label="Folder link" onFocus={(e) => e.currentTarget.select()} className="mt-2 w-full rounded border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-[11px]" data-testid="folder-share-url" />
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" onClick={copy} className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50" autoFocus>

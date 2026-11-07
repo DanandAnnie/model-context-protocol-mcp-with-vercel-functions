@@ -3946,6 +3946,41 @@ test("the share folder panel stays on a phone's screen and closes when focus or 
     .toBe(true);
 });
 
+test("a shared folder counts the opens of its public page and shows them to the owner", async ({ page, browser }) => {
+  const tag = `Opens ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, "Garden tour");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  const views = async () => ((await (await page.request.get("/api/collections")).json()).collections as { id: string; views: number; lastViewedAt: string | null }[]).find((c) => c.id === collection.id)!;
+  expect(await views()).toMatchObject({ views: 0, lastViewedAt: null });
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  const shareButton = page.getByRole("button", { name: "Share folder" });
+  await shareButton.click();
+  await expect(page.getByTestId("folder-share-views")).toHaveText("Not opened yet.");
+  await page.keyboard.press("Escape");
+  // A visitor without a session opens the page; a reload in the same window is the same open.
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  const counted = guest.waitForResponse((r) => r.url().endsWith(`/api/collections/${collection.id}/view`));
+  await guest.goto(collection.url);
+  expect((await counted).status()).toBe(200);
+  const again = guest.waitForResponse((r) => r.url().endsWith(`/api/collections/${collection.id}/view`));
+  await guest.reload();
+  expect(await (await again).json()).toEqual({ views: 1, counted: false });
+  await visitor.close();
+  const after = await views();
+  expect(after.views).toBe(1);
+  expect(Date.now() - Date.parse(after.lastViewedAt!)).toBeLessThan(120_000);
+  await shareButton.click();
+  await expect(page.getByTestId("folder-share-views")).toHaveText(/^Opened once, last on .+\.$/);
+  // A page from another site cannot count opens, and a link that shows nothing answers not found.
+  expect(await (await page.request.post(`/api/collections/${collection.id}/view`, { headers: { "sec-fetch-site": "cross-site" } })).json()).toEqual({ counted: false });
+  expect((await views()).views).toBe(1);
+  expect((await page.request.post("/api/collections/col_00000000000000000000/view")).status()).toBe(404);
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

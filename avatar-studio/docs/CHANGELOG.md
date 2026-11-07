@@ -2076,3 +2076,25 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - stepping round at either end.
 
     The e2e test searches with case and an accent, and checks the marks, the count, and the current place. It steps with Enter, Shift+Enter, and the buttons. It also checks that typed letters do not play or mute the video, that no matches disables the buttons, and that Escape clears the search with the keyboard kept in the box.
+- Copy or download the transcript on the share page (`59c0447`). A viewer can now take the transcript away as plain text.
+  - **The buttons.** Beside the transcript's heading sit **Copy transcript**, **Download .txt**, and a **Times** checkbox (ticked by default).
+    - The text opens with the video's title, followed by the language for a translated transcript. After a blank line comes one line per caption: `0:05  Words`, or the words alone with Times unticked.
+    - It follows the subtitle language the viewer picked in the player, the same as the lines on the page.
+    - A caption's own line breaks, and any in the title, become spaces, so the layout holds.
+  - **The file.** It is named after the video: "House tour transcript.txt", or "House tour transcript (Spanish).txt".
+    - It is made safe to save on any system. A long title is shortened to make room for the ending, so each language's file keeps its own name.
+    - The file is built in the browser from what the page already holds, so no request is made.
+  - **Feedback.** A status line says "Transcript copied." or "Transcript downloaded." and is announced each time, even when repeated.
+    - It clears when Times or the language changes, so it never describes text that has since changed.
+    - If the browser refuses the clipboard, it says so and suggests downloading instead.
+  - **Where.** On the share page only; an embed shows no transcript. The video's title now travels with the share page's content. It was already shown on the page and in link previews before any gate, so nothing new is revealed.
+  - **Review.** An independent review found nothing that could leak and raised three points, all fixed:
+    - A long title lost " transcript (Language)" from the file name.
+    - The status was not announced again on a repeated action, and stayed after the text changed.
+    - A title containing a line break broke the file's heading.
+  - **Tests.** Unit tests cover:
+    - the heading, with a language and without a title;
+    - lines with and without times, blank captions left out, and line breaks joined;
+    - file names with unsafe characters, a `.txt` title, a blank title, and long titles with and without a language.
+
+    The e2e test checks that the copy, with times, matches the page's captions under the title. It also checks the download's file name and content, that unticking Times clears the message and copies the words alone, and that an embed has no buttons.

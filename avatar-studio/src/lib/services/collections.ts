@@ -10,7 +10,7 @@ import { MAX_FOLDER_NAME } from "../types";
 import { owned } from "./shared";
 import { purgeDue } from "./videos";
 
-/** The most videos a collection page lists, newest first. */
+/** The most videos a collection page lists, the first ones in its order. */
 export const COLLECTION_MAX_VIDEOS = 100;
 
 export interface Collection {
@@ -26,6 +26,8 @@ export interface Collection {
   lastViewedAt?: string;
   /** The owner's words for viewers, shown under the folder's name on the public page (plain text). */
   note?: string;
+  /** How the page lists the videos; none is newest first. */
+  order?: CollectionOrder;
 }
 
 /** One video as a collection page shows it: what its own share page would preview, and no more. */
@@ -43,8 +45,19 @@ export const collectionSchema = z.object({ folder: z.string().trim().min(1).max(
 
 /** The longest note a shared folder's page shows. */
 export const COLLECTION_NOTE_MAX = 500;
-/** A note for the page; an empty one (or only spaces) takes the note off. */
-export const collectionNoteSchema = z.object({ note: z.string().trim().max(COLLECTION_NOTE_MAX, `Keep the note to ${COLLECTION_NOTE_MAX} characters`) });
+/** How a shared folder's page can list its videos: newest made first (the default), oldest first, or by title. */
+export const COLLECTION_ORDERS = ["newest", "oldest", "title"] as const;
+export type CollectionOrder = (typeof COLLECTION_ORDERS)[number];
+/**
+ * A change to a shared folder's page: its note (an empty one, or only spaces, takes it off), its order, or both. A
+ * field left out is left as it is.
+ */
+export const collectionUpdateSchema = z
+  .object({
+    note: z.string().trim().max(COLLECTION_NOTE_MAX, `Keep the note to ${COLLECTION_NOTE_MAX} characters`).optional(),
+    order: z.enum(COLLECTION_ORDERS, { error: "The order is newest, oldest, or title" }).optional(),
+  })
+  .refine((v) => v.note !== undefined || v.order !== undefined, { error: "Send a note, an order, or both" });
 
 /**
  * One write at a time per share, in this process: a page view's read-then-write cannot land after the share was
@@ -126,26 +139,38 @@ export async function stopSharingFolder(id: string, ownerId: string = LOCAL_OWNE
 }
 
 /**
- * Sets or clears the note a shared folder's page shows under its name. Plain text: line breaks are kept (Windows ones
- * become plain), spaces at the ends of lines go, and runs of more than one blank line are closed up. Written under the share's lock, so a page view
- * counted meanwhile is kept.
+ * Changes a shared folder's page: its note and its order (see collectionUpdateSchema). The note is plain text: line
+ * breaks are kept (Windows ones become plain), spaces at the ends of lines go, and runs of more than one blank line
+ * are closed up. Newest first is the default, so it is stored as no order. Written under the share's lock, so a page
+ * view counted meanwhile is kept.
  */
-export async function setCollectionNote(id: string, input: z.input<typeof collectionNoteSchema> | unknown, ownerId: string = LOCAL_OWNER): Promise<Collection> {
-  const parsed = collectionNoteSchema.safeParse(input);
+export async function updateCollection(id: string, input: z.input<typeof collectionUpdateSchema> | unknown, ownerId: string = LOCAL_OWNER): Promise<Collection> {
+  const parsed = collectionUpdateSchema.safeParse(input);
   // Said plainly to an API client too, not only as a schema issue.
-  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid note");
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid change");
+  const { order } = parsed.data;
   const note = parsed.data.note
-    .replace(/\r\n?/g, "\n")
+    ?.replace(/\r\n?/g, "\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n");
   return withShareLock(id, async () => {
     const share = owned(await getStore().get<Collection>("collection", id), ownerId, `Shared folder ${id}`);
-    const { note: _old, ...rest } = share;
-    const next: Collection = { ...rest, ...(note ? { note } : {}), updatedAt: nowIso() };
+    const next: Collection = { ...share, updatedAt: nowIso() };
+    if (note !== undefined) {
+      if (note) next.note = note;
+      else delete next.note;
+    }
+    if (order !== undefined) {
+      if (order === "newest") delete next.order;
+      else next.order = order;
+    }
     await getStore().put("collection", next);
     return next;
   });
 }
+
+/** Sets or clears a shared folder's note (updateCollection with a note). */
+export const setCollectionNote = updateCollection;
 
 /**
  * Keeps shared folders with their videos when a folder is renamed. A plain rename (onto a name no video had) carries
@@ -190,9 +215,17 @@ export function recordCollectionView(id: string, gate: () => boolean = () => tru
   });
 }
 
+const newestFirst = (a: Video, b: Video) => b.createdAt.localeCompare(a.createdAt);
+/** The page's order: newest made first, oldest first, or by title (as a person reads it: case aside, "2" before "10"), newest first among equal titles. */
+function videoOrder(order: CollectionOrder = "newest"): (a: Video, b: Video) => number {
+  if (order === "oldest") return (a, b) => a.createdAt.localeCompare(b.createdAt);
+  if (order === "title") return (a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base", numeric: true }) || newestFirst(a, b);
+  return newestFirst;
+}
+
 /**
  * The public page of a shared folder: its name and the videos in it whose own share link a viewer can open now
- * (rendered, out of the trash, switched on, live, not expired), newest first, at most COLLECTION_MAX_VIDEOS of them,
+ * (rendered, out of the trash, switched on, live, not expired), in the share's order, at most COLLECTION_MAX_VIDEOS of them,
  * with `total` the count before that cap. A link with a password still lists, without its picture; its page asks for
  * the password, as an email gate asks for an email. An unknown id, or a share whose folder holds no video any more,
  * is a NotFoundError.
@@ -205,7 +238,7 @@ export async function collectionPage(id: string, now = Date.now()): Promise<{ co
   if (!foldersHeld(all, now).has(collection.folder)) throw new NotFoundError("Collection not found");
   const sendable = all
     .filter((v) => v.folder === collection.folder && v.status === "completed" && !shareOffline(v, now))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort(videoOrder(collection.order));
   const videos = sendable.slice(0, COLLECTION_MAX_VIDEOS).map((v) => ({
     id: v.id,
     title: v.title,

@@ -3,7 +3,15 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { api, formatDate } from "@/lib/client";
 
-type Shared = { id: string; folder: string; url: string; views?: number; lastViewedAt?: string | null; note?: string | null };
+type Order = "newest" | "oldest" | "title";
+type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; note?: string | null; order?: Order };
+
+/** The page's orders as the panel names them (the server's COLLECTION_ORDERS). */
+const ORDERS: { value: Order; label: string; saved: string }[] = [
+  { value: "newest", label: "Newest first", saved: "newest first" },
+  { value: "oldest", label: "Oldest first", saved: "oldest first" },
+  { value: "title", label: "Title A–Z", saved: "by title, A to Z" },
+];
 
 /** The longest note the folder's page shows (the server's COLLECTION_NOTE_MAX). */
 const NOTE_MAX = 500;
@@ -29,6 +37,12 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const noteFieldRef = useRef<HTMLTextAreaElement>(null);
+  // The order picked and not saved yet (shown at once), and one picked while an earlier pick is still saving.
+  const [pendingOrder, setPendingOrder] = useState<Order | null>(null);
+  const orderSaving = useRef(false);
+  const queuedOrder = useRef<Order | null>(null);
+  // A note save and an order save can be under way together; whichever reply is the newer write is the one kept.
+  const keepFresher = (next: Shared) => setShared((prev) => (prev && prev.id === next.id && (prev.updatedAt ?? "") > (next.updatedAt ?? "") ? prev : next));
   // The folder shown now: a reply that arrives after the library moved to another folder is dropped.
   const current = useRef(folder);
   current.current = folder;
@@ -41,6 +55,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setNote("");
     draftDirty.current = false;
     setPageNote("");
+    queuedOrder.current = null;
+    setPendingOrder(null);
   }, [folder]);
 
   // Looked up afresh each time the panel opens (or Try again is pressed), so it never shows a stale link.
@@ -151,7 +167,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       const asked = folder;
       const r = await api<{ collection: Shared }>(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "PATCH", body: JSON.stringify({ note: pageNote }) });
       if (current.current !== asked) return;
-      setShared(r.collection);
+      keepFresher(r.collection);
       draftDirty.current = false;
       setPageNote(r.collection.note ?? "");
       setNote(r.collection.note ? "Note saved. The folder's page shows it under the name." : "Note taken off the folder's page.");
@@ -162,6 +178,39 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       // Save note is disabled once the note is saved (and while it saves), which would leave focus nowhere; it goes
       // back to the note, after the field stops being read-only.
       setTimeout(() => noteFieldRef.current?.focus(), 0);
+    }
+  };
+
+  // Saved as soon as it is picked, and shown picked straight away. A pick made while an earlier one is saving is saved
+  // after it (the latest pick wins); order saves do not wait for a note save. The select is never disabled, which would
+  // drop the focus.
+  const saveOrder = async (order: Order) => {
+    if (!shared) return;
+    setPendingOrder(order);
+    queuedOrder.current = order;
+    if (orderSaving.current) return;
+    orderSaving.current = true;
+    const asked = folder;
+    let saved: Order = shared.order ?? "newest";
+    try {
+      while (queuedOrder.current) {
+        const next: Order = queuedOrder.current;
+        queuedOrder.current = null;
+        if (next === saved) continue;
+        setNote("");
+        const r = await api<{ collection: Shared }>(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "PATCH", body: JSON.stringify({ order: next }) });
+        if (current.current !== asked) return;
+        saved = r.collection.order ?? "newest";
+        // Only the order changed: the stored note comes back too, and a draft being typed is left alone.
+        keepFresher(r.collection);
+        setNote(`The folder's page now lists its videos ${ORDERS.find((o) => o.value === saved)?.saved}.`);
+      }
+    } catch (e) {
+      queuedOrder.current = null;
+      setNote((e as Error).message);
+    } finally {
+      orderSaving.current = false;
+      setPendingOrder(null);
     }
   };
 
@@ -232,7 +281,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
             <p className="mt-2 text-slate-500">Looking for its link…</p>
           ) : shared ? (
             <>
-              <p className="mt-1 text-slate-500">One page lists the folder&apos;s videos whose own links can be sent now, newest first.</p>
+              <p className="mt-1 text-slate-500">One page lists the folder&apos;s videos whose own links can be sent now.</p>
               <p className="mt-1 text-slate-600" data-testid="folder-share-views">
                 {!shared.views ? "Not opened yet." : `Opened ${shared.views === 1 ? "once" : `${shared.views} times`}${shared.lastViewedAt ? `, last on ${formatDate(shared.lastViewedAt)}` : ""}.`}
               </p>
@@ -250,6 +299,28 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                   </button>
                 )}
               </div>
+              {canEdit ? (
+                <div className="mt-3">
+                  <label htmlFor="folder-share-order" className="font-medium text-slate-700">
+                    Order on the page
+                  </label>
+                  <select
+                    id="folder-share-order"
+                    value={pendingOrder ?? shared.order ?? "newest"}
+                    onChange={(e) => void saveOrder(e.target.value as Order)}
+                    className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1"
+                    data-testid="folder-share-order"
+                  >
+                    {ORDERS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="mt-2 text-slate-600">Order on the page: {ORDERS.find((o) => o.value === (shared.order ?? "newest"))?.label}</p>
+              )}
               {canEdit ? (
                 <div className="mt-3">
                   <label htmlFor="folder-share-page-note" className="font-medium text-slate-700">

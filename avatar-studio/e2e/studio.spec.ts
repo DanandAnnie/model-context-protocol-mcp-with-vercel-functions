@@ -4030,6 +4030,63 @@ test("a shared folder's page shows the owner's note under its name, as plain tex
   await visitor.close();
 });
 
+test("a shared folder's page lists its videos in the order the owner picks", async ({ page, browser }) => {
+  const tag = `Ordered ${Date.now().toString(36)}`;
+  const made: { id: string }[] = [];
+  for (const title of ["Charlie tour", "alpha tour", "Bravo tour"]) made.push(await createVideoViaApi(page, title));
+  const stamps: string[] = [];
+  for (const v of made) {
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+    stamps.push((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.createdAt);
+  }
+  // Newest and oldest first are only told apart by when each was made.
+  expect(new Set(stamps).size).toBe(3);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect(collection.order).toBe("newest");
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  const cards = guest.getByTestId("collection-video");
+  await guest.goto(collection.url);
+  await expect(cards).toHaveText([/Bravo tour/, /alpha tour/, /Charlie tour/]);
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const order = page.getByLabel("Order on the page");
+  await expect(order).toHaveValue("newest");
+  // On a slow connection each pick shows at once, and one made while the last is saving is saved after it.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(`**/api/collections/${collection.id}`, async (route) => {
+    if (route.request().method() === "PATCH") await held;
+    await route.continue();
+  });
+  // As a keyboard user does: the select has the focus when its value changes.
+  await order.focus();
+  await order.selectOption({ label: "Title A–Z" });
+  await expect(order).toHaveValue("title");
+  await order.selectOption({ label: "Oldest first" });
+  await expect(order).toHaveValue("oldest");
+  release();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("The folder's page now lists its videos oldest first.");
+  await expect(order).toHaveValue("oldest");
+  await expect(order).toBeFocused();
+  await page.unroute(`**/api/collections/${collection.id}`);
+  await guest.reload();
+  await expect(cards).toHaveText([/Charlie tour/, /alpha tour/, /Bravo tour/]);
+  await order.selectOption({ label: "Title A–Z" });
+  await expect(page.getByTestId("folder-share-note")).toHaveText("The folder's page now lists its videos by title, A to Z.");
+  await guest.reload();
+  await expect(cards).toHaveText([/alpha tour/, /Bravo tour/, /Charlie tour/]);
+  // The API says so, and refuses an order it does not know.
+  const listed = ((await (await page.request.get("/api/collections")).json()).collections as { id: string; order: string }[]).find((c) => c.id === collection.id)!;
+  expect(listed.order).toBe("title");
+  const bad = await page.request.patch(`/api/collections/${collection.id}`, { data: { order: "random" } });
+  expect(bad.status()).toBe(400);
+  expect((await bad.json()).error).toBe("The order is newest, oldest, or title");
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

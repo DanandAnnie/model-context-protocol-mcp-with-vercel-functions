@@ -40,7 +40,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 /**
  * A shared folder's public page: the folder's name and a card for each of its videos whose share link can be sent now,
- * newest first, each opening that video's own share page (which asks for a password or an email where its owner set
+ * in the order its owner chose (newest first unless set), each opening that video's own share page (which asks for a password or an email where its owner set
  * one). Not found once the owner stops sharing the folder.
  */
 export default async function CollectionPage({ params }: { params: Promise<{ id: string }> }) {
@@ -82,7 +82,17 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
           </p>
         )}
         <p className="mt-1 text-sm text-slate-400" data-testid="collection-count">
-          {total === 0 ? "No videos to watch here yet." : total > videos.length ? `The newest ${videos.length} of ${total} videos` : total === 1 ? "1 video" : `${total} videos`}
+          {total === 0
+            ? "No videos to watch here yet."
+            : total > videos.length
+              ? collection.order === "oldest"
+                ? `The oldest ${videos.length} of ${total} videos`
+                : collection.order === "title"
+                  ? `The first ${videos.length} of ${total} videos, by title`
+                  : `The newest ${videos.length} of ${total} videos`
+              : total === 1
+                ? "1 video"
+                : `${total} videos`}
         </p>
         {videos.length > 0 && (
           <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3" data-testid="collection-videos">

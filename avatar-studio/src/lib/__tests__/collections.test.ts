@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, setCollectionNote, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -237,5 +237,26 @@ describe("shared folders", () => {
     const cleared = await setCollectionNote(collection.id, { note: "   " }, owner);
     assert.equal("note" in cleared, false);
     assert.equal((await collectionPage(collection.id)).collection.note, undefined);
+  });
+
+  it("lists the page's videos in the order chosen, and changes the order and the note apart", async () => {
+    for (const v of [made("v1", { title: "Charlie" }), made("v2", { title: "alpha 10" }), made("v3", { title: "Alpha 2" }), made("v4", { title: "charlie" })]) await getStore().put("video", v);
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const titles = async () => (await collectionPage(collection.id)).videos.map((v) => v.title);
+    assert.deepEqual(await titles(), ["charlie", "Alpha 2", "alpha 10", "Charlie"], "newest first by default");
+    await updateCollection(collection.id, { note: "Spring" }, owner);
+    let saved = await updateCollection(collection.id, { order: "title" }, owner);
+    assert.deepEqual([saved.order, saved.note], ["title", "Spring"], "an order alone leaves the note");
+    // Case aside and numbers as numbers; equal titles newest first.
+    assert.deepEqual(await titles(), ["Alpha 2", "alpha 10", "charlie", "Charlie"]);
+    await updateCollection(collection.id, { order: "oldest" }, owner);
+    assert.deepEqual(await titles(), ["Charlie", "alpha 10", "Alpha 2", "charlie"]);
+    saved = await updateCollection(collection.id, { order: "newest", note: "" }, owner);
+    assert.equal("order" in saved, false, "newest is the default, kept as no order");
+    assert.equal("note" in saved, false);
+    assert.equal((await listCollections(owner))[0].order, undefined);
+    await assert.rejects(updateCollection(collection.id, { order: "random" }, owner), (err: Error) => err instanceof ValidationError && err.message === "The order is newest, oldest, or title");
+    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a note, an order, or both");
+    await assert.rejects(updateCollection(collection.id, { order: "title" }, "someone_else"), NotFoundError);
   });
 });

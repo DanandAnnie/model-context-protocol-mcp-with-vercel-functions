@@ -11,5 +11,6 @@ export function collectionJson(c: Collection, origin: string) {
     views: c.views ?? 0,
     lastViewedAt: c.lastViewedAt ?? null,
     note: c.note ?? null,
+    order: c.order ?? "newest",
   };
 }

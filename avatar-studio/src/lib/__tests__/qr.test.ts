@@ -154,6 +154,7 @@ describe("qrWording", () => {
   it("names a video's code by its share link and a presenter's by its talk link", () => {
     assert.deepEqual(qrWording("share", "Open house"), { label: "QR code for the share link", title: "Scan to watch “Open house”" });
     assert.deepEqual(qrWording("talk", "Ask Dana"), { label: "QR code for the talk link", title: "Scan to talk to “Ask Dana”" });
+    assert.deepEqual(qrWording("folder", "Spring listings"), { label: "QR code for the folder link", title: "Scan to see “Spring listings”" });
   });
 
   it("gives a title qrSvg keeps to what an SVG file may hold", () => {

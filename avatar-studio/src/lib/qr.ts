@@ -67,12 +67,14 @@ export function qrDraw(ctx: Pick<CanvasRenderingContext2D, "fillStyle" | "fillRe
   matrix.forEach((row, y) => row.forEach((dark, x) => dark && ctx.fillRect(offset + x * cell, offset + y * cell, cell, cell)));
 }
 
-/** What a code links to: a video's share page, or an interactive presenter's talk page. */
-export type QrSubject = "share" | "talk";
+/** What a code links to: a video's share page, an interactive presenter's talk page, or a shared folder's page. */
+export type QrSubject = "share" | "talk" | "folder";
 
-/** How a code is named on the page (`label`) and inside its SVG file (`title`), for a video or presenter `name`. */
+/** How a code is named on the page (`label`) and inside its SVG file (`title`), for a video, presenter, or folder `name`. */
 export function qrWording(subject: QrSubject, name: string): { label: string; title: string } {
-  return subject === "talk" ? { label: "QR code for the talk link", title: `Scan to talk to “${name}”` } : { label: "QR code for the share link", title: `Scan to watch “${name}”` };
+  if (subject === "talk") return { label: "QR code for the talk link", title: `Scan to talk to “${name}”` };
+  if (subject === "folder") return { label: "QR code for the folder link", title: `Scan to see “${name}”` };
+  return { label: "QR code for the share link", title: `Scan to watch “${name}”` };
 }
 
 /** The most UTF-8 bytes a name's title part takes, so the whole name stays under the 255 bytes macOS and Linux allow. */

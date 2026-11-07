@@ -2,6 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { api, formatDate } from "@/lib/client";
+import { ShareQrCode } from "./ShareQrCode";
 
 type Order = "newest" | "oldest" | "title";
 type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order };
@@ -37,6 +38,13 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const titleDirty = useRef(false);
   const titleFieldRef = useRef<HTMLInputElement>(null);
   const [failed, setFailed] = useState(false);
+  // The QR code of the folder's link, shown on request so the panel stays short.
+  const [showQr, setShowQr] = useState(false);
+  const qrRef = useRef<HTMLDivElement>(null);
+  // Shown below the fields it opens under, which on a phone can be past the bottom of the screen; brought into view.
+  useEffect(() => {
+    if (showQr) qrRef.current?.scrollIntoView({ block: "nearest" });
+  }, [showQr]);
   const [attempt, setAttempt] = useState(0);
   const [shift, setShift] = useState(0);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -73,6 +81,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setShared(undefined);
     setFailed(false);
     setNote("");
+    setShowQr(false);
     draftDirty.current = false;
     setPageNote("");
     titleDirty.current = false;
@@ -87,6 +96,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     if (!open) return;
     let live = true;
     setShared(undefined);
+    // Each opening starts with the code hidden, as the panel is short by default.
+    setShowQr(false);
     setFailed(false);
     setNote("");
     api<{ collections: Shared[] }>("/api/collections")
@@ -156,6 +167,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       const r = await api<{ collection: Shared }>("/api/collections", { method: "POST", body: JSON.stringify({ folder }) });
       if (current.current !== asked) return;
       setShared(r.collection);
+      setShowQr(false);
       setPageNote(r.collection.note ?? "");
       setPageTitle(r.collection.title ?? "");
       setNote("Folder shared. Anyone with the link can see its videos whose own links can be sent.");
@@ -175,6 +187,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       await api(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "DELETE" });
       if (current.current !== asked) return;
       setShared(null);
+      setShowQr(false);
       lastSaved.current = null;
       draftDirty.current = false;
       setPageNote("");
@@ -341,12 +354,27 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                 <a href={shared.url} target="_blank" rel="noopener noreferrer" className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50">
                   Open
                 </a>
+                <button
+                  type="button"
+                  onClick={() => setShowQr((v) => !v)}
+                  aria-expanded={showQr}
+                  aria-controls={showQr ? "folder-share-qr" : undefined}
+                  className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50"
+                >
+                  QR code
+                </button>
                 {canEdit && (
                   <button type="button" onClick={stop} disabled={busy} className="rounded-full border border-red-200 px-3 py-1 font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
                     Stop sharing
                   </button>
                 )}
               </div>
+              {showQr && (
+                <div ref={qrRef} id="folder-share-qr" role="region" aria-label="QR code for the folder" className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2" data-testid="folder-share-qr">
+                  <p className="text-slate-600">Scanning it opens the folder&apos;s page. For a sign at an open house, a flyer, or a slide.</p>
+                  <ShareQrCode url={shared.url} title={shared.title || folder} subject="folder" />
+                </div>
+              )}
               {canEdit ? (
                 <form
                   className="mt-3"

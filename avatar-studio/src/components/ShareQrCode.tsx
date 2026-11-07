@@ -21,16 +21,16 @@ function save(blob: Blob, name: string) {
 }
 
 /**
- * A QR code of a share link (or, with `subject` "talk", a presenter's talk link), for a flyer, a slide, or a sign at an
- * open house: shown on the page, saved as an SVG (sharp at any size) or a 1024-pixel PNG named after the video or
- * presenter, or copied as that PNG to paste straight into a slide.
+ * A QR code of a share link (or, with `subject` "talk", a presenter's talk link, or with "folder", a shared folder's
+ * link), for a flyer, a slide, or a sign at an open house: shown on the page, saved as an SVG (sharp at any size) or a
+ * 1024-pixel PNG named after the video, presenter, or folder, or copied as that PNG to paste straight into a slide.
  */
 export function ShareQrCode({ url, title, subject = "share" }: { url: string; title: string; subject?: QrSubject }) {
   const wording = qrWording(subject, title);
   const matrix = useMemo(() => qrMatrix(url), [url]);
   const path = useMemo(() => qrPath(matrix), [matrix]);
   const side = qrSide(matrix);
-  const stem = `qr-${safeFileStem(title) || (subject === "talk" ? "presenter" : "video")}`;
+  const stem = `qr-${safeFileStem(title) || (subject === "talk" ? "presenter" : subject === "folder" ? "folder" : "video")}`;
   const [err, setErr] = useState<string | null>(null);
   // The link the last copy was of, so the note does not outlive a change to the link.
   const [copied, setCopied] = useState<string | null>(null);

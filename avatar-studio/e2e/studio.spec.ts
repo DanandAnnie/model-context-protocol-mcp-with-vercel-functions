@@ -4136,6 +4136,90 @@ test("a shared folder's page is headed by the owner's title, or by the folder's 
   await visitor.close();
 });
 
+test("a shared folder's panel shows a QR code of its link, named after the page's heading", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const tag = `Coded ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, "Den tour");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const panel = page.getByTestId("folder-share-panel");
+  const toggle = panel.getByRole("button", { name: "QR code" });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(panel.getByTestId("folder-share-qr")).toHaveCount(0);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(toggle).toHaveAttribute("aria-controls", "folder-share-qr");
+  const region = panel.getByRole("region", { name: "QR code for the folder" });
+  await expect(region).toHaveAttribute("id", "folder-share-qr");
+  const qr = region.getByRole("img", { name: "QR code for the folder link" });
+  await expect(qr).toBeVisible();
+  // Without a title the file is named after the folder.
+  let download = page.waitForEvent("download");
+  await region.getByRole("button", { name: "Download SVG" }).click();
+  let file = await download;
+  expect(file.suggestedFilename()).toBe(`qr-${tag}.svg`);
+  let svg = await readFile((await file.path())!, "utf8");
+  expect(svg).toContain(`<title>Scan to see “${tag}”</title>`);
+  expect(svg).toContain(`d="${await qr.locator("path").getAttribute("d")}"`);
+  await expect(panel).toBeVisible();
+  // The PNG scans to the folder's link.
+  download = page.waitForEvent("download");
+  await region.getByRole("button", { name: "Download PNG" }).click();
+  file = await download;
+  const png = (await readFile((await file.path())!)).toString("base64");
+  const text = await page.evaluate(async (data) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${data}`;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 256;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, 0, 0, 256, 256);
+    return Array.from(ctx.getImageData(0, 0, 256, 256).data);
+  }, png);
+  expect(jsQR(new Uint8ClampedArray(text), 256, 256)?.data).toBe(collection.url);
+  // Copy image puts it on the clipboard and leaves the panel open.
+  await region.getByRole("button", { name: "Copy image" }).click();
+  await expect(region.getByTestId("qr-copy-note")).toHaveText("Copied: paste it into a slide, a flyer, or a document.");
+  await expect(panel).toBeVisible();
+  // With a title, the files are named after the page's heading; the panel stays open throughout.
+  await panel.getByLabel("Title on the page").fill("Spring listings tour");
+  await panel.getByRole("button", { name: "Save title" }).click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Title saved. The folder's page is headed “Spring listings tour”.");
+  download = page.waitForEvent("download");
+  await region.getByRole("button", { name: "Download SVG" }).click();
+  file = await download;
+  expect(file.suggestedFilename()).toBe("qr-Spring listings tour.svg");
+  svg = await readFile((await file.path())!, "utf8");
+  expect(svg).toContain("<title>Scan to see “Spring listings tour”</title>");
+  // Hidden again on request; Escape from inside still closes the panel onto its button.
+  await toggle.click();
+  await expect(panel.getByTestId("folder-share-qr")).toHaveCount(0);
+  await toggle.click();
+  await region.getByRole("button", { name: "Copy image" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Share folder" })).toBeFocused();
+  // On a phone, the code is brought into view when it opens below the panel's fields.
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.getByRole("button", { name: "Share folder" }).click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(region.getByRole("img", { name: "QR code for the folder link" })).toBeInViewport();
+  // Stopping and sharing again starts with the code hidden: a new link is not shown unasked.
+  page.once("dialog", (d) => void d.accept());
+  await panel.getByRole("button", { name: "Stop sharing" }).click();
+  await panel.getByRole("button", { name: "Share this folder" }).click();
+  await expect(page.getByTestId("folder-share-url")).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(panel.getByTestId("folder-share-qr")).toHaveCount(0);
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

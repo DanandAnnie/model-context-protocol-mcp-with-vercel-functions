@@ -4209,11 +4209,22 @@ test("a shared folder's panel shows a QR code of its link, named after the page'
   await page.setViewportSize({ width: 375, height: 667 });
   await page.getByRole("button", { name: "Share folder" }).click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  // The whole panel, its title, order and note fields included, is brought on screen as it opens.
-  await expect(panel.getByRole("button", { name: "Save note" })).toBeInViewport();
-  await expect(panel).toBeInViewport({ ratio: 1 });
+  // The whole panel is brought on screen as it opens, below the phone's sticky top bar, not under it.
+  const barBottom = async () => (await page.getByRole("button", { name: "Open menu" }).locator("xpath=..").boundingBox())!.y + (await page.getByRole("button", { name: "Open menu" }).locator("xpath=..").boundingBox())!.height;
+  const onScreen = async () => {
+    const b = (await panel.boundingBox())!;
+    return b.y >= (await barBottom()) - 0.5 && b.y + b.height <= 667 + 0.5;
+  };
+  await expect.poll(onScreen).toBe(true);
   await toggle.click();
   await expect(region.getByRole("img", { name: "QR code for the folder link" })).toBeInViewport();
+  // With the code open the panel is taller than the room it has: it scrolls inside itself, still clear of the bar.
+  expect(await panel.evaluate((e) => e.scrollHeight > e.clientHeight)).toBe(true);
+  await expect.poll(onScreen).toBe(true);
+  const save = panel.getByRole("button", { name: "Save button" });
+  await save.scrollIntoViewIfNeeded();
+  await expect(save).toBeInViewport();
+  await expect.poll(onScreen).toBe(true);
   // Stopping and sharing again starts with the code hidden: a new link is not shown unasked.
   page.once("dialog", (d) => void d.accept());
   await panel.getByRole("button", { name: "Stop sharing" }).click();
@@ -4221,6 +4232,54 @@ test("a shared folder's panel shows a QR code of its link, named after the page'
   await expect(page.getByTestId("folder-share-url")).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
   await expect(panel.getByTestId("folder-share-qr")).toHaveCount(0);
+});
+
+test("a shared folder's page can carry a button the owner sets, in a new tab, and take it off again", async ({ page, browser }) => {
+  const tag = `Button ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, "Garage tour");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect(collection.cta).toBeNull();
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const panel = page.getByTestId("folder-share-panel");
+  const label = panel.getByLabel("Button label");
+  const link = panel.getByLabel("Button link");
+  const save = panel.getByRole("button", { name: "Save button" });
+  await expect(save).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Remove button" })).toHaveCount(0);
+  // A link without its scheme is refused in words, in the status line, and nothing is saved.
+  await label.fill("Book a showing");
+  await link.fill("www.example.com/book");
+  await link.press("Enter");
+  await expect(page.getByTestId("folder-share-note")).toHaveText("The link must start with http:// or https://");
+  expect((await (await page.request.get("/api/collections")).json()).collections.find((c: { id: string }) => c.id === collection.id).cta).toBeNull();
+  await link.fill("https://example.com/book?home=12");
+  await link.press("Enter");
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Button saved. The folder's page shows “Book a showing”.");
+  await expect(save).toBeDisabled();
+  await expect(link).toBeFocused();
+  // A visitor sees it under the heading, opening the link in a new tab.
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  const cta = guest.getByTestId("collection-cta");
+  await expect(cta).toHaveText(/^Book a showing/);
+  await expect(cta).toHaveAttribute("href", "https://example.com/book?home=12");
+  await expect(cta).toHaveAttribute("target", "_blank");
+  await expect(cta).toHaveAttribute("rel", "noreferrer noopener");
+  expect((await (await page.request.get("/api/collections")).json()).collections.find((c: { id: string }) => c.id === collection.id).cta).toEqual({ label: "Book a showing", url: "https://example.com/book?home=12" });
+  // Taken off again; focus goes back to the button's text.
+  await panel.getByRole("button", { name: "Remove button" }).click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Button taken off the folder's page.");
+  await expect(label).toHaveValue("");
+  await expect(label).toBeFocused();
+  await guest.reload();
+  await expect(guest.getByTestId("collection-title")).toHaveText(tag);
+  await expect(guest.getByTestId("collection-cta")).toHaveCount(0);
+  await visitor.close();
 });
 
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {

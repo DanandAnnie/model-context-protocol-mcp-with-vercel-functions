@@ -6,7 +6,8 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
 import { dropEmptyShares, followFolderRename } from "./collections";
-import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, SHARE_CTA_LABEL_MAX, SHARE_CTA_URL_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
+import { shareCtaSchema } from "../share-cta";
+import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
 export { videoNeeds, videoPresenters, videoVoices };
 import type { AgentMessage, AudioClip, Avatar, Backdrop, Background, CaptionCue, DirectedMedia, DirectedScene, LineEdit, LineFixBefore, Scene, Video, VideoRequest, Voice, WatchQuarter } from "../types";
@@ -1083,17 +1084,6 @@ export const sharePasswordSchema = z
   .max(SHARE_PASSWORD_MAX, `The share password can have at most ${SHARE_PASSWORD_MAX} characters`)
   .nullable();
 
-/** A call-to-action button on the share page (its text and where it goes), or null for none. */
-export const shareCtaSchema = z
-  .object({
-    label: z.string().trim().min(1).max(SHARE_CTA_LABEL_MAX),
-    url: z
-      .string()
-      .trim()
-      .max(SHARE_CTA_URL_MAX)
-      .refine((v) => /^https?:\/\/[^\s]+$/i.test(v), "The link must start with http:// or https://"),
-  })
-  .nullable();
 
 /** A cover picture as a `data:image/...` URL (PNG, JPEG, WebP, or GIF; 2 MB decoded), or null for none. */
 const coverDataUrlSchema = z

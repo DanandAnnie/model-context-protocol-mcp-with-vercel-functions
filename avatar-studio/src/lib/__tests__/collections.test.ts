@@ -256,7 +256,7 @@ describe("shared folders", () => {
     assert.equal("note" in saved, false);
     assert.equal((await listCollections(owner))[0].order, undefined);
     await assert.rejects(updateCollection(collection.id, { order: "random" }, owner), (err: Error) => err instanceof ValidationError && err.message === "The order is newest, oldest, or title");
-    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a title, a note, or an order");
+    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a title, a note, an order, or a button");
     await assert.rejects(updateCollection(collection.id, { order: "title" }, "someone_else"), NotFoundError);
   });
 
@@ -285,5 +285,29 @@ describe("shared folders", () => {
     const cleared = await updateCollection(collection.id, { title: " \n " }, owner);
     assert.equal("title" in cleared, false);
     assert.equal((await collectionPage(collection.id)).collection.title, undefined);
+  });
+
+  it("puts a button on the page, kept apart from the title, note, and order, and through a rename", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    await updateCollection(collection.id, { title: "Spring", note: "Hi", order: "oldest" }, owner);
+    const set = await updateCollection(collection.id, { cta: { label: "  Book a showing ", url: " https://example.com/book " } }, owner);
+    assert.deepEqual(set.cta, { label: "Book a showing", url: "https://example.com/book" });
+    assert.deepEqual([set.title, set.note, set.order], ["Spring", "Hi", "oldest"], "a button alone leaves the rest");
+    await renameFolder({ from: "Listings", to: "Sold" }, owner);
+    assert.deepEqual((await collectionPage(collection.id)).collection.cta, { label: "Book a showing", url: "https://example.com/book" });
+    assert.deepEqual((await updateCollection(collection.id, { note: "Bye" }, owner)).cta?.label, "Book a showing", "a note alone leaves the button");
+    for (const [cta, message] of [
+      [{ label: "Go", url: "www.example.com" }, "The link must start with http:// or https://"],
+      [{ label: "Go", url: "javascript:alert(1)" }, "The link must start with http:// or https://"],
+      [{ label: "   ", url: "https://example.com" }, "Give the button some text"],
+      [{ label: "x".repeat(41), url: "https://example.com" }, "Keep the button text to 40 characters"],
+    ] as const) {
+      await assert.rejects(updateCollection(collection.id, { cta }, owner), (err: Error) => err instanceof ValidationError && err.message === message);
+    }
+    await assert.rejects(updateCollection(collection.id, { cta: null }, "someone_else"), NotFoundError);
+    const cleared = await updateCollection(collection.id, { cta: null }, owner);
+    assert.equal("cta" in cleared, false);
+    assert.equal((await collectionPage(collection.id)).collection.cta, undefined);
   });
 });

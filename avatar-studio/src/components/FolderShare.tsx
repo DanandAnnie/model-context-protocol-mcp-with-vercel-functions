@@ -5,7 +5,7 @@ import { api, formatDate } from "@/lib/client";
 import { ShareQrCode } from "./ShareQrCode";
 
 type Order = "newest" | "oldest" | "title";
-type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order };
+type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null };
 
 /** The page's orders as the panel names them (the server's COLLECTION_ORDERS). */
 const ORDERS: { value: Order; label: string; saved: string }[] = [
@@ -18,6 +18,8 @@ const ORDERS: { value: Order; label: string; saved: string }[] = [
 const TITLE_MAX = 100;
 /** The longest note the folder's page shows (the server's COLLECTION_NOTE_MAX). */
 const NOTE_MAX = 500;
+/** The longest button text (the server's SHARE_CTA_LABEL_MAX). */
+const CTA_LABEL_MAX = 40;
 
 /**
  * The library's "Share folder" control for the folder it shows: a public page listing the folder's videos whose
@@ -37,6 +39,15 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const [pageTitle, setPageTitle] = useState("");
   const titleDirty = useRef(false);
   const titleFieldRef = useRef<HTMLInputElement>(null);
+  // The page's button as typed (its text and link), kept the same way.
+  const [ctaLabel, setCtaLabel] = useState("");
+  const [ctaUrl, setCtaUrl] = useState("");
+  const ctaDirty = useRef(false);
+  const ctaFieldRef = useRef<HTMLInputElement>(null);
+  const setCtaDraft = (cta: Shared["cta"]) => {
+    setCtaLabel(cta?.label ?? "");
+    setCtaUrl(cta?.url ?? "");
+  };
   const [failed, setFailed] = useState(false);
   // The QR code of the folder's link, shown on request so the panel stays short.
   const [showQr, setShowQr] = useState(false);
@@ -86,6 +97,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setPageNote("");
     titleDirty.current = false;
     setPageTitle("");
+    ctaDirty.current = false;
+    setCtaDraft(null);
     lastSaved.current = null;
     queuedOrder.current = null;
     setPendingOrder(null);
@@ -108,6 +121,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
         setShared(found);
         if (!draftDirty.current) setPageNote(found?.note ?? "");
         if (!titleDirty.current) setPageTitle(found?.title ?? "");
+        if (!ctaDirty.current) setCtaDraft(found?.cta);
       })
       .catch((e: Error) => {
         if (!live) return;
@@ -176,6 +190,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       setShowQr(false);
       setPageNote(r.collection.note ?? "");
       setPageTitle(r.collection.title ?? "");
+      setCtaDraft(r.collection.cta);
       setNote("Folder shared. Anyone with the link can see its videos whose own links can be sent.");
     } catch (e) {
       setNote((e as Error).message);
@@ -199,6 +214,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       setPageNote("");
       titleDirty.current = false;
       setPageTitle("");
+      ctaDirty.current = false;
+      setCtaDraft(null);
       setNote("The folder's link no longer works.");
     } catch (e) {
       setNote((e as Error).message);
@@ -248,6 +265,28 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     }
   };
 
+  // Saves the button as typed, or takes it off (`remove`).
+  const saveCta = async (remove = false) => {
+    if (!shared) return;
+    setBusy(true);
+    setNote("");
+    try {
+      const asked = folder;
+      const cta = remove ? null : { label: ctaLabel.trim(), url: ctaUrl.trim() };
+      const r = await api<{ collection: Shared }>(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "PATCH", body: JSON.stringify({ cta }) });
+      if (current.current !== asked) return;
+      keepFresher(r.collection);
+      ctaDirty.current = false;
+      setCtaDraft(r.collection.cta);
+      setNote(r.collection.cta ? `Button saved. The folder's page shows “${r.collection.cta.label}”.` : "Button taken off the folder's page.");
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+      refocus(ctaFieldRef.current);
+    }
+  };
+
   // Saved as soon as it is picked, and shown picked straight away. A pick made while an earlier one is saving is saved
   // after it (the latest pick wins); order saves do not wait for a note save. The select is never disabled, which would
   // drop the focus.
@@ -292,6 +331,9 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     }
   };
 
+  // The button as typed differs from the saved one.
+  const ctaUnsaved = !!shared && (ctaLabel.trim() !== (shared.cta?.label ?? "") || ctaUrl.trim() !== (shared.cta?.url ?? ""));
+
   return (
     <span
       ref={wrapRef}
@@ -330,7 +372,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
           role="group"
           aria-label={`Share the folder “${folder}”`}
           style={{ left: shift }}
-          className="absolute top-full z-20 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-lg border focus:outline-none border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg"
+          className="absolute top-full z-20 mt-1 max-h-[calc(100dvh-5.5rem)] w-[min(22rem,calc(100vw-2rem))] scroll-mt-16 overflow-y-auto overscroll-contain lg:max-h-[calc(100dvh-2rem)] lg:scroll-mt-0 rounded-lg border focus:outline-none border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg"
           data-testid="folder-share-panel"
         >
           <p className="font-medium text-slate-900">Share “{folder}”</p>
@@ -489,6 +531,74 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                 shared.note && (
                   <p className="mt-2 whitespace-pre-line text-slate-600" data-testid="folder-share-page-note-text">
                     Note on the page: {shared.note}
+                  </p>
+                )
+              )}
+              {canEdit ? (
+                <form
+                  className="mt-3"
+                  aria-labelledby="folder-share-cta-heading"
+                  // The server says what is wrong with a link, in the panel's status line, rather than a browser bubble.
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!busy && ctaUnsaved) void saveCta();
+                  }}
+                >
+                  <p id="folder-share-cta-heading" className="font-medium text-slate-700">
+                    Button on the page
+                  </p>
+                  <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                    <input
+                      ref={ctaFieldRef}
+                      value={ctaLabel}
+                      maxLength={CTA_LABEL_MAX}
+                      placeholder="Book a showing"
+                      aria-label="Button label"
+                      onChange={(e) => {
+                        ctaDirty.current = true;
+                        setCtaLabel(e.target.value);
+                      }}
+                      readOnly={busy}
+                      className="min-w-0 rounded border border-slate-200 px-2 py-1"
+                      data-testid="folder-share-cta-label"
+                    />
+                    <input
+                      value={ctaUrl}
+                      type="url"
+                      placeholder="https://…"
+                      aria-label="Button link"
+                      onChange={(e) => {
+                        ctaDirty.current = true;
+                        setCtaUrl(e.target.value);
+                      }}
+                      readOnly={busy}
+                      className="min-w-0 rounded border border-slate-200 px-2 py-1"
+                      data-testid="folder-share-cta-url"
+                    />
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-slate-500">Opens in a new tab, above the videos on the page.</span>
+                    <span className="flex gap-2">
+                      {shared.cta && (
+                        <button type="button" onClick={() => void saveCta(true)} disabled={busy} className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50 disabled:opacity-50">
+                          Remove button
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        disabled={busy || !ctaUnsaved || !ctaLabel.trim() || !ctaUrl.trim()}
+                        className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Save button
+                      </button>
+                    </span>
+                  </div>
+                </form>
+              ) : (
+                shared.cta && (
+                  <p className="mt-2 text-slate-600 [overflow-wrap:anywhere]" data-testid="folder-share-cta-text">
+                    Button on the page: {shared.cta.label} ({shared.cta.url})
                   </p>
                 )
               )}

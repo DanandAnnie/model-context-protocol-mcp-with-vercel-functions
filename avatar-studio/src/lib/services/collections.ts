@@ -8,6 +8,7 @@ import { getStore } from "../store";
 import type { Video } from "../types";
 import { MAX_FOLDER_NAME } from "../types";
 import { owned } from "./shared";
+import { shareCtaSchema } from "../share-cta";
 import { purgeDue } from "./videos";
 
 /** The most videos a collection page lists, the first ones in its order. */
@@ -30,6 +31,8 @@ export interface Collection {
   note?: string;
   /** How the page lists the videos; none is newest first. */
   order?: CollectionOrder;
+  /** A call-to-action button above the videos (its text and where it goes, http or https), as on a video's share page. */
+  cta?: { label: string; url: string };
 }
 
 /** One video as a collection page shows it: what its own share page would preview, and no more. */
@@ -54,7 +57,7 @@ export const COLLECTION_ORDERS = ["newest", "oldest", "title"] as const;
 export type CollectionOrder = (typeof COLLECTION_ORDERS)[number];
 /**
  * A change to a shared folder's page: its title and its note (an empty one, or one with nothing visible, takes it off),
- * its order, or any of them together. A field left out is left as it is. The title's and the note's lengths are checked
+ * its order, its button (null takes it off), or any of them together. A field left out is left as it is. The title's and the note's lengths are checked
  * by updateCollection once they are tidied, so spaces that tidying removes do not count against them.
  */
 export const collectionUpdateSchema = z
@@ -62,8 +65,11 @@ export const collectionUpdateSchema = z
     title: z.string().optional(),
     note: z.string().optional(),
     order: z.enum(COLLECTION_ORDERS, { error: "The order is newest, oldest, or title" }).optional(),
+    cta: shareCtaSchema.optional(),
   })
-  .refine((v) => v.title !== undefined || v.note !== undefined || v.order !== undefined, { error: "Send a title, a note, or an order" });
+  .refine((v) => v.title !== undefined || v.note !== undefined || v.order !== undefined || v.cta !== undefined, {
+    error: "Send a title, a note, an order, or a button",
+  });
 
 /**
  * One write at a time per share, in this process: a page view's read-then-write cannot land after the share was
@@ -163,7 +169,7 @@ export async function updateCollection(id: string, input: z.input<typeof collect
   const parsed = collectionUpdateSchema.safeParse(input);
   // Said plainly to an API client too, not only as a schema issue.
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid change");
-  const { order } = parsed.data;
+  const { order, cta } = parsed.data;
   let title = parsed.data.title?.replace(TITLE_STRIP, " ").replace(/\s+/g, " ").trim();
   let note = parsed.data.note
     ?.trim()
@@ -188,6 +194,10 @@ export async function updateCollection(id: string, input: z.input<typeof collect
     if (order !== undefined) {
       if (order === "newest") delete next.order;
       else next.order = order;
+    }
+    if (cta !== undefined) {
+      if (cta) next.cta = cta;
+      else delete next.cta;
     }
     await getStore().put("collection", next);
     return next;

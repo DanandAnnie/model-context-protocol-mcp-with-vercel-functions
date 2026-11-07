@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 import { Lock, Play, Sparkles } from "lucide-react";
 import { NotFoundError, collectionPage, getBrandKit } from "@/lib/services";
-import { formatSeconds } from "@/lib/client";
+import { formatSeconds, isDarkHex } from "@/lib/client";
 import { publicLogoSrc } from "@/lib/brand-logo";
 import { CollectionViewBeacon } from "@/components/CollectionViewBeacon";
 
@@ -95,6 +95,22 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
                 ? "1 video"
                 : `${total} videos`}
         </p>
+        {collection.cta && (
+          // The owner's button, in the brand's colour as on a video's share page; it opens in a new tab.
+          <div className="mt-4">
+            <a
+              href={collection.cta.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              data-testid="collection-cta"
+              className="inline-flex max-w-full items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold shadow-sm [overflow-wrap:anywhere] hover:opacity-90"
+              style={{ background: accent ?? "#4f46e5", color: isDarkHex(accent ?? "#4f46e5") ? "#fff" : "#0f172a" }}
+            >
+              {collection.cta.label}
+              <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+          </div>
+        )}
         {videos.length > 0 && (
           <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3" data-testid="collection-videos">
             {videos.map((v) => (

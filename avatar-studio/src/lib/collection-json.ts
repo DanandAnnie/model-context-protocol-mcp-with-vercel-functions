@@ -1,6 +1,6 @@
 import type { Collection } from "./services/collections";
 
-/** A shared folder as the API shows it to its owner: its public link, counts, title, note, and order. */
+/** A shared folder as the API shows it to its owner: its public link, counts, title, note, order, and button. */
 export function collectionJson(c: Collection, origin: string) {
   return {
     id: c.id,
@@ -13,5 +13,6 @@ export function collectionJson(c: Collection, origin: string) {
     title: c.title ?? null,
     note: c.note ?? null,
     order: c.order ?? "newest",
+    cta: c.cta ?? null,
   };
 }

@@ -4646,6 +4646,88 @@ test("a shared folder's page can be embedded on a website, its cards opening the
   await visitor.close();
 });
 
+test("a shared folder's page of six videos or more can be searched by title, the search kept in its address", async ({ page, browser }) => {
+  const tag = `Search ${Date.now().toString(36)}`;
+  const titles = ["Café on Main", "3 bed on Oak Street", "Oak Street garden", "Loft tour", "Den tour", "Pool house"];
+  const made: Array<{ id: string }> = [];
+  for (const title of titles) made.push(await createVideoViaApi(page, title));
+  for (const v of made) {
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  }
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  const box = guest.getByRole("searchbox", { name: "Search this folder's videos" });
+  const cards = guest.getByTestId("collection-video");
+  const count = guest.getByTestId("collection-search-count");
+  await expect(cards).toHaveCount(6);
+  await expect(count).toHaveText("");
+  // Part of a word, in any case; the count is read out and the address follows without a new history entry.
+  const entries = await guest.evaluate(() => history.length);
+  await box.fill("OAK");
+  await expect(cards).toHaveCount(2);
+  await expect(count).toHaveText("2 of 6 videos");
+  await expect(guest).toHaveURL(/[?&]q=OAK$/);
+  expect(await guest.evaluate(() => history.length)).toBe(entries);
+  // Every word, in any order.
+  await box.fill("oak 3");
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toHaveText(/3 bed on Oak Street/);
+  // Accents aside.
+  await box.fill("cafe");
+  await expect(cards).toHaveText(/Café on Main/);
+  // Nothing found: a way back to every video, the focus kept in the box and the search off the address.
+  await box.fill("zzz");
+  await expect(cards).toHaveCount(0);
+  await expect(guest.getByTestId("collection-search-empty")).toContainText("No video here matches your search.");
+  await expect(count).toHaveText("0 of 6 videos");
+  await guest.getByRole("button", { name: "Clear search" }).click();
+  await expect(cards).toHaveCount(6);
+  await expect(box).toBeFocused();
+  await expect(box).toHaveValue("");
+  await expect.poll(() => new URL(guest.url()).searchParams.has("q")).toBe(false);
+  // Escape empties the box, in browsers whose search fields do not do it themselves (a synthetic key press, which the
+  // browser itself does not act on, checks the page's own handling).
+  await box.fill("loft");
+  await expect(cards).toHaveCount(1);
+  await box.dispatchEvent("keydown", { key: "Escape", bubbles: true });
+  await expect(cards).toHaveCount(6);
+  await expect(box).toHaveValue("");
+  // Back from a video comes back to the same search, whether the card opened it or Play all did (a move within the app,
+  // whose Back restores the page from the router's cache).
+  await box.fill("pool");
+  await expect(cards).toHaveCount(1);
+  await expect(guest).toHaveURL(/[?&]q=pool$/);
+  await guest.getByTestId("collection-play-all").click();
+  await expect(guest).toHaveURL(/\/share\//);
+  await guest.goBack();
+  await expect(box).toHaveValue("pool");
+  await expect(cards).toHaveCount(1);
+  await expect(guest).toHaveURL(/[?&]q=pool$/);
+  await cards.first().click();
+  await expect(guest.getByRole("heading", { name: "Pool house" })).toBeVisible();
+  await guest.goBack();
+  await expect(box).toHaveValue("pool");
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toHaveText(/Pool house/);
+  // A link with a search opens on it, and the embedded view searches too, keeping its own place in the address.
+  await guest.goto(`${collection.url}?q=loft`);
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toHaveText(/Loft tour/);
+  await guest.goto(`${collection.url}?embed=1`);
+  await box.fill("tour");
+  await expect(cards).toHaveCount(2);
+  await expect.poll(() => Object.fromEntries(new URL(guest.url()).searchParams)).toEqual({ embed: "1", q: "tour" });
+  // Down to five videos, the page offers no search and lists every one, whatever the address says.
+  expect((await page.request.patch(`/api/videos/${made[5].id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  await guest.goto(`${collection.url}?q=oak`);
+  await expect(cards).toHaveCount(5);
+  await expect(guest.getByTestId("collection-search")).toHaveCount(0);
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

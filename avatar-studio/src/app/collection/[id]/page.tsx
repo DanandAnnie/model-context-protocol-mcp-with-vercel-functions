@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { Lock, Play, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { NotFoundError, collectionPage, getBrandKit } from "@/lib/services";
-import { formatSeconds, isDarkHex } from "@/lib/client";
+import { isDarkHex } from "@/lib/client";
 import { publicLogoSrc } from "@/lib/brand-logo";
 import { CollectionCta } from "@/components/CollectionCta";
 import { CollectionPlayAll } from "@/components/CollectionPlayAll";
+import { CollectionVideos } from "@/components/CollectionVideos";
 import { CollectionViewBeacon } from "@/components/CollectionViewBeacon";
 
 export const dynamic = "force-dynamic";
@@ -115,31 +116,7 @@ export default async function CollectionPage({ params, searchParams }: { params:
             )}
           </div>
         )}
-        {videos.length > 0 && (
-          <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3" data-testid="collection-videos">
-            {videos.map((v) => (
-              <li key={v.id}>
-                <a href={`/share/${v.id}`} {...(embed ? { target: "_blank", rel: "noopener" } : {})} className="group block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400" data-testid="collection-video">
-                  <div className="relative aspect-video overflow-hidden rounded-xl bg-slate-800">
-                    {v.poster ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={v.poster} alt="" className="h-full w-full object-cover transition group-hover:opacity-90" loading="lazy" />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-slate-500">
-                        {v.locked ? <Lock className="h-8 w-8" aria-hidden /> : <Play className="h-8 w-8" aria-hidden />}
-                      </div>
-                    )}
-                    {v.durationSec != null && (
-                      <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">{formatSeconds(v.durationSec)}</span>
-                    )}
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-slate-100 group-hover:underline">{v.title}</p>
-                  {v.locked && <p className="text-xs text-slate-400">Password protected</p>}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
+        {videos.length > 0 && <CollectionVideos videos={videos} embed={embed} />}
       </section>
     </main>
   );

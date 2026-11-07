@@ -2392,3 +2392,22 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Opening the same video from its card does not start it.
     - A password on the first video moves Play all to the next.
     - A folder down to one video has no Play all.
+- A shared folder's page on a website (`e17ae94`).
+  - **What it does.** The Share folder panel has a Copy embed code button. It copies an iframe of the folder's page that a realtor can paste into their own website's HTML. The iframe fills the width it is pasted into, is 640 pixels tall, and is titled with the page's heading. The status line says "Embed code copied. Paste it into your website's HTML; its videos open in a new tab."
+  - **The embedded view** (`/collection/:id?embed=1`) shows the heading, note, count, the owner's button, and the video cards. It leaves out the page's header and Play all. Its cards open their videos in a new tab, where they play full size.
+  - **Framing.**
+    - A shared folder's page may now be framed by any website, as a video's share page already could. The page holds nothing a framing site could trick a visitor into: no owner controls, no forms, only links and the owner's button.
+    - Every other page of the studio, and its API, still refuses to be framed.
+  - **Counting.**
+    - Opens of the embedded view count among the page's opens, and apart, as `embedViews`, since any site can load it. The panel says "Opened 3 times (once embedded on a website), last on …".
+    - Clicks on the owner's button count as on the page.
+    - On a website on another site, the new tab shows no back link or next video, because the browser does not keep a note made in a frame on another site.
+  - **Review findings fixed before commit.**
+    - Embedded opens were counted as plain opens, so any site could swell the count unseen. They are now counted apart, as a video's embedded views are.
+    - The tests did not check the count, the missing back link in the new tab, the API's refusal to be framed, or the card's `rel`.
+    - The docs described the cookie the wrong way round, and the README's line read as if the videos were embedded.
+  - **Tests.**
+    - A unit test covers the snippet's escaping, and one covers an embedded open counted among the page's opens and apart.
+    - An e2e test copies the embed code from the panel. It checks that the folder page may be framed but the studio and its API may not.
+    - It frames the snippet on a page and checks the heading, cards, and button with no header or Play all, and that the open is counted as embedded.
+    - It then opens a card in a new tab with no back link or next video, and checks that the page itself keeps its header and Play all.

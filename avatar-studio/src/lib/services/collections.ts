@@ -283,7 +283,7 @@ export async function collectionNav(
   from: unknown,
   video: Pick<Video, "id" | "ownerId" | "folder">,
   now = Date.now(),
-): Promise<{ href: string; label: string; next: { href: string; title: string } | null } | null> {
+): Promise<{ href: string; label: string; next: { id: string; href: string; title: string } | null } | null> {
   if (typeof from !== "string" || !/^col_[0-9a-f]{1,64}$/.test(from) || !video.folder) return null;
   const collection = await getStore().get<Collection>("collection", from);
   if (!collection || collection.ownerId !== (video.ownerId ?? LOCAL_OWNER) || collection.folder !== video.folder) return null;
@@ -294,7 +294,7 @@ export async function collectionNav(
   return {
     href: `/collection/${encodeURIComponent(collection.id)}`,
     label: collection.title || collection.folder,
-    next: after ? { href: `/share/${encodeURIComponent(after.id)}`, title: after.title } : null,
+    next: after ? { id: after.id, href: `/share/${encodeURIComponent(after.id)}`, title: after.title } : null,
   };
 }
 

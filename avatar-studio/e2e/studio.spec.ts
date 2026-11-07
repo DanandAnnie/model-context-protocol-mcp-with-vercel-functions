@@ -4404,6 +4404,129 @@ test("a share page opened from a shared folder's page leads on to the folder's n
   await visitor.close();
 });
 
+test("a folder's video played to its end counts down to the next one, which opens and plays, unless the viewer stops it", async ({ page, browser }) => {
+  const tag = `UpNext ${Date.now().toString(36)}`;
+  const made = [];
+  for (const title of ["Garden tour", "Kitchen tour"]) {
+    const v = await createVideoViaApi(page, title);
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+    made.push(v);
+  }
+  const [garden, kitchen] = made;
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  // Newest first: Kitchen, then Garden.
+  await guest.getByTestId("collection-video").first().click();
+  await expect(guest.getByRole("heading", { name: "Kitchen tour" })).toBeVisible();
+  const player = guest.getByTestId("share-player");
+  const upNext = guest.getByTestId("share-up-next");
+  const toEnd = () =>
+    player.evaluate(async (el: HTMLVideoElement) => {
+      el.muted = true;
+      el.currentTime = Math.max(0, el.duration - 0.4);
+      await el.play();
+    });
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.duration)).toBeGreaterThan(1);
+  // Scrubbing to the end while paused is not watching it: no countdown. (Some browsers fire "ended" for that, Chromium
+  // does not, so the test fires it as they would.)
+  await player.evaluate((el: HTMLVideoElement) => {
+    el.currentTime = el.duration;
+    el.dispatchEvent(new Event("ended"));
+  });
+  await guest.waitForTimeout(700);
+  // Counted once, not waited for: a countdown that had started would be gone again once its page moved on.
+  expect(await upNext.count()).toBe(0);
+  // Nor is watching a little, pausing, and dragging to the end.
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.currentTime = 0;
+    await el.play();
+  });
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThan(0.2);
+  await player.evaluate((el: HTMLVideoElement) => {
+    el.pause();
+    el.currentTime = el.duration;
+  });
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.ended)).toBe(true);
+  await player.evaluate((el: HTMLVideoElement) => el.dispatchEvent(new Event("ended")));
+  await guest.waitForTimeout(700);
+  // Counted once, not waited for: a countdown that had started would be gone again once its page moved on.
+  expect(await upNext.count()).toBe(0);
+  // Played to its end: the countdown names the next video, at the top of the screen, and is announced once with the
+  // way to stay; Cancel stops it and the page stays.
+  await toEnd();
+  await expect(upNext).toContainText("Garden tour");
+  await expect(upNext).toContainText(/Up next in [1-5]/);
+  expect((await upNext.boundingBox())!.y).toBeLessThan(100);
+  await expect(guest.getByRole("status").filter({ hasText: "Up next: Garden tour, in 5 seconds. Press Escape to stay on this video." })).toHaveCount(1);
+  await upNext.getByRole("button", { name: "Cancel" }).click();
+  await expect(upNext).toHaveCount(0);
+  await guest.waitForTimeout(5_500);
+  await expect(guest).toHaveURL(new RegExp(`/share/${kitchen.id}$`));
+  await expect(guest.getByTestId("share-next-in-folder")).toContainText("Garden tour");
+  // Escape stops it too, and so does playing the video again.
+  await toEnd();
+  await expect(upNext).toBeVisible();
+  await guest.keyboard.press("Escape");
+  await expect(upNext).toHaveCount(0);
+  await guest.waitForTimeout(5_500);
+  await expect(guest).toHaveURL(new RegExp(`/share/${kitchen.id}$`));
+  await toEnd();
+  await expect(upNext).toBeVisible();
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.currentTime = 0;
+    await el.play();
+  });
+  await expect(upNext).toHaveCount(0);
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  // Left to run, the countdown opens the next video, which starts playing by itself.
+  await toEnd();
+  await expect(upNext).toBeVisible();
+  await expect(guest).toHaveURL(new RegExp(`/share/${garden.id}$`), { timeout: 10_000 });
+  await expect(guest.getByRole("heading", { name: "Garden tour" })).toBeVisible();
+  await expect.poll(() => guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => !el.paused && el.currentTime > 0), { timeout: 10_000 }).toBe(true);
+  // The last video has nothing to count down to; a reload does not start it again.
+  await guest.getByTestId("share-player").evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.currentTime = Math.max(0, el.duration - 0.4);
+    await el.play();
+  });
+  await expect.poll(() => guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.ended)).toBe(true);
+  await guest.waitForTimeout(700);
+  // Counted once, not waited for: a countdown that had started would be gone again once its page moved on.
+  expect(await upNext.count()).toBe(0);
+  await guest.reload();
+  await expect.poll(() => guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThan(0);
+  await guest.waitForTimeout(1_500);
+  expect(await guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.paused)).toBe(true);
+  // A note left behind long ago starts nothing either.
+  await guest.evaluate((id) => sessionStorage.setItem("share-up-next", JSON.stringify({ id, at: Date.now() - 60_000 })), kitchen.id);
+  await guest.goto(`/share/${kitchen.id}`);
+  await expect.poll(() => guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThan(0);
+  await guest.waitForTimeout(1_500);
+  expect(await guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.paused)).toBe(true);
+  expect(await guest.evaluate(() => sessionStorage.getItem("share-up-next"))).toBeNull();
+  // Someone sent the video's address alone gets no countdown at its end.
+  const forwarded = await browser.newContext();
+  const friend = await forwarded.newPage();
+  await friend.goto(`/share/${kitchen.id}`);
+  const theirs = friend.getByTestId("share-player");
+  await expect.poll(() => theirs.evaluate((el: HTMLVideoElement) => el.duration)).toBeGreaterThan(1);
+  await theirs.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.currentTime = Math.max(0, el.duration - 0.4);
+    await el.play();
+  });
+  await expect.poll(() => theirs.evaluate((el: HTMLVideoElement) => el.ended)).toBe(true);
+  await friend.waitForTimeout(700);
+  await expect(friend.getByTestId("share-up-next")).toHaveCount(0);
+  await forwarded.close();
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

@@ -345,8 +345,8 @@ describe("shared folders", () => {
     const { collection } = await shareFolder({ folder: "Listings" }, owner);
     const at = async (id: string) => (await collectionNav(collection.id, (await getStore().get<Video>("video", id))!))?.next ?? null;
     // Newest first (the default): v3, v2, v1; the last has nothing after it, and another folder's video is never next.
-    assert.deepEqual(await at("v3"), { href: "/share/v2", title: "Cellar" });
-    assert.deepEqual(await at("v2"), { href: "/share/v1", title: "Attic 2" });
+    assert.deepEqual(await at("v3"), { id: "v2", href: "/share/v2", title: "Cellar" });
+    assert.deepEqual(await at("v2"), { id: "v1", href: "/share/v1", title: "Attic 2" });
     assert.equal(await at("v1"), null);
     // The page's own order is followed. Oldest first: v1, v2, v3.
     await updateCollection(collection.id, { order: "oldest" }, owner);
@@ -362,7 +362,7 @@ describe("shared folders", () => {
     // A video the page does not list is stepped over: switched off, in the trash, not rendered, or not live yet.
     for (const patch of [{ shareDisabled: true }, { deletedAt: "2026-10-20T00:00:00Z" }, { status: "processing" }, { shareStartsAt: "2999-01-01T00:00:00Z" }] as Partial<Video>[]) {
       await getStore().put("video", made("v2", { title: "Cellar", ...patch }));
-      assert.deepEqual(await at("v3"), { href: "/share/v1", title: "Attic 2" }, JSON.stringify(patch));
+      assert.deepEqual(await at("v3"), { id: "v1", href: "/share/v1", title: "Attic 2" }, JSON.stringify(patch));
     }
   });
 

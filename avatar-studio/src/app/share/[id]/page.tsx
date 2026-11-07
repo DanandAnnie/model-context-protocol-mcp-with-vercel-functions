@@ -24,6 +24,7 @@ import { ShareWatch } from "@/components/ShareWatch";
 import { parseEndTime, parseStartTime, shareSectionLink } from "@/lib/share-time";
 import { isWebm, shareBodyFor } from "@/lib/share-body";
 import { FOLDER_VISIT_COOKIE } from "@/lib/folder-visit";
+import { ShareUpNext, ShareUpNextArrival } from "@/components/ShareUpNext";
 
 export const dynamic = "force-dynamic";
 
@@ -230,6 +231,8 @@ export default async function SharePage({
             <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} start={start} end={end} />
           )
         )}
+        {back && <ShareUpNextArrival videoId={video.id} />}
+        {back?.next && <ShareUpNext href={back.next.href} title={back.next.title} nextId={back.next.id} loop={loop} />}
         {back?.next && (
           <Link
             href={back.next.href}

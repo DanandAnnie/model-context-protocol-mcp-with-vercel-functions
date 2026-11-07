@@ -7,6 +7,7 @@ import { NotFoundError, collectionPage, getBrandKit } from "@/lib/services";
 import { formatSeconds, isDarkHex } from "@/lib/client";
 import { publicLogoSrc } from "@/lib/brand-logo";
 import { CollectionCta } from "@/components/CollectionCta";
+import { CollectionPlayAll } from "@/components/CollectionPlayAll";
 import { CollectionViewBeacon } from "@/components/CollectionViewBeacon";
 
 export const dynamic = "force-dynamic";
@@ -96,10 +97,17 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
                 ? "1 video"
                 : `${total} videos`}
         </p>
-        {collection.cta && (
-          // The owner's button, in the brand's colour as on a video's share page; it opens in a new tab.
-          <div className="mt-4">
-            <CollectionCta collectionId={collection.id} label={collection.cta.label} url={collection.cta.url} background={accent ?? "#4f46e5"} dark={isDarkHex(accent ?? "#4f46e5")} />
+        {(collection.cta || videos.length >= 2) && (
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            {/* Plays the page's videos one after another, from the first listed. */}
+            {videos.length >= 2 && (
+              // From the first video a visitor can watch without a password, so it can start by itself.
+              <CollectionPlayAll collectionId={collection.id} firstId={(videos.find((v) => !v.locked) ?? videos[0]).id} count={videos.length} />
+            )}
+            {/* The owner's button, in the brand's colour as on a video's share page; it opens in a new tab. */}
+            {collection.cta && (
+              <CollectionCta collectionId={collection.id} label={collection.cta.label} url={collection.cta.url} background={accent ?? "#4f46e5"} dark={isDarkHex(accent ?? "#4f46e5")} />
+            )}
           </div>
         )}
         {videos.length > 0 && (

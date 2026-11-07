@@ -4527,6 +4527,61 @@ test("a folder's video played to its end counts down to the next one, which open
   await visitor.close();
 });
 
+test("Play all on a shared folder's page opens the first video playing, and only for a folder with more than one", async ({ page, browser }) => {
+  const tag = `PlayAll ${Date.now().toString(36)}`;
+  const made = [];
+  for (const title of ["Den tour", "Loft tour"]) {
+    const v = await createVideoViaApi(page, title);
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+    made.push(v);
+  }
+  const [den, loft] = made;
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { cta: { label: "Book a showing", url: "https://example.com/book" } } })).status()).toBe(200);
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  const playAll = guest.getByTestId("collection-play-all");
+  // Beside the owner's button, and a link to the first video listed (newest first: Loft).
+  await expect(playAll).toHaveText("Play all");
+  await expect(playAll).toHaveAccessibleName("Play all 2 videos");
+  await expect(playAll).toHaveAttribute("href", `/share/${loft.id}`);
+  await expect(guest.getByTestId("collection-cta")).toBeVisible();
+  // A click that opens a new tab notes nothing in this one.
+  const opened = visitor.waitForEvent("page");
+  await playAll.click({ modifiers: ["Control"] });
+  await (await opened).close();
+  expect(await guest.evaluate(() => sessionStorage.getItem("share-up-next"))).toBeNull();
+  await expect(guest).toHaveURL(collection.url);
+  // It moves within the page rather than reloading it, so browsers that only allow sound after a click still count it.
+  await guest.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
+  await playAll.click();
+  await expect(guest).toHaveURL(new RegExp(`/share/${loft.id}$`));
+  expect(await guest.evaluate(() => (window as unknown as { stayed?: boolean }).stayed)).toBe(true);
+  await expect(guest.getByRole("heading", { name: "Loft tour" })).toBeVisible();
+  await expect.poll(() => guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => !el.paused && el.currentTime > 0), { timeout: 10_000 }).toBe(true);
+  await expect(guest.getByTestId("share-next-in-folder")).toContainText("Den tour");
+  // Opening the same video straight from its card does not start it.
+  await guest.goto(collection.url);
+  await guest.getByTestId("collection-video").first().click();
+  await expect(guest).toHaveURL(new RegExp(`/share/${loft.id}$`));
+  await expect.poll(() => guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThan(0);
+  await guest.waitForTimeout(1_500);
+  expect(await guest.getByTestId("share-player").evaluate((el: HTMLVideoElement) => el.paused)).toBe(true);
+  // With the first listed video behind a password, Play all starts from the first one that is not.
+  expect((await page.request.post("/api/videos/bulk", { data: { action: "password", ids: [loft.id], sharePassword: "open sesame" } })).status()).toBe(200);
+  await guest.goto(collection.url);
+  await expect(playAll).toHaveAttribute("href", `/share/${den.id}`);
+  // A folder down to one video offers no Play all.
+  expect((await page.request.patch(`/api/videos/${den.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  await guest.goto(collection.url);
+  await expect(guest.getByTestId("collection-video")).toHaveCount(1);
+  await expect(playAll).toHaveCount(0);
+  await expect(guest.getByTestId("collection-cta")).toBeVisible();
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

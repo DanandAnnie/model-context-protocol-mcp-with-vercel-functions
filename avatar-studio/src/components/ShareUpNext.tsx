@@ -11,6 +11,18 @@ const PLAY_ON_ARRIVAL = "share-up-next";
 const ARRIVAL_WINDOW_MS = 30_000;
 
 /**
+ * Notes, in this browser tab, that the share page of `videoId` about to open should start playing (see
+ * `ShareUpNextArrival`). Storage refused (a private window, blocked site data) leaves the page to open as usual.
+ */
+export function notePlayOnArrival(videoId: string): void {
+  try {
+    sessionStorage.setItem(PLAY_ON_ARRIVAL, JSON.stringify({ id: videoId, at: Date.now() }));
+  } catch {
+    // The page opens without starting itself.
+  }
+}
+
+/**
  * Watches the share page's player and, once the video plays through to its end, counts down to the next video of the
  * shared folder the viewer came from, then opens it. Play now goes at once; Cancel, Escape, or playing the video again
  * stops the countdown and leaves the page's "Next in" card as it was. A video dragged to its end while paused does not
@@ -34,11 +46,7 @@ export function ShareUpNext({ href, title, nextId, loop = false }: { href: strin
     navigating.current = true;
     stop();
     setOpening(true);
-    try {
-      sessionStorage.setItem(PLAY_ON_ARRIVAL, JSON.stringify({ id: nextId, at: Date.now() }));
-    } catch {
-      // Storage refused (a private window, blocked site data): the next page opens without starting itself.
-    }
+    notePlayOnArrival(nextId);
     router.push(href);
   };
   const goRef = useRef(go);
@@ -150,7 +158,14 @@ export function ShareUpNextArrival({ videoId }: { videoId: string }) {
     if (!noted || noted.id !== videoId || typeof noted.at !== "number" || Date.now() - noted.at > ARRIVAL_WINDOW_MS) return;
     const el = document.getElementById(SHARE_PLAYER_ID);
     // play() waits for the data itself; waiting for "canplay" first can wait forever where nothing loads until asked.
-    if (el instanceof HTMLVideoElement) void el.play().catch(() => undefined);
+    // A browser that will not start it with sound is asked to start it muted: the viewer asked for the videos to play,
+    // and the player's own control turns the sound on.
+    if (el instanceof HTMLVideoElement)
+      void el.play().catch((err: unknown) => {
+        if (!(err instanceof DOMException) || err.name !== "NotAllowedError") return;
+        el.muted = true;
+        void el.play().catch(() => undefined);
+      });
   }, [videoId]);
   return null;
 }

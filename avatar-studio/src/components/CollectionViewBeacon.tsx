@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { FOLDER_VISIT_COOKIE, FOLDER_VISIT_SECONDS } from "@/lib/folder-visit";
+import { noteFolderVisit } from "@/lib/folder-visit";
 
 /**
  * Fires one open beacon when a shared folder's page mounts (failures are ignored; the count is a convenience), and notes
@@ -8,8 +8,7 @@ import { FOLDER_VISIT_COOKIE, FOLDER_VISIT_SECONDS } from "@/lib/folder-visit";
  */
 export function CollectionViewBeacon({ collectionId }: { collectionId: string }) {
   useEffect(() => {
-    const secure = window.location.protocol === "https:" ? "; secure" : "";
-    document.cookie = `${FOLDER_VISIT_COOKIE}=${encodeURIComponent(collectionId)}; path=/share; max-age=${FOLDER_VISIT_SECONDS}; samesite=lax${secure}`;
+    noteFolderVisit(collectionId);
     // Repeats within the server's window are not counted, so a double mount is harmless.
     fetch(`/api/collections/${encodeURIComponent(collectionId)}/view`, { method: "POST", keepalive: true }).catch(() => {});
   }, [collectionId]);

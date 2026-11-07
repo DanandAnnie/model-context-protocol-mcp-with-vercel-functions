@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { chaptersPlayed, type PlayMark } from "@/lib/chapter-play";
 import { SHARE_PLAYER_ID, shareTrackId } from "@/lib/share-player";
 import { startPlays } from "@/lib/share-time";
+import { retentionPoint } from "@/lib/retention";
 import { wellFormed } from "@/lib/text";
 import type { CaptionFont, CaptionLook, CaptionSize, WatchQuarter } from "@/lib/types";
 
@@ -12,7 +13,8 @@ import type { CaptionFont, CaptionLook, CaptionSize, WatchQuarter } from "@/lib/
  * counts every marker up to the one reported, so a seek past three markers is one beacon.
  * It reports too each chapter the viewer plays, once per chapter per mount, through the same queue
  * (see `chaptersPlayed`): one only scrubbed through or landed on while paused does not count, and a
- * muted autoplay (an embed's background loop) counts none until the viewer turns the sound on.
+ * muted autoplay (an embed's background loop) counts none until the viewer turns the sound on. And it reports the furthest
+ * retention point (started, each tenth, the end) the same way as the quarters, for the video page's retention chart.
  */
 export function SharePlayer({
   videoId,
@@ -54,6 +56,10 @@ export function SharePlayer({
   chapters?: Array<{ startMs: number; scene: number }>;
 }) {
   const reported = useRef<WatchQuarter | 0>(0);
+  const reportedPoint = useRef(-1);
+  // Retention follows a viewer who plays from the start: one who began further in (a link's start time, Resume, a seek
+  // before playing) saw nothing of what came before, so their mount reports no retention at all.
+  const fromStart = useRef<boolean | null>(null);
   /** Where the section stops, until the viewer chooses to keep watching past it. */
   const [stopAt, setStopAt] = useState(end);
   const [sectionOver, setSectionOver] = useState(false);
@@ -79,10 +85,18 @@ export function SharePlayer({
   }, []);
   // The chapter and time of the last time update while playing, cleared by a seek.
   const last = useRef<PlayMark>(null);
-  const send = (body: { quarter: WatchQuarter } | { scene: number }) => {
+  const send = (body: { quarter: WatchQuarter } | { scene: number } | { point: number }) => {
     queue.current = queue.current
       .then(() => fetch(`/api/videos/${videoId}/watch`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: true }))
       .then(() => undefined, () => undefined);
+  };
+  const reportPoint = (el: HTMLVideoElement, point: number) => {
+    // A muted autoplay (an embed's background loop) is no viewer until the sound is turned on, as for chapters.
+    if (autoplay && el.muted) return;
+    if (fromStart.current === null) fromStart.current = point === 0;
+    if (!fromStart.current || point <= reportedPoint.current) return;
+    reportedPoint.current = point;
+    send({ point });
   };
   const report = (quarter: WatchQuarter) => {
     if (quarter <= reported.current) return;
@@ -148,6 +162,13 @@ export function SharePlayer({
       data-testid="share-player"
       onTimeUpdate={(e) => {
         const el = e.currentTarget;
+        // Taken before a section's end pauses the player on the update that crosses it, so its last tenth still counts.
+        const wasPlaying = !el.paused;
+        const playedTo = stopAt === undefined ? el.currentTime : Math.min(el.currentTime, stopAt);
+        if (wasPlaying && Number.isFinite(el.duration) && el.duration > 0) {
+          const nearEndNow = loop && el.duration - el.currentTime < 0.5 * Math.max(1, el.playbackRate);
+          reportPoint(el, retentionPoint(playedTo, el.duration, { nearEnd: nearEndNow }));
+        }
         holdSection(el);
         reportChapter(el);
         // Only playback reaches a point: a link's start time, or a seek while paused, moves the playhead without it.
@@ -155,7 +176,8 @@ export function SharePlayer({
         const pct = (el.currentTime / el.duration) * 100;
         // A looping video never ends, so the last half second counts as the end (more of it when played faster, so a
         // time update still lands in it).
-        const reached = loop && el.duration - el.currentTime < 0.5 * Math.max(1, el.playbackRate) ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
+        const nearEnd = loop && el.duration - el.currentTime < 0.5 * Math.max(1, el.playbackRate);
+        const reached = nearEnd ? 100 : pct >= 75 ? 75 : pct >= 50 ? 50 : pct >= 25 ? 25 : 0;
         if (reached) report(reached);
       }}
       onLoadedMetadata={(e) => startAt(e.currentTarget)}
@@ -167,6 +189,8 @@ export function SharePlayer({
       onPlay={leaveSectionNote}
       onEnded={(e) => {
         report(100);
+        // Only a video played to its end: scrubbing to the end while paused fires "ended" too.
+        if (e.currentTarget.played.length > 0) reportPoint(e.currentTarget, 10);
         // A section that runs to the video's own end loops from the section's start.
         if (loop && stopAt !== undefined) {
           const el = e.currentTarget;

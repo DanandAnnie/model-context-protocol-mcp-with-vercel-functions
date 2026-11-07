@@ -1,4 +1,5 @@
 // Video renders. Used by API routes only.
+import { RETENTION_POINTS, retentionCounts } from "../retention";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
@@ -1271,7 +1272,7 @@ function withCounterLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** The counters that beacons own; an owner edit or provider update must never roll them back. */
-const COUNTER_FIELDS = ["views", "embedViews", "lastViewedAt", "viewsByDay", "watch", "chapterViews", "ctaClicks", "lastCtaClickAt"] as const;
+const COUNTER_FIELDS = ["views", "embedViews", "lastViewedAt", "viewsByDay", "watch", "retention", "chapterViews", "ctaClicks", "lastCtaClickAt"] as const;
 /**
  * Fields other writers own, which an edit built from an earlier read must take from the stored
  * record rather than from its own copy: the counters, the subtitle tracks, which a translation adds
@@ -1368,6 +1369,8 @@ export const watchSchema = z.union([
   z.object({ quarter: z.union([z.literal(25), z.literal(50), z.literal(75), z.literal(100)]) }),
   /** The chapter being played, by the scene it opens (from 0). */
   z.object({ scene: z.number().int().min(0).max(MAX_SCENES - 1) }),
+  /** The furthest retention point reached: 0 once playing has started, then each tenth to 10 at the end. */
+  z.object({ point: z.number().int().min(0).max(RETENTION_POINTS - 1) }),
 ]);
 export const WATCH_QUARTERS: readonly WatchQuarter[] = [25, 50, 75, 100];
 
@@ -1396,6 +1399,28 @@ export function recordWatch(
     }
     if (counted) await getStore().put("video", { ...video, watch });
     return { watch, counted };
+  });
+}
+
+/**
+ * Count a viewer reaching a retention point in the share-page player (see `retention.ts`). Every point up to `point`
+ * that the viewer has not been counted for yet is counted in one write, as the quarters are; `gate(p)` is the route's
+ * per-viewer window for each point. The answer says only whether it counted: the counts are the owner's.
+ */
+export function recordRetention(id: string, point: number, gate: (p: number) => boolean = () => true, shareCookie?: string): Promise<{ counted: boolean }> {
+  return withCounterLock(id, async () => {
+    const video = await getStore().get<Video>("video", id);
+    if (!video || shareOffline(video)) throw new NotFoundError(`Video ${id} not found`);
+    if (video.status !== "completed" || !(await shareUnlocked(video, shareCookie))) return { counted: false };
+    const counts = retentionCounts(video.retention);
+    let counted = false;
+    for (let p = 0; p <= point && p < RETENTION_POINTS; p++) {
+      if (!gate(p)) continue;
+      counts[p] += 1;
+      counted = true;
+    }
+    if (counted) await getStore().put("video", { ...video, retention: counts });
+    return { counted };
   });
 }
 

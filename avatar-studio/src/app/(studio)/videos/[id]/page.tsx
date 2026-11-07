@@ -7,6 +7,7 @@ import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Downloa
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { LANGUAGES } from "@/lib/stock";
 import { ViewSparkline } from "@/components/ViewSparkline";
+import { RetentionChart } from "@/components/RetentionChart";
 import { VideoComments } from "@/components/VideoComments";
 import { ReviewPanel } from "@/components/ReviewPanel";
 import { SubtitleLanguages } from "@/components/SubtitleLanguages";
@@ -1113,6 +1114,11 @@ export default function VideoDetailPage() {
                           </span>
                         ))}
                       </span>
+                    </Row>
+                  )}
+                  {video.status === "completed" && (
+                    <Row label="Retention" wrap>
+                      <RetentionChart video={video} />
                     </Row>
                   )}
                   {(video.shareCta || (video.ctaClicks ?? 0) > 0) && (

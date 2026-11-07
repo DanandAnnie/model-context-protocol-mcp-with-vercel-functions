@@ -2095,6 +2095,34 @@ describe("folders and share views", () => {
     await assert.rejects(recordWatch("vid_missing", 25), /not found/);
   });
 
+  it("counts how far viewers get, once per tenth, under the share rules", async () => {
+    const { recordRetention, updateVideo, videoPatchSchema, watchSchema } = await import("../services/videos");
+    const v = await createVideo(req);
+    assert.throws(() => watchSchema.parse({ point: 11 }), /Invalid|Too big/);
+    assert.throws(() => watchSchema.parse({ point: -1 }), /Invalid|Too small/);
+    assert.deepEqual(watchSchema.parse({ point: 0 }), { point: 0 });
+    assert.equal((await recordRetention(v.id, 3)).counted, false, "nothing counts before the render completed");
+    const fresh = await getVideo(v.id, undefined, false);
+    globalThis.__avatarStudioStore!.put("video", { ...fresh, status: "completed" });
+    // One viewer's windows: each point counts once, however the beacons arrive.
+    const seen = new Set<number>();
+    const viewer = (p: number) => (seen.has(p) ? false : (seen.add(p), true));
+    assert.equal((await recordRetention(v.id, 0, viewer)).counted, true);
+    assert.equal((await recordRetention(v.id, 4, viewer)).counted, true, "a jump counts every point up to it, in one write");
+    assert.equal((await recordRetention(v.id, 2, viewer)).counted, false, "nothing left to count for this viewer");
+    assert.deepEqual((await getVideo(v.id, undefined, false)).retention, [1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]);
+    // Another viewer, to the end, landing at once with a third who only started.
+    await Promise.all([recordRetention(v.id, 10), recordRetention(v.id, 0)]);
+    assert.deepEqual((await getVideo(v.id, undefined, false)).retention, [3, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1], "concurrent beacons all land");
+    // An owner edit keeps them.
+    await updateVideo(v.id, videoPatchSchema.parse({ title: "Renamed" }));
+    assert.equal((await getVideo(v.id, undefined, false)).retention?.[0], 3);
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "letmein1" }));
+    assert.equal((await recordRetention(v.id, 5)).counted, false, "a locked link needs the unlock cookie");
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: null, shareDisabled: true }));
+    await assert.rejects(recordRetention(v.id, 5), /not found/, "an offline link answers like the share page");
+  });
+
   it("owner edits and late webhooks never roll the counters back", async () => {
     const { applyAvatarWebhook, updateVideo, videoPatchSchema } = await import("../services/videos");
     const v = await createVideo(req);

@@ -14879,3 +14879,66 @@ test("a share page's playing video follows the viewer down the page as a mini pl
   await page.waitForTimeout(300);
   await expect(mini).toHaveCount(0);
 });
+
+test("the video page shows how far share-page viewers got, tenth by tenth", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Retention ${Date.now().toString(36)}`);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  const retention = page.getByTestId("retention");
+  await page.goto(`/videos/${v.id}`);
+  await expect(retention).toHaveText("No plays on the share page yet");
+  const player = page.getByTestId("share-player");
+  const stored = async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.retention ?? null;
+  // No retention from someone who began further in (a link's start time), from a silent autoplay, or from a scrub to
+  // the end while paused: none of them watched from the start.
+  await page.goto(`/share/${v.id}?t=6`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(6);
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    await el.play();
+  });
+  await page.waitForTimeout(1200);
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  await page.goto(`/share/${v.id}?embed=1&autoplay=1`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime), { timeout: 10_000 }).toBeGreaterThan(1);
+  await page.goto(`/share/${v.id}`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = el.duration));
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.ended)).toBe(true);
+  await page.waitForTimeout(500);
+  expect(await stored()).toBeNull();
+  // A viewer plays a little, skips near the end, and watches to the end: every point counted once.
+  await page.goto(`/share/${v.id}`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    await el.play();
+  });
+  await page.waitForTimeout(1500);
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = el.duration - 1));
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.ended), { timeout: 10_000 }).toBe(true);
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.retention, { timeout: 10_000 }).toEqual(Array(11).fill(1));
+  // Three more viewers (told apart by address): one who only started, one who stopped at 30%, one at 50%.
+  for (const [ip, point] of [["203.0.113.1", 0], ["203.0.113.2", 3], ["203.0.113.3", 5]] as const) {
+    const res = await page.request.post(`/api/videos/${v.id}/watch`, { data: { point }, headers: { "x-forwarded-for": ip } });
+    expect(res.status()).toBe(200);
+  }
+  // A repeat from the same viewer counts nothing more, and a point past the end is refused.
+  await page.request.post(`/api/videos/${v.id}/watch`, { data: { point: 5 }, headers: { "x-forwarded-for": "203.0.113.3" } });
+  expect((await page.request.post(`/api/videos/${v.id}/watch`, { data: { point: 11 } })).status()).toBe(400);
+  expect((await (await page.request.get(`/api/videos/${v.id}`)).json()).video.retention).toEqual([4, 3, 3, 3, 2, 2, 1, 1, 1, 1, 1]);
+  await page.goto(`/videos/${v.id}`);
+  await expect(retention).toHaveAttribute("data-started", "4");
+  await expect(retention).toContainText("4 started · 25% to the end");
+  await expect(retention.locator("[data-share]")).toHaveCount(10);
+  await expect(retention.locator("[data-share]").nth(0)).toHaveAttribute("data-share", "75");
+  await expect(retention.locator("[data-share]").nth(4)).toHaveAttribute("data-share", "50");
+  await expect(retention.locator("[data-share]").nth(9)).toHaveAttribute("data-share", "25");
+  await expect(retention.getByRole("img")).toHaveAccessibleName("Retention: of 4 viewers who started, 25% reached the end");
+  await expect(page.getByTestId("retention-drop")).toHaveText("Most left between the start and 10% (25 points)");
+  // The same figures as a table.
+  await retention.getByText("Retention table").click();
+  const table = page.getByTestId("retention-table");
+  await expect(table.getByRole("row")).toHaveCount(12);
+  await expect(table.getByRole("row", { name: /Started/ })).toContainText("4");
+  await expect(table.getByRole("row", { name: /The end/ })).toContainText("25%");
+});

@@ -2,7 +2,7 @@ import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { cookies } from "next/headers";
 import { beaconAllowed } from "@/lib/beacon";
 import { shareCookieName } from "@/lib/share-lock";
-import { recordChapterView, recordWatch, watchSchema } from "@/lib/services";
+import { recordChapterView, recordRetention, recordWatch, watchSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -15,13 +15,18 @@ const WATCHES_PER_VIDEO = 600;
 /**
  * Public beacon from the share-page player: `{ "quarter": 25 | 50 | 75 | 100 }`, the furthest
  * point reached, every quarter up to it counted once per viewer per window in one write; or
- * `{ "scene": n }`, the chapter being played, by the scene it opens, once per viewer per chapter per window.
+ * `{ "scene": n }`, the chapter being played, by the scene it opens, once per viewer per chapter per window; or
+ * `{ "point": n }`, the furthest retention point (0 started, 1–9 each tenth, 10 the end), every point up to it counted
+ * once per viewer per window.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await ctx.params;
     const body = watchSchema.parse(await readJson(req));
     const unlock = (await cookies()).get(shareCookieName(id))?.value;
+    if ("point" in body) {
+      return json(await recordRetention(id, body.point, (p) => beaconAllowed(req, `retention${p}`, id, WATCHES_PER_VIDEO, WATCH_WINDOW_MS), unlock));
+    }
     if ("scene" in body) {
       const { scene } = body;
       return json(await recordChapterView(id, scene, () => beaconAllowed(req, `chapter${scene}`, id, WATCHES_PER_VIDEO, WATCH_WINDOW_MS), unlock));

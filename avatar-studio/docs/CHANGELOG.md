@@ -2050,3 +2050,29 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - reading only well-formed kept places.
 
     The e2e test checks that seeking without playing keeps nothing, and that a place is kept after playing and offered on reload as a named group. It checks that Resume seeks, plays, and focuses the player, and that Start over clears the place and goes back to the start. It also checks that K pressed on the offer plays with the keyboard on the player, that a place near the end is not kept, and that `?t=`, section links, autoplaying links, and embeds offer nothing.
+- Search the transcript on the share page (`ded00c8`). A viewer can now find a word or phrase in the transcript under the player.
+  - **The box.** A "Search the transcript" box sits over the lines.
+    - Every place the words occur is marked, and the first is current. A count beside the box says "2 of 5", or "No matches". Screen readers hear the count, and the box is described by it.
+    - Enter goes to the next place and Shift+Enter to the one before, going round at either end; ↑ and ↓ buttons do the same. Escape clears the search.
+    - The current place is scrolled into view inside the list, never moving the page. Its line still plays the video from there.
+  - **Matching.** The search ignores case, accents, and runs of spaces, and finds words inside longer ones ("open" finds "opens"). It spells out ligatures ("ﬁ") and "ß", and treats final sigma as sigma.
+    - Accents written as separate characters, and the selectors that set how an emoji is drawn, are marked with the letter they follow.
+    - Marks that change the letter are not dropped: "か" does not find "が", and a Korean syllable does not find others that share its first part.
+    - A match never splits a character outside the basic plane.
+  - **The video and the keyboard.** Typing in the box is never taken for the player's shortcuts. While the viewer steps through matches, the list stays on them rather than following the spoken line. Playing the video (from a line, a key, or the player) or clearing the search makes the list follow the video again. Keys that finish or cancel an input method's composing are left to it.
+  - **Review.** An independent review found four bugs and three lesser points, all fixed:
+    - After a search that found nothing, or once the video played, the list stopped following the spoken line.
+    - A match ended before an accent written apart, an emoji's selector, or a keycap.
+    - A Korean syllable found every syllable sharing its first part.
+    - Enter and Escape acted while an input method was composing.
+    - The count could show a stale number for a moment after a subtitle language switch.
+    - Final sigma, "ß", and ligatures did not match.
+    - Each line scanned every match, which was slow on long transcripts.
+  - **Tests.** Unit tests cover:
+    - case, accents, and spaces, with offsets back into each line;
+    - characters outside the basic plane, accents written apart, emoji selectors, and keycaps;
+    - Hangul, dakuten, final sigma, "ß", and ligatures;
+    - no overlapping marks, the pieces a line is marked in, and the per-line ranges;
+    - stepping round at either end.
+
+    The e2e test searches with case and an accent, and checks the marks, the count, and the current place. It steps with Enter, Shift+Enter, and the buttons. It also checks that typed letters do not play or mute the video, that no matches disables the buttons, and that Escape clears the search with the keyboard kept in the box.

@@ -14609,3 +14609,97 @@ test("a spoken line of a finished video is fixed in place: only that scene re-re
   await page.goto(`/videos/${fresh.id}`);
   await expect(page.getByTestId("line-fixes")).toHaveCount(0);
 });
+
+test("a share page offers to resume where the viewer left off, in this browser", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Resume ${Date.now().toString(36)}`);
+  await expect.poll(async () => ((await (await page.request.get(`/api/videos/${v.id}`)).json()).video as { status: string }).status, { timeout: 20_000 }).toBe("completed");
+  await page.goto(`/share/${v.id}`);
+  const player = page.getByTestId("share-player");
+  const offer = page.getByTestId("share-resume");
+  const kept = () => page.evaluate((id) => (JSON.parse(localStorage.getItem("avatar-studio:share-resume") ?? "{}") as Record<string, { t: number }>)[id]?.t ?? null, v.id);
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await expect(offer).toHaveCount(0);
+  // Opening the page and seeking without playing keeps nothing.
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 6));
+  await page.waitForTimeout(300);
+  expect(await kept()).toBeNull();
+  // Played to six seconds of the twelve, then paused: kept to the second.
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.currentTime = 6;
+    await el.play();
+    el.pause();
+  });
+  await expect.poll(kept).not.toBeNull();
+  const at = (await kept())!;
+  expect(at).toBeGreaterThanOrEqual(6);
+  expect(at).toBeLessThan(8);
+  const label = `0:0${at}`;
+  // Coming back offers it, as a named group.
+  await page.reload();
+  await expect(page.getByRole("group", { name: "Resume watching" })).toBeVisible();
+  await expect(offer).toContainText(`You stopped at ${label} last time.`);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(0);
+  // Resume seeks there and plays, with the keyboard on the player.
+  await offer.getByRole("button", { name: `Resume from ${label}` }).click();
+  await expect(offer).toHaveCount(0);
+  await expect(player).toBeFocused();
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBeGreaterThanOrEqual(at);
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+  await player.evaluate((el: HTMLVideoElement) => {
+    el.pause();
+    el.currentTime = 4;
+  });
+  await player.evaluate((el: HTMLVideoElement) => el.play().then(() => el.pause()));
+  await expect.poll(kept).toBe(4);
+  // Start over clears it, with the keyboard on the player, and the next visit offers nothing.
+  await page.reload();
+  await expect(offer).toContainText("You stopped at 0:04 last time.");
+  // Start over plays from the start even if the player was moved meanwhile.
+  await player.evaluate((el: HTMLVideoElement) => (el.currentTime = 3));
+  await offer.getByRole("button", { name: "Start over" }).click();
+  await expect(offer).toHaveCount(0);
+  await expect(player).toBeFocused();
+  expect(await player.evaluate((el: HTMLVideoElement) => el.currentTime)).toBe(0);
+  expect(await kept()).toBeNull();
+  await page.reload();
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  await expect(offer).toHaveCount(0);
+  // Playing on with K while a button of the offer has the keyboard: the offer goes, and the keyboard is on the player.
+  await page.evaluate((id) => localStorage.setItem("avatar-studio:share-resume", JSON.stringify({ [id]: { t: 5, at: Date.now() } })), v.id);
+  await page.reload();
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await offer.getByRole("button", { name: "Start over" }).focus();
+  await page.keyboard.press("k");
+  await expect(offer).toHaveCount(0);
+  await expect(player).toBeFocused();
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  // Playing on without choosing takes the offer away; a place near the end is not kept.
+  await page.goto("/create");
+  await page.evaluate((id) => localStorage.setItem("avatar-studio:share-resume", JSON.stringify({ [id]: { t: 5, at: Date.now() } })), v.id);
+  await page.goto(`/share/${v.id}`);
+  await expect(offer).toBeVisible();
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.currentTime = 11;
+    await el.play();
+    el.pause();
+  });
+  await expect(offer).toHaveCount(0);
+  await expect.poll(kept).toBeNull();
+  // A link that says where to start, plays a section, or autoplays, or an embed, offers nothing (and leaves the place
+  // alone).
+  await page.goto("/create");
+  await page.evaluate((id) => localStorage.setItem("avatar-studio:share-resume", JSON.stringify({ [id]: { t: 5, at: Date.now() } })), v.id);
+  for (const query of ["?t=2", "?t=2&end=8", "?end=8", "?autoplay=1", "?embed=1"]) {
+    await page.goto(`/share/${v.id}${query}`);
+    await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+    // Once the length is known, when a short video's place would be offered.
+    await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+    await expect(offer).toHaveCount(0);
+  }
+  expect(await kept()).toBe(5);
+});

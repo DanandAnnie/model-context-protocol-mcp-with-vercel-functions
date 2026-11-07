@@ -9,6 +9,7 @@ import { ShareTranscript } from "./ShareTranscript";
 import { ShareChapters } from "./ShareChapters";
 import { ShareKeys } from "./ShareKeys";
 import { ShareMoment } from "./ShareMoment";
+import { ShareResume } from "./ShareResume";
 import { ShareSpeed } from "./ShareSpeed";
 import { ViewBeacon } from "./ViewBeacon";
 
@@ -67,6 +68,8 @@ export function ShareWatch({ body, autoplay, loop, start, end, focus = false, em
           </div>
         )}
       </div>
+      {/* On a plain link only: one that starts at a time or plays a section says where to watch already. */}
+      {!embed && !autoplay && player && start === undefined && end === undefined && <ShareResume playerId={SHARE_PLAYER_ID} videoId={body.videoId} />}
       {!embed && (cta || body.download || moment) && (
         <p className="mt-4 flex flex-wrap items-center gap-3">
           {cta && <ShareCta videoId={body.videoId} label={cta.label} url={cta.url} background={cta.background} dark={cta.dark} />}

@@ -2262,3 +2262,11 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The README sentence attached the opens-per-visitor rule to the QR code.
     - The test did not cover Copy image, `aria-controls`, the panel staying open, or Stop sharing with the code open.
   - **Tests.** A unit case covers the folder wording. A new e2e test covers the toggle and its `aria-controls`, and an SVG named after the folder that draws what the page shows. It also covers a PNG that scans back to the folder's link, Copy image with the panel still open, and the file name following a saved title. Finally it covers Escape from inside the code, the code in view on a 375-pixel phone, and Stop sharing then sharing again starting with the code hidden.
+- QA pass 41: shared folder order, title, and QR code, in a browser (`24534f6`).
+  - **Checked and working.**
+    - **Order.** Two presses of the down arrow on "Order on the page" moved it through Oldest first to Title A–Z. Each pick was saved, and the status line says "The folder's page now lists its videos by title, A to Z." Focus stayed on the select. A visitor then saw "Attic 2", "attic 10", "Kitchen walk".
+    - **Title.** "  Spring listings: 3 homes 🏡  ", saved with Enter, was kept without its outer spaces and with its emoji, and focus stayed in the field. The field's hint is read with it. A 100-character title wraps on a 375-pixel phone with nothing scrolling sideways, and it heads the tab title too.
+    - **QR code.** It opens from the keyboard, and Tab moves on through Download SVG, Download PNG, and Copy image. On a phone the code is in view and nothing scrolls sideways.
+    - **Panel.** Tab order runs Copy link, Open, QR code, Stop sharing, the title, the order, then the note. Tabbing past the last control closes the panel. No console errors or failed requests showed on any page.
+  - **Fixed.** On a 375×667 phone the panel opened with its title, order, and note fields below the bottom of the screen: the panel ended at 836 pixels. It is now brought into view once its contents load, and nothing moves where it already fits.
+  - **Tests.** The QR e2e test now opens the panel on a 375×667 phone and checks that the whole panel and Save note are on screen. Without the fix, the panel ends 169 pixels below the screen.

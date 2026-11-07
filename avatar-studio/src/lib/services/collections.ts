@@ -24,6 +24,8 @@ export interface Collection {
   /** How often the public page was opened (one per visitor per window; see the view route). */
   views?: number;
   lastViewedAt?: string;
+  /** The owner's words for viewers, shown under the folder's name on the public page (plain text). */
+  note?: string;
 }
 
 /** One video as a collection page shows it: what its own share page would preview, and no more. */
@@ -38,6 +40,11 @@ export interface CollectionVideo {
 }
 
 export const collectionSchema = z.object({ folder: z.string().trim().min(1).max(MAX_FOLDER_NAME) });
+
+/** The longest note a shared folder's page shows. */
+export const COLLECTION_NOTE_MAX = 500;
+/** A note for the page; an empty one (or only spaces) takes the note off. */
+export const collectionNoteSchema = z.object({ note: z.string().trim().max(COLLECTION_NOTE_MAX, `Keep the note to ${COLLECTION_NOTE_MAX} characters`) });
 
 /**
  * One write at a time per share, in this process: a page view's read-then-write cannot land after the share was
@@ -116,6 +123,28 @@ export async function shareFolder(input: z.infer<typeof collectionSchema>, owner
 export async function stopSharingFolder(id: string, ownerId: string = LOCAL_OWNER): Promise<void> {
   const share = owned(await getStore().get<Collection>("collection", id), ownerId, `Shared folder ${id}`);
   for (const c of await sharesOf(ownerId)) if (c.folder === share.folder) await removeShare(c.id);
+}
+
+/**
+ * Sets or clears the note a shared folder's page shows under its name. Plain text: line breaks are kept (Windows ones
+ * become plain), spaces at the ends of lines go, and runs of more than one blank line are closed up. Written under the share's lock, so a page view
+ * counted meanwhile is kept.
+ */
+export async function setCollectionNote(id: string, input: z.input<typeof collectionNoteSchema> | unknown, ownerId: string = LOCAL_OWNER): Promise<Collection> {
+  const parsed = collectionNoteSchema.safeParse(input);
+  // Said plainly to an API client too, not only as a schema issue.
+  if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid note");
+  const note = parsed.data.note
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
+  return withShareLock(id, async () => {
+    const share = owned(await getStore().get<Collection>("collection", id), ownerId, `Shared folder ${id}`);
+    const { note: _old, ...rest } = share;
+    const next: Collection = { ...rest, ...(note ? { note } : {}), updatedAt: nowIso() };
+    await getStore().put("collection", next);
+    return next;
+  });
 }
 
 /**

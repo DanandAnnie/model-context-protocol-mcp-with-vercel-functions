@@ -1,6 +1,8 @@
-import { errorResponse } from "@/lib/api-utils";
+import { errorResponse, json, readJson } from "@/lib/api-utils";
+import { publicOrigin } from "@/lib/config";
+import { collectionJson } from "@/lib/collection-json";
 import { requireEditor } from "@/lib/owner";
-import { stopSharingFolder } from "@/lib/services";
+import { setCollectionNote, stopSharingFolder } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,19 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
     const { id } = await ctx.params;
     await stopSharingFolder(id, owner);
     return new Response(null, { status: 204 });
+  } catch (err) {
+    return errorResponse(err);
+  }
+}
+
+/** Sets the note the folder's page shows under its name (`{ "note" }`, up to 500 characters; empty takes it off). Editors only. */
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const owner = await requireEditor();
+    const { id } = await ctx.params;
+    // The service checks the body, so a note that is too long is answered in words.
+    const collection = await setCollectionNote(id, await readJson(req), owner);
+    return json({ collection: collectionJson(collection, publicOrigin(req)) });
   } catch (err) {
     return errorResponse(err);
   }

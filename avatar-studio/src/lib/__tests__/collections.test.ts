@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionView, renameFolder, setCollectionNote, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -217,5 +217,25 @@ describe("shared folders", () => {
     await assert.rejects(recordCollectionView(collection.id), NotFoundError);
     const stored = await getStore().get<{ views?: number }>("collection", collection.id);
     assert.equal(stored?.views, undefined);
+  });
+
+  it("keeps the owner's note for the page: tidied, shown on the page, cleared when empty, and the owner's alone", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const set = await setCollectionNote(collection.id, { note: "  Open house videos  \r\n \r\n\t\r\n\r\nSee you Saturday.  " }, owner);
+    assert.equal(set.note, "Open house videos\n\nSee you Saturday.");
+    assert.equal((await collectionPage(collection.id)).collection.note, "Open house videos\n\nSee you Saturday.");
+    // A view counted between setting the note and renaming the folder is kept, and so is the note.
+    await recordCollectionView(collection.id);
+    await renameFolder({ from: "Listings", to: "Sold" }, owner);
+    const [listed] = await listCollections(owner);
+    assert.deepEqual([listed.folder, listed.note, listed.views], ["Sold", "Open house videos\n\nSee you Saturday.", 1]);
+    await assert.rejects(setCollectionNote(collection.id, { note: "x".repeat(COLLECTION_NOTE_MAX + 1) }, owner), (err: Error) => err instanceof ValidationError && err.message === `Keep the note to ${COLLECTION_NOTE_MAX} characters`);
+    // Spaces around a note of the full length do not count against it.
+    assert.equal((await setCollectionNote(collection.id, { note: `  ${"y".repeat(COLLECTION_NOTE_MAX)}  ` }, owner)).note?.length, COLLECTION_NOTE_MAX);
+    await assert.rejects(setCollectionNote(collection.id, { note: "Mine now" }, "someone_else"), NotFoundError);
+    const cleared = await setCollectionNote(collection.id, { note: "   " }, owner);
+    assert.equal("note" in cleared, false);
+    assert.equal((await collectionPage(collection.id)).collection.note, undefined);
   });
 });

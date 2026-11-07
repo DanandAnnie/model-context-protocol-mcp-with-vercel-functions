@@ -3981,6 +3981,52 @@ test("a shared folder counts the opens of its public page and shows them to the 
   expect((await page.request.post("/api/collections/col_00000000000000000000/view")).status()).toBe(404);
 });
 
+test("a shared folder's page shows the owner's note under its name, as plain text", async ({ page, browser }) => {
+  const tag = `Noted ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, "Hallway tour");
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect(collection.note).toBeNull();
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const field = page.getByLabel("Note on the page");
+  await expect(field).toHaveValue("");
+  const save = page.getByRole("button", { name: "Save note" });
+  await expect(save).toBeDisabled();
+  const typed = "Videos for <b>12 Oak St</b>\nOpen house on Saturday.";
+  await field.fill(typed);
+  await expect(page.getByText(`Shown to viewers under the folder's name. ${typed.length}/500`)).toBeVisible();
+  // Closing the panel before saving keeps the draft for when it opens again.
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Share folder" }).click();
+  await expect(field).toHaveValue(typed);
+  await save.click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Note saved. The folder's page shows it under the name.");
+  await expect(save).toBeDisabled();
+  // A visitor sees it under the name, with its line break and its angle brackets as typed.
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  const note = guest.getByTestId("collection-note");
+  await expect(note).toBeVisible();
+  expect(await note.evaluate((e) => (e as HTMLElement).innerText)).toBe(typed);
+  await expect(note.locator("b")).toHaveCount(0);
+  await expect(guest.locator('meta[name="description"]')).toHaveAttribute("content", "Videos for <b>12 Oak St</b> Open house on Saturday.");
+  // Too long is refused; an empty note takes it off the page.
+  const tooLong = await page.request.patch(`/api/collections/${collection.id}`, { data: { note: "x".repeat(501) } });
+  expect(tooLong.status()).toBe(400);
+  expect((await tooLong.json()).error).toBe("Keep the note to 500 characters");
+  await field.fill("");
+  await save.click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Note taken off the folder's page.");
+  await guest.reload();
+  await expect(guest.getByTestId("collection-title")).toHaveText(tag);
+  await expect(guest.getByTestId("collection-note")).toHaveCount(0);
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

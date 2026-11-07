@@ -3,7 +3,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { api, formatDate } from "@/lib/client";
 
-type Shared = { id: string; folder: string; url: string; views?: number; lastViewedAt?: string | null };
+type Shared = { id: string; folder: string; url: string; views?: number; lastViewedAt?: string | null; note?: string | null };
+
+/** The longest note the folder's page shows (the server's COLLECTION_NOTE_MAX). */
+const NOTE_MAX = 500;
 
 /**
  * The library's "Share folder" control for the folder it shows: a public page listing the folder's videos whose
@@ -15,6 +18,10 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const [shared, setShared] = useState<Shared | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
+  // The note for the folder's public page, as typed (the status line above is `note`).
+  const [pageNote, setPageNote] = useState("");
+  // Typed and not saved yet: the panel closing (Escape, a click elsewhere) and opening again keeps the draft.
+  const draftDirty = useRef(false);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [shift, setShift] = useState(0);
@@ -31,6 +38,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setShared(undefined);
     setFailed(false);
     setNote("");
+    draftDirty.current = false;
+    setPageNote("");
   }, [folder]);
 
   // Looked up afresh each time the panel opens (or Try again is pressed), so it never shows a stale link.
@@ -41,7 +50,12 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setFailed(false);
     setNote("");
     api<{ collections: Shared[] }>("/api/collections")
-      .then((r) => live && setShared(r.collections.find((c) => c.folder === folder) ?? null))
+      .then((r) => {
+        if (!live) return;
+        const found = r.collections.find((c) => c.folder === folder) ?? null;
+        setShared(found);
+        if (!draftDirty.current) setPageNote(found?.note ?? "");
+      })
       .catch((e: Error) => {
         if (!live) return;
         setFailed(true);
@@ -100,6 +114,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       const r = await api<{ collection: Shared }>("/api/collections", { method: "POST", body: JSON.stringify({ folder }) });
       if (current.current !== asked) return;
       setShared(r.collection);
+      setPageNote(r.collection.note ?? "");
       setNote("Folder shared. Anyone with the link can see its videos whose own links can be sent.");
     } catch (e) {
       setNote((e as Error).message);
@@ -117,7 +132,28 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       await api(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "DELETE" });
       if (current.current !== asked) return;
       setShared(null);
+      draftDirty.current = false;
+      setPageNote("");
       setNote("The folder's link no longer works.");
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveNote = async () => {
+    if (!shared) return;
+    setBusy(true);
+    setNote("");
+    try {
+      const asked = folder;
+      const r = await api<{ collection: Shared }>(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "PATCH", body: JSON.stringify({ note: pageNote }) });
+      if (current.current !== asked) return;
+      setShared(r.collection);
+      draftDirty.current = false;
+      setPageNote(r.collection.note ?? "");
+      setNote(r.collection.note ? "Note saved. The folder's page shows it under the name." : "Note taken off the folder's page.");
     } catch (e) {
       setNote((e as Error).message);
     } finally {
@@ -210,6 +246,47 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                   </button>
                 )}
               </div>
+              {canEdit ? (
+                <div className="mt-3">
+                  <label htmlFor="folder-share-page-note" className="font-medium text-slate-700">
+                    Note on the page
+                  </label>
+                  <textarea
+                    id="folder-share-page-note"
+                    value={pageNote}
+                    maxLength={NOTE_MAX}
+                    rows={3}
+                    onChange={(e) => {
+                      draftDirty.current = true;
+                      setPageNote(e.target.value);
+                    }}
+                    // Not while a save is under way: its reply would replace what was typed meanwhile.
+                    readOnly={busy}
+                    aria-describedby="folder-share-page-note-hint"
+                    className="mt-1 w-full rounded border border-slate-200 px-2 py-1"
+                    data-testid="folder-share-page-note"
+                  />
+                  <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                    <span id="folder-share-page-note-hint" className="text-slate-500">
+                      Shown to viewers under the folder&apos;s name. {pageNote.length}/{NOTE_MAX}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={saveNote}
+                      disabled={busy || pageNote.trim() === (shared.note ?? "")}
+                      className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Save note
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                shared.note && (
+                  <p className="mt-2 whitespace-pre-line text-slate-600" data-testid="folder-share-page-note-text">
+                    Note on the page: {shared.note}
+                  </p>
+                )
+              )}
             </>
           ) : canEdit ? (
             <>

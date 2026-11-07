@@ -28,11 +28,13 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const brand = await getBrandKit(page.collection.ownerId);
   const siteName = brand?.name || "Avatar Studio";
   const count = page.total === 1 ? "1 video" : `${page.total} videos`;
+  // The owner's note says what the page is better than a count, where there is one.
+  const description = page.collection.note ? Array.from(page.collection.note.replace(/\s+/g, " ")).slice(0, 200).join("") : `${count} from ${siteName}`;
   return {
     title: `${page.collection.folder} · ${siteName}`,
-    description: `${count} from ${siteName}`,
+    description,
     robots: { index: false, follow: false },
-    openGraph: { title: page.collection.folder, description: `${count} from ${siteName}`, siteName, type: "website" },
+    openGraph: { title: page.collection.folder, description, siteName, type: "website" },
   };
 }
 
@@ -74,6 +76,11 @@ export default async function CollectionPage({ params }: { params: Promise<{ id:
       </header>
       <section className="mx-auto max-w-5xl px-6 pb-16">
         <h1 className="text-xl font-semibold" data-testid="collection-title">{collection.folder}</h1>
+        {collection.note && (
+          <p className="mt-2 max-w-2xl whitespace-pre-line text-sm text-slate-300" data-testid="collection-note">
+            {collection.note}
+          </p>
+        )}
         <p className="mt-1 text-sm text-slate-400" data-testid="collection-count">
           {total === 0 ? "No videos to watch here yet." : total > videos.length ? `The newest ${videos.length} of ${total} videos` : total === 1 ? "1 video" : `${total} videos`}
         </p>

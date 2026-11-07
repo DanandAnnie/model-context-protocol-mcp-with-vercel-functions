@@ -1,19 +1,12 @@
 import { errorResponse, json, readJson } from "@/lib/api-utils";
 import { publicOrigin } from "@/lib/config";
 import { requireEditor, requireOwner } from "@/lib/owner";
-import { collectionSchema, listCollections, shareFolder, type Collection } from "@/lib/services";
+import { collectionSchema, listCollections, shareFolder } from "@/lib/services";
+import { collectionJson } from "@/lib/collection-json";
 
 export const dynamic = "force-dynamic";
 
-const withUrl = (c: Collection, origin: string) => ({
-  id: c.id,
-  folder: c.folder,
-  url: `${origin.replace(/\/$/, "")}/collection/${c.id}`,
-  createdAt: c.createdAt,
-  updatedAt: c.updatedAt,
-  views: c.views ?? 0,
-  lastViewedAt: c.lastViewedAt ?? null,
-});
+const withUrl = collectionJson;
 
 /** The shared folders of the account or workspace, each with its public link. */
 export async function GET(req: Request) {

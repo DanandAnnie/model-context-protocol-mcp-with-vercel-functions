@@ -1,5 +1,5 @@
 // Video renders. Used by API routes only.
-import { RETENTION_POINTS, retentionCounts } from "../retention";
+import { RETENTION_POINTS, retentionCounts, retentionShares } from "../retention";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { newId, nowIso } from "../ids";
@@ -2491,7 +2491,7 @@ export const videoQuerySchema = z.object({
    * `commented` puts the newest note or reply first, by anyone in any thread, resolved ones too; a video without
    * comments comes last. Every order breaks ties newest made first.
    */
-  sort: z.enum(["newest", "oldest", "title", "views", "viewed", "length", "commented"]).default("newest"),
+  sort: z.enum(["newest", "oldest", "title", "views", "viewed", "length", "commented", "kept"]).default("newest"),
   /** Review state in a workspace: "pending" (awaiting an owner), "approved", "changes", or "none" (never asked). */
   review: z.enum(["all", "pending", "approved", "changes", "none"]).default("all"),
   /**
@@ -2609,7 +2609,16 @@ const SORTERS: Record<VideoQuery["sort"], (a: Video, b: Video) => number> = {
   length: (a, b) => (b.durationSec ?? -1) - (a.durationSec ?? -1) || b.createdAt.localeCompare(a.createdAt),
   // Ordered by the comment times filterVideos is given (see byLastComment); on its own, newest made first.
   commented: (a, b) => b.createdAt.localeCompare(a.createdAt),
+  // The largest share of share-page viewers watching to the end first, more starters breaking a tie; a video nobody
+  // has started playing comes after every one somebody has, newest first among them.
+  kept: (a, b) => keptKey(b)[0] - keptKey(a)[0] || keptKey(b)[1] - keptKey(a)[1] || b.createdAt.localeCompare(a.createdAt),
 };
+
+/** The share of the viewers who started that reached the end, and how many started; -1 before anyone started. */
+function keptKey(v: Video): [number, number] {
+  const r = retentionShares(v.retention);
+  return r ? [r.shares[RETENTION_POINTS - 2], r.started] : [-1, 0];
+}
 
 /** Videos with the newest comment first, by `lastAt` (from commentCounts); those with none after, newest made first. */
 function byLastComment(lastAt: Map<string, string>) {

@@ -1528,6 +1528,7 @@ function VideosInner() {
             <option value="viewed">Latest viewer visit</option>
             <option value="length">Longest first</option>
             <option value="commented">Recent comments</option>
+            <option value="kept">Most watched to the end</option>
           </select>
           {/* A render has no length, and no share page, until it finishes, so a length filter or "Not viewed yet" leaves the
               ones in flight out: say so. */}

@@ -3848,6 +3848,31 @@ test("captions, share page, rename, and library filters", async ({ page }) => {
   await expect(page.locator("button[title='Rename']")).toHaveText("Renamed video");
 });
 
+test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
+  const tag = `keptsort${Date.now().toString(36)}`;
+  const kept = await createVideoViaApi(page, `Kept ${tag}`);
+  const left = await createVideoViaApi(page, `Left ${tag}`);
+  const unstarted = await createVideoViaApi(page, `Unstarted ${tag}`);
+  for (const v of [kept, left, unstarted]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  // Both of the first video's viewers reach the end; one of the second's leaves at 40%; nobody starts the third.
+  const watch = (id: string, ip: string, point: number) => page.request.post(`/api/videos/${id}/watch`, { data: { point }, headers: { "x-forwarded-for": ip } });
+  expect((await watch(kept.id, "203.0.113.21", 10)).status()).toBe(200);
+  expect((await watch(kept.id, "203.0.113.22", 10)).status()).toBe(200);
+  expect((await watch(left.id, "203.0.113.23", 10)).status()).toBe(200);
+  expect((await watch(left.id, "203.0.113.24", 4)).status()).toBe(200);
+  const titles = page.locator("a[href^='/videos/vid_'] .truncate");
+  await page.goto("/videos");
+  await page.getByPlaceholder(/Search title/).fill(tag);
+  await expect(titles).toHaveText([`Unstarted ${tag}`, `Left ${tag}`, `Kept ${tag}`]);
+  await page.getByLabel("Sort videos").selectOption({ label: "Most watched to the end" });
+  await expect(titles).toHaveText([`Kept ${tag}`, `Left ${tag}`, `Unstarted ${tag}`]);
+  // The API and the analytics download take the same order.
+  const ids = ((await (await page.request.get(`/api/videos?q=${tag}&sort=kept`)).json()).videos as { id: string }[]).map((v) => v.id);
+  expect(ids).toEqual([kept.id, left.id, unstarted.id]);
+  const sheet = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${tag}&sort=kept`)).text());
+  expect(sheet.rows.map((r) => [r.id, r.reached_100_pct])).toEqual([[kept.id, "100"], [left.id, "50"], [unstarted.id, ""]]);
+});
+
 test("library sorts by date, title, views, latest view, length, and recent comments", async ({ page }) => {
   // The older one has much the longer script, so the length sort has an order to show.
   const older = await createVideoViaApi(page, "Zulu sortcheck", { script: Array.from({ length: 12 }, (_, i) => `This is sentence number ${i + 1} of a longer tour.`).join(" ") });

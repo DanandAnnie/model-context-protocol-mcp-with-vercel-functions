@@ -1,4 +1,4 @@
-// The library's sorts by latest view and by length: videos without one come last, newest first among ties.
+// The library's sorts by latest view, by length, and by the share watched to the end: videos without one come last, newest first among ties.
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -26,6 +26,19 @@ describe("library sorts", () => {
 
   it("puts the longest first, ties newest first, and untimed renders last", () => {
     assert.deepEqual(order("length"), ["never-new", "seen-today", "seen-yesterday", "rendering", "never-old"]);
+  });
+
+  it("puts the largest share watched to the end first, more starters breaking a tie, and the unstarted last", () => {
+    const kept = [
+      made("half-of-two", "2026-10-01T00:00:00Z", { retention: [2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1] }),
+      made("all-of-one", "2026-10-02T00:00:00Z", { retention: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1] }),
+      made("half-of-four", "2026-09-01T00:00:00Z", { retention: [4, 4, 4, 3, 3, 2, 2, 2, 2, 2, 2] }),
+      made("none-to-end", "2026-10-05T00:00:00Z", { retention: [3, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0] }),
+      made("unstarted-new", "2026-10-20T00:00:00Z"),
+      made("unstarted-old", "2026-08-01T00:00:00Z", { retention: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }),
+    ];
+    const ids = filterVideos(kept, videoQuerySchema.parse({ sort: "kept" })).map((v) => v.id);
+    assert.deepEqual(ids, ["all-of-one", "half-of-four", "half-of-two", "none-to-end", "unstarted-new", "unstarted-old"]);
   });
 
   it("sorts the trash by these too, rather than by deletion time", async () => {

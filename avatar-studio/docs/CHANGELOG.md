@@ -2369,3 +2369,26 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - It checks that, left to run, the next video opens and plays by itself.
     - It also covers the last video, a reload, a stale note, and an address sent alone.
     - Dragging to the end (never played, and after watching a little) is checked with the `ended` event some browsers fire for it, and the check was confirmed to fail under the earlier rule.
+- Play all on a shared folder's page (`d60ab2c`).
+  - **What it does.** A shared folder's page that lists two or more videos has a Play all button beside the owner's button. It opens the first video, playing, and each video's "Up next" countdown carries the viewer through the rest in the page's order. A realtor can send one link to a whole open house that plays like a show.
+  - **Starting the first video.**
+    - Play all starts from the first listed video that needs no password, so it can start by itself.
+    - It moves within the page rather than reloading it, so browsers that only allow sound after a click still count the click.
+    - A browser that still refuses sound starts the video muted, and the player's own control turns sound on. This applies to the countdown's next video too.
+    - A video behind an email form starts once the form is sent and play is pressed.
+  - **Kept straight.**
+    - Play all is an ordinary link: a click that opens a new tab or window leaves nothing behind in this tab.
+    - Pressing it notes the folder in the browser itself. If another tab opened a different folder since, or the press came before the page finished loading, the video still knows which folder it belongs to.
+    - Screen readers hear "Play all 2 videos".
+  - **Review findings fixed before commit.**
+    - Play all reloaded the page, which loses the click some browsers need before allowing sound.
+    - It relied on the folder page having noted the folder when it opened.
+    - It could start on a video behind a password.
+    - Its border was faint, and its height did not match the owner's button.
+    - The docs claimed the video always plays with sound.
+  - **Tests.**
+    - An e2e test checks the button's name and link, and that a Ctrl-click opening a new tab notes nothing.
+    - Play all then opens the first video playing, moving within the page.
+    - Opening the same video from its card does not start it.
+    - A password on the first video moves Play all to the next.
+    - A folder down to one video has no Play all.

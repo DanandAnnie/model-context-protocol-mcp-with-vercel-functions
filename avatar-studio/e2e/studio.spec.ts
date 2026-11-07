@@ -5333,7 +5333,7 @@ test("share page offers a download only when the owner allows it", async ({ page
   const analytics = await page.request.get("/api/videos/analytics");
   expect(analytics.headers()["content-type"]).toContain("text/csv");
   const sheet = parseCsv(await analytics.text());
-  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link", "embed_views"]);
+  expect(sheet.columns).toEqual(["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link", "embed_views", "retention_started", "reached_10_pct", "reached_20_pct", "reached_30_pct", "reached_40_pct", "reached_50_pct", "reached_60_pct", "reached_70_pct", "reached_80_pct", "reached_90_pct", "reached_100_pct", "most_left_between", "most_left_points"]);
   const row = sheet.rows.find((r) => r.id === v.id)!;
   expect([row.watched_25, row.watched_50, row.watched_75, row.watched_100, row.cta_clicks]).toEqual(["1", "1", "1", "1", "1"]);
   expect(Number(row.views)).toBeGreaterThan(0);
@@ -14881,7 +14881,8 @@ test("a share page's playing video follows the viewer down the page as a mini pl
 });
 
 test("the video page shows how far share-page viewers got, tenth by tenth", async ({ page }) => {
-  const v = await createVideoViaApi(page, `Retention ${Date.now().toString(36)}`);
+  const title = `Retention ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, title);
   await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   const retention = page.getByTestId("retention");
   await page.goto(`/videos/${v.id}`);
@@ -14941,4 +14942,9 @@ test("the video page shows how far share-page viewers got, tenth by tenth", asyn
   await expect(table.getByRole("row")).toHaveCount(12);
   await expect(table.getByRole("row", { name: /Started/ })).toContainText("4");
   await expect(table.getByRole("row", { name: /The end/ })).toContainText("25%");
+  // The library's analytics file carries the same figures, one column per tenth.
+  const sheet = parseCsv(await (await page.request.get(`/api/videos/analytics?q=${encodeURIComponent(title)}`)).text());
+  const row = sheet.rows.find((r) => r.id === v.id)!;
+  expect([row.retention_started, row.reached_10_pct, row.reached_50_pct, row.reached_100_pct]).toEqual(["4", "75", "50", "25"]);
+  expect([row.most_left_between, row.most_left_points]).toEqual(["0%-10%", "25"]);
 });

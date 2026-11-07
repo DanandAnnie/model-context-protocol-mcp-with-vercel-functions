@@ -3112,6 +3112,17 @@ describe("insights", () => {
     assert.equal(rows[0].share_link, `https://studio.example.com/share/${videos[1].id}`, "no double slash");
     assert.equal(rows[1].views, 0);
     assert.equal(rows[1].finish_rate, undefined, "no views, empty cell");
+    // Retention follows the video page's chart: who started, each tenth's share of them, and where most left.
+    const [kept] = analyticsRows([{ ...videos[0], retention: [10, 10, 9, 8, 8, 6, 5, 5, 4, 3, 2] }], "https://s");
+    assert.equal(kept.retention_started, 10);
+    assert.deepEqual([kept.reached_10_pct, kept.reached_50_pct, kept.reached_100_pct], [100, 60, 20]);
+    assert.equal(kept.most_left_between, "40%-50%");
+    assert.equal(kept.most_left_points, 20);
+    assert.equal(analyticsRows([{ ...videos[0], retention: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3] }], "https://s")[0].most_left_between, undefined, "nobody left, no drop");
+    assert.equal(analyticsRows([{ ...videos[0], retention: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] }], "https://s")[0].most_left_between, "0%-10%", "from the start");
+    assert.equal(rows[1].retention_started, 0, "nobody started");
+    assert.equal(rows[1].reached_10_pct, undefined, "no shares before anyone started");
+    assert.equal(sheet.rows[1].reached_100_pct, "");
     assert.equal(finishRateOf(videos[1]), 3 / 7);
     assert.equal(finishRateOf({ views: 0 }), null);
     assert.equal(finishRateOf({ views: 2, watch: { q25: 9, q50: 9, q75: 9, q100: 9 } }), 1, "never above one when counters disagree");

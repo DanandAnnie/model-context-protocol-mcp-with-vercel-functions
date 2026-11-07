@@ -1,4 +1,5 @@
 // Library analytics computed client-side from the owner's videos. Pure, so it is unit-tested directly.
+import { biggestDrop, retentionShares } from "./retention";
 import type { Video } from "./types";
 
 const DAY_MS = 86_400_000;
@@ -60,7 +61,20 @@ export function viewsInLast(video: Pick<Video, "viewsByDay">, days: number, now 
   return viewsPerDay(video, now, days).reduce((n, d) => n + d.count, 0);
 }
 
-export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link", "embed_views"] as const;
+export const ANALYTICS_COLUMNS = ["id", "title", "status", "created", "folder", "duration_sec", "views", "views_7d", "last_viewed", "watched_25", "watched_50", "watched_75", "watched_100", "finish_rate", "cta_clicks", "share_link", "embed_views", "retention_started", "reached_10_pct", "reached_20_pct", "reached_30_pct", "reached_40_pct", "reached_50_pct", "reached_60_pct", "reached_70_pct", "reached_80_pct", "reached_90_pct", "reached_100_pct", "most_left_between", "most_left_points"] as const;
+
+/** The retention columns' cells: who started, the share reaching each tenth, and where most left; empty before anyone started. */
+function retentionCells(v: Pick<Video, "retention">) {
+  const r = retentionShares(v.retention);
+  const drop = r && biggestDrop(r.shares);
+  const reached = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`reached_${(i + 1) * 10}_pct`, r?.shares[i]])) as Record<`reached_${10 | 20 | 30 | 40 | 50 | 60 | 70 | 80 | 90 | 100}_pct`, number | undefined>;
+  return {
+    retention_started: r?.started ?? 0,
+    ...reached,
+    most_left_between: drop ? `${drop.from * 10}%-${drop.to * 10}%` : undefined,
+    most_left_points: drop?.points,
+  };
+}
 
 /** One spreadsheet row per video: what the owner sees on the video page, in a form that sorts and sums. */
 export function analyticsRows(videos: Video[], base: string, now = Date.now()): Array<Record<(typeof ANALYTICS_COLUMNS)[number], string | number | undefined>> {
@@ -85,6 +99,7 @@ export function analyticsRows(videos: Video[], base: string, now = Date.now()): 
       finish_rate: rate === null ? undefined : Math.round(rate * 100),
       cta_clicks: v.ctaClicks ?? 0,
       share_link: `${origin}/share/${v.id}`,
+      ...retentionCells(v),
     };
   });
 }

@@ -99,7 +99,7 @@ export function Insights({ videos }: { videos: Video[] }) {
           <div className="flex items-baseline justify-between gap-2">
             <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Share views</div>
             {videos.length > 0 && (
-              <a href="/api/videos/analytics" download className="text-xs text-brand-700 hover:underline" title="Views, watch-through, clicks, and share links for every video" data-testid="analytics-csv">
+              <a href="/api/videos/analytics" download className="text-xs text-brand-700 hover:underline" title="Views, watch-through, retention, clicks, and share links for every video" data-testid="analytics-csv">
                 Download CSV
               </a>
             )}

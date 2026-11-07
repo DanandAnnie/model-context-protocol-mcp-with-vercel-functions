@@ -1516,7 +1516,7 @@ function VideosInner() {
           </span>
           {/* Shown only when the file would hold a video: the share analytics of what the library shows, in its order. */}
           {!trash && (data?.matched ?? 0) > 0 && (
-            <a href={analyticsHref} download className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" title="Views, watch-through, clicks, and share links for the videos shown, every match and in this order" data-testid="library-analytics">
+            <a href={analyticsHref} download className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" title="Views, watch-through, retention, clicks, and share links for the videos shown, every match and in this order" data-testid="library-analytics">
               <Download className="h-3 w-3" aria-hidden /> Download analytics
             </a>
           )}

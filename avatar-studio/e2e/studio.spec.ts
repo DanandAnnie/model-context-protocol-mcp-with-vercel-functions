@@ -4323,6 +4323,15 @@ test("a share page opened from a shared folder's page links back to it, and only
   await back.click();
   await expect(guest).toHaveURL(collection.url);
   await expect(guest.getByTestId("collection-title")).toHaveText("Spring listings");
+  // On a phone a long heading wraps, and the arrow stays at the start of its first line.
+  const long = "Open house tours across Washington County, every room and garden, this spring";
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { title: long } })).status()).toBe(200);
+  await guest.setViewportSize({ width: 375, height: 667 });
+  await guest.goto(`/share/${v.id}`);
+  await expect(back).toHaveText(`← Back to “${long}”`);
+  const [link, arrow] = [await back.boundingBox(), await back.locator("span").first().boundingBox()];
+  expect(link!.height).toBeGreaterThan(30);
+  expect(Math.abs(arrow!.y - link!.y)).toBeLessThan(4);
   // Someone the video's address is forwarded to gets the video alone, and a folder's id in the address does nothing.
   const forwarded = await browser.newContext();
   const friend = await forwarded.newPage();

@@ -213,7 +213,7 @@ export default async function SharePage({
       </header>
       <section className="mx-auto max-w-4xl px-6 pb-16">
         {back && (
-          <Link href={back.href} className="mb-3 inline-flex max-w-full items-center gap-1 text-sm text-slate-300 [overflow-wrap:anywhere] hover:text-white hover:underline" data-testid="share-back-to-folder">
+          <Link href={back.href} className="mb-3 inline-flex max-w-full items-start gap-1 text-sm text-slate-300 [overflow-wrap:anywhere] hover:text-white hover:underline" data-testid="share-back-to-folder">
             <span aria-hidden>←</span> Back to “{back.label}”
           </Link>
         )}

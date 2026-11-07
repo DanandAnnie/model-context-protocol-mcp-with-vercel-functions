@@ -4002,9 +4002,12 @@ test("a shared folder's page shows the owner's note under its name, as plain tex
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Share folder" }).click();
   await expect(field).toHaveValue(typed);
-  await save.click();
+  // Saved from the keyboard: the button turns disabled, and focus goes back to the note rather than to nowhere.
+  await save.focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByTestId("folder-share-note")).toHaveText("Note saved. The folder's page shows it under the name.");
   await expect(save).toBeDisabled();
+  await expect(field).toBeFocused();
   // A visitor sees it under the name, with its line break and its angle brackets as typed.
   const visitor = await browser.newContext();
   const guest = await visitor.newPage();

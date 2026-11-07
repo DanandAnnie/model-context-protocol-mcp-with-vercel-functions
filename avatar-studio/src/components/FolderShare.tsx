@@ -28,6 +28,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const wrapRef = useRef<HTMLSpanElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const noteFieldRef = useRef<HTMLTextAreaElement>(null);
   // The folder shown now: a reply that arrives after the library moved to another folder is dropped.
   const current = useRef(folder);
   current.current = folder;
@@ -158,6 +159,9 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       setNote((e as Error).message);
     } finally {
       setBusy(false);
+      // Save note is disabled once the note is saved (and while it saves), which would leave focus nowhere; it goes
+      // back to the note, after the field stops being read-only.
+      setTimeout(() => noteFieldRef.current?.focus(), 0);
     }
   };
 
@@ -252,6 +256,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                     Note on the page
                   </label>
                   <textarea
+                    ref={noteFieldRef}
                     id="folder-share-page-note"
                     value={pageNote}
                     maxLength={NOTE_MAX}

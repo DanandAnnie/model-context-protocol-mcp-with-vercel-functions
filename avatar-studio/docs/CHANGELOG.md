@@ -2330,3 +2330,18 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - **On a phone.** The panel fits within the screen with Save button reachable, and neither the folder's page nor the video's page scrolls sideways. No console errors or failed requests showed, apart from the two refused links.
   - **Fixed.** On a 375-pixel phone, a long folder heading wraps over two or three lines in the back link, and its "←" sat beside the middle line. It now starts the first line.
   - **Tests.** The back-link e2e test now gives the folder a 78-character heading and opens the video at 375×667. It checks that the link wraps and that the arrow is level with its first line. With the old layout the arrow sat 10 pixels lower, and the test fails.
+- Next in the folder, on a video's share page (`c6d2a89`).
+  - **What it does.** A viewer who opened a video from a shared folder's page sees a "Next in “Open houses”" card under the player, naming the next video. It opens that video's page, so a buyer can walk through a realtor's listings one after another. The last listed video shows no card but keeps its "Back to" link.
+  - **Which video is next.** It is the video listed after this one on the folder's page, in that page's order: newest first, oldest first, or by title, whichever the owner picked. Only videos the page lists count, so a video whose link is switched off, in the trash, not rendered yet, or not live yet is stepped over. A video past the page's first 100 has no next.
+  - **When it shows.** The card follows the same rule as the back link. The folder page notes its share in the viewer's browser, and the share must be live, belong to the video's owner, and hold the video. Someone sent a video's address alone sees no card. Embeds never show it. A video behind a password or an email form still shows it, naming only a title the folder's page already lists. Without the note, nothing extra is read.
+  - **Kept straight.** The folder's page and the next link use one helper for which videos are listed and in what order, so they cannot drift apart.
+  - **Review findings fixed before commit.**
+    - The tests' made order and title order were the same, so a next link that ignored the page's order would still have passed. They now differ.
+    - Another folder's video was made last, so a missing folder check could not show up. It is now made first.
+    - The 100-video limit had no test.
+    - The API notes did not say the next link needs the video to be among those the page lists.
+  - **Tests.**
+    - A unit test checks newest first, oldest first, and by title, the last video, another folder's video, and the four ways a video drops off the page.
+    - A second unit test checks the 100-video limit with 101 videos.
+    - Each was checked to fail when the page's order, the folder check, or the limit is taken out.
+    - An e2e test follows the card through a three-video folder and reorders it by title. It also switches one video off and checks that someone sent the address alone sees no card.

@@ -14799,3 +14799,83 @@ test("a share page's transcript is copied or downloaded as text, with times or w
   await page.goto(`/share/${v.id}?embed=1`);
   await expect(page.getByRole("button", { name: "Copy transcript" })).toHaveCount(0);
 });
+
+test("a share page's playing video follows the viewer down the page as a mini player", async ({ page }) => {
+  const v = await createVideoViaApi(page, `Mini ${Date.now().toString(36)}`, { script: "First we open the doors. Then the team walks you through every room. Finally we hand over the keys and the garage remote." });
+  await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.setViewportSize({ width: 480, height: 420 });
+  // "Back to the video" scrolls at once rather than smoothly, so each step starts from where the last one ended.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto(`/share/${v.id}`);
+  const frame = page.getByTestId("share-player-frame");
+  const slot = page.getByTestId("share-player-slot");
+  const player = page.getByTestId("share-player");
+  const mini = page.getByRole("group", { name: "Mini player" });
+  const toBottom = () => page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const toTop = () => page.evaluate(() => window.scrollTo(0, 0));
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await expect.poll(() => player.evaluate((el: HTMLVideoElement) => el.readyState)).toBeGreaterThanOrEqual(1);
+  // Paused, the player stays in its place however far the viewer scrolls.
+  await toBottom();
+  await page.waitForTimeout(300);
+  await expect(frame).not.toHaveAttribute("data-mini", "true");
+  await expect(mini).toHaveCount(0);
+  // Playing and scrolled away: pinned small in the corner, still playing, its place on the page kept.
+  await toTop();
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    el.loop = true;
+    await el.play();
+  });
+  const slotHeight = (await slot.boundingBox())!.height;
+  await toBottom();
+  await expect(frame).toHaveAttribute("data-mini", "true");
+  await expect(mini).toBeVisible();
+  const box = (await frame.boundingBox())!;
+  expect(box.x + box.width).toBeGreaterThan(480 - 40);
+  expect(box.y + box.height).toBeGreaterThan(420 - 40);
+  expect(box.width).toBeLessThanOrEqual(360);
+  expect(box.height).toBeLessThanOrEqual(420 / 2 + 1);
+  expect((await slot.boundingBox())!.height).toBeCloseTo(slotHeight, 0);
+  // Room at the foot of the page, so the end of the page can still be scrolled out from under it.
+  await expect(page.getByTestId("share-mini-room")).toHaveCount(1);
+  expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+  // Back to the video: its place scrolls into view, the player returns to it with the keyboard on it.
+  await mini.getByRole("button", { name: "Back to the video" }).click();
+  await expect(frame).not.toHaveAttribute("data-mini", "true");
+  await expect(player).toBeFocused();
+  expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(false);
+  // Closing pauses the video and puts the player back; it stays put while the viewer reads on.
+  await toBottom();
+  await expect(frame).toHaveAttribute("data-mini", "true");
+  await mini.getByRole("button", { name: "Close the mini player" }).click();
+  await expect(frame).not.toHaveAttribute("data-mini", "true");
+  expect(await player.evaluate((el: HTMLVideoElement) => el.paused)).toBe(true);
+  await player.evaluate((el: HTMLVideoElement) => el.play());
+  await page.waitForTimeout(300);
+  await expect(frame).not.toHaveAttribute("data-mini", "true");
+  // Back at the player, closing is forgotten: the next time it scrolls away, it follows again.
+  await toTop();
+  await page.waitForTimeout(300);
+  await toBottom();
+  await expect(frame).toHaveAttribute("data-mini", "true");
+  // Paused in the corner, it stays there to be played again.
+  await player.evaluate((el: HTMLVideoElement) => el.pause());
+  await page.waitForTimeout(300);
+  await expect(frame).toHaveAttribute("data-mini", "true");
+  // Closed from the keyboard: the keyboard moves to the video rather than being dropped with the buttons.
+  await mini.getByRole("button", { name: "Close the mini player" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(frame).not.toHaveAttribute("data-mini", "true");
+  await expect(player).toBeFocused();
+  await expect(page.getByTestId("share-mini-room")).toHaveCount(0);
+  // An embed is only the player: nothing to scroll away from.
+  await page.goto(`/share/${v.id}?embed=1`);
+  await expect(page.getByTestId("share-keys-status")).toHaveAttribute("data-ready", "true");
+  await player.evaluate(async (el: HTMLVideoElement) => {
+    el.muted = true;
+    await el.play();
+  });
+  await page.waitForTimeout(300);
+  await expect(mini).toHaveCount(0);
+});

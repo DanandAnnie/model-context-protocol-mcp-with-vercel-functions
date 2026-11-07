@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { api } from "@/lib/client";
 
@@ -17,6 +17,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
   const [note, setNote] = useState("");
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [shift, setShift] = useState(0);
+  const wrapRef = useRef<HTMLSpanElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   // The folder shown now: a reply that arrives after the library moved to another folder is dropped.
@@ -49,6 +51,41 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       live = false;
     };
   }, [open, folder, attempt]);
+
+  // The panel opens under its button but moves left as far as it must to stay on screen (16px from either edge), as
+  // the button can sit near the right of a phone's screen. Measured against the library's scrolling <main>, so a
+  // scrollbar is not counted as room, and again after every render: the selects beside the button can appear once the
+  // library loads and push it along its row.
+  const place = () => {
+    const wrap = wrapRef.current;
+    const panel = panelRef.current;
+    if (!wrap || !panel) return;
+    const left = wrap.getBoundingClientRect().left;
+    const box = wrap.closest("main");
+    const right = box ? box.getBoundingClientRect().left + box.clientWidth : document.documentElement.clientWidth;
+    setShift(Math.max(Math.min(0, right - 16 - panel.offsetWidth - left), 16 - left));
+  };
+  useLayoutEffect(() => {
+    if (open) place();
+  });
+  // A resize re-renders it, which places it again.
+  const [, setResized] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const resized = () => setResized((n) => n + 1);
+    window.addEventListener("resize", resized);
+    return () => window.removeEventListener("resize", resized);
+  }, [open]);
+
+  // A click anywhere else closes it, so it never sits over the controls around it.
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    return () => document.removeEventListener("pointerdown", away);
+  }, [open]);
 
   const close = () => {
     setOpen(false);
@@ -101,7 +138,13 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
 
   return (
     <span
+      ref={wrapRef}
       className="relative"
+      onBlur={(e) => {
+        // Focus moving on to another control closes it (it would cover the filters under it); focus leaving the page
+        // (the Open link's new tab, the Stop sharing confirm) does not.
+        if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
       onKeyDown={(e) => {
         // Escape closes the panel from anywhere in it or on its button, whatever the panel holds at the moment.
         if (e.key === "Escape" && open) {
@@ -130,7 +173,8 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
           id="folder-share-panel"
           role="group"
           aria-label={`Share the folder “${folder}”`}
-          className="absolute left-0 top-full z-20 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-lg border focus:outline-none border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg"
+          style={{ left: shift }}
+          className="absolute top-full z-20 mt-1 w-[min(22rem,calc(100vw-2rem))] rounded-lg border focus:outline-none border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-lg"
           data-testid="folder-share-panel"
         >
           <p className="font-medium text-slate-900">Share “{folder}”</p>

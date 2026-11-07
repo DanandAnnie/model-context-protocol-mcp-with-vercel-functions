@@ -3899,6 +3899,46 @@ test("a shared folder is one page of its sendable videos that follows a rename a
   await visitor.close();
 });
 
+test("the share folder panel stays on a phone's screen and closes when focus or a click moves away", async ({ page }) => {
+  const tag = `Pocket ${Date.now().toString(36)}`;
+  const v = await createVideoViaApi(page, "Porch tour");
+  expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  const shareButton = page.getByRole("button", { name: "Share folder" });
+  await shareButton.click();
+  const panel = page.getByTestId("folder-share-panel");
+  await expect(panel.getByRole("button", { name: "Share this folder" })).toBeVisible();
+  // Its whole width is on screen, 16px in from either edge at most.
+  const box = (await panel.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(15.5);
+  expect(box.x + box.width).toBeLessThanOrEqual(375 - 15.5);
+  // Tabbing on past its last control closes it rather than leaving it over the filters.
+  await expect(panel.getByRole("button", { name: "Share this folder" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(panel).toBeHidden();
+  await expect(shareButton).toHaveAttribute("aria-expanded", "false");
+  // A click elsewhere on the page closes it too; a click inside it does not.
+  await shareButton.click();
+  await panel.getByText(`Share “${tag}”`).click();
+  await expect(panel).toBeVisible();
+  await page.getByRole("heading", { name: "My videos" }).click();
+  await expect(panel).toBeHidden();
+  // With room it opens right under its button; narrowing the window moves it back on screen while it is open.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await shareButton.click();
+  await expect(panel.getByRole("button", { name: "Share this folder" })).toBeVisible();
+  expect(Math.abs((await panel.boundingBox())!.x - (await shareButton.boundingBox())!.x)).toBeLessThan(1);
+  await page.setViewportSize({ width: 375, height: 740 });
+  await expect
+    .poll(async () => {
+      const b = (await panel.boundingBox())!;
+      return b.x >= 15.5 && b.x + b.width <= 375 - 15.5;
+    })
+    .toBe(true);
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

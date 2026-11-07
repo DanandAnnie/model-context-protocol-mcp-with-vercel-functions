@@ -2098,3 +2098,18 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - file names with unsafe characters, a `.txt` title, a blank title, and long titles with and without a language.
 
     The e2e test checks that the copy, with times, matches the page's captions under the title. It also checks the download's file name and content, that unticking Times clears the message and copies the words alone, and that an embed has no buttons.
+- QA pass 37: resume watching, transcript search, and transcript copy and download, in a browser (walked on `65fd74a`). The three latest share-page features were walked in a real browser against the demo build, at desktop width and on a phone (375 pixels), with the mouse and the keyboard. The pass covered:
+  - the resume offer: Resume and Start over, by keyboard;
+  - searching the transcript, its count, and its marks;
+  - the Times, Copy transcript, and Download .txt controls;
+  - the tab order down the page;
+  - a long title with accents and a dash.
+
+  Nothing needed fixing:
+  - The page never scrolled sideways.
+  - The transcript's controls wrapped under its heading on a phone.
+  - The tab order ran from the player to Resume, Start over, Speed, the link and shortcut controls, then Times, Copy, Download, and the search box.
+  - Enter on Resume played from the kept place with the keyboard on the player.
+  - No console or HTTP errors appeared.
+
+  One thing looked wrong but was the test machine: the downloaded file of the accented title was named "download". That happens because the machine has no UTF-8 locale. Headless Chromium then cannot write a non-ASCII file name and falls back. With a UTF-8 locale, the same file keeps its full name, accents and dash included. The app needed no change.

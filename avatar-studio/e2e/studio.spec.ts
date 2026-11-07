@@ -4582,6 +4582,66 @@ test("Play all on a shared folder's page opens the first video playing, and only
   await visitor.close();
 });
 
+test("a shared folder's page can be embedded on a website, its cards opening their videos in a new tab", async ({ page, context, browser }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const tag = `Embed ${Date.now().toString(36)}`;
+  const made = [];
+  for (const title of ["Porch tour", "Patio tour"]) {
+    const v = await createVideoViaApi(page, title);
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+    made.push(v);
+  }
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { title: 'Homes "for sale"', cta: { label: "Book a showing", url: "https://example.com/book" } } })).status()).toBe(200);
+  // The panel copies an iframe of the page's embed view, named after its heading.
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const panel = page.getByTestId("folder-share-panel");
+  await panel.getByRole("button", { name: "Copy embed code" }).click();
+  await expect(page.getByTestId("folder-share-note")).toHaveText("Embed code copied. Paste it into your website's HTML; its videos open in a new tab.");
+  const snippet = await page.evaluate(() => navigator.clipboard.readText());
+  expect(snippet).toBe(`<iframe src="${collection.url}?embed=1" width="100%" height="640" style="border:0;max-width:100%" loading="lazy" title="Homes &quot;for sale&quot;"></iframe>`);
+  // The folder's page may be framed; the studio's own pages still may not.
+  expect((await page.request.get(`${collection.url}?embed=1`)).headers()["x-frame-options"]).toBeUndefined();
+  expect((await page.request.get("/videos")).headers()["x-frame-options"]).toBe("DENY");
+  expect((await page.request.get("/api/collections")).headers()["x-frame-options"]).toBe("DENY");
+  // On a website: the heading, the count, and the owner's button, without the page's header or Play all.
+  const visitor = await browser.newContext();
+  const site = await visitor.newPage();
+  await site.setContent(`<h1>Our listings</h1>${snippet}`);
+  const frame = site.frameLocator("iframe");
+  await expect(frame.getByTestId("collection-title")).toHaveText('Homes "for sale"');
+  await expect(frame.getByTestId("collection-video")).toHaveCount(2);
+  await expect(frame.getByTestId("collection-cta")).toBeVisible();
+  await expect(frame.locator("header")).toHaveCount(0);
+  await expect(frame.getByTestId("collection-play-all")).toHaveCount(0);
+  // A card opens its video full size in a new tab.
+  const card = frame.getByTestId("collection-video").first();
+  await expect(card).toHaveAttribute("target", "_blank");
+  await expect(card).toHaveAttribute("rel", "noopener");
+  // The open is counted, and as one framed on a website.
+  await expect
+    .poll(async () => ((await (await page.request.get("/api/collections")).json()).collections as Array<{ id: string; views: number; embedViews: number }>).find((c) => c.id === collection.id))
+    .toMatchObject({ views: 1, embedViews: 1 });
+  const opened = visitor.waitForEvent("page");
+  await card.click();
+  const tab = await opened;
+  await expect(tab).toHaveURL(new RegExp(`/share/${made[1].id}$`));
+  await expect(tab.getByRole("heading", { name: "Patio tour" })).toBeVisible();
+  // A frame on another site cannot leave the folder noted for the new tab, so no way back or on shows there.
+  await expect(tab.getByTestId("share-back-to-folder")).toHaveCount(0);
+  await expect(tab.getByTestId("share-next-in-folder")).toHaveCount(0);
+  // The page itself keeps its header, Play all, and cards that open in the same tab.
+  const direct = await visitor.newPage();
+  await direct.goto(collection.url);
+  await expect(direct.locator("header")).toHaveCount(1);
+  await expect(direct.getByTestId("collection-play-all")).toBeVisible();
+  await expect(direct.getByTestId("collection-video").first()).not.toHaveAttribute("target", "_blank");
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

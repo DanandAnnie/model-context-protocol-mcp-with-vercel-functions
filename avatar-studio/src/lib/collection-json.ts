@@ -9,6 +9,7 @@ export function collectionJson(c: Collection, origin: string) {
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
     views: c.views ?? 0,
+    embedViews: c.embedViews ?? 0,
     lastViewedAt: c.lastViewedAt ?? null,
     title: c.title ?? null,
     note: c.note ?? null,

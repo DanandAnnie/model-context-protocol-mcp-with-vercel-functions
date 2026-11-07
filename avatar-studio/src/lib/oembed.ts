@@ -33,6 +33,15 @@ export function sectionEmbedSnippet(shareUrl: string, aspect: AspectRatio, title
   return `<iframe src="${escapeHtml(`${shareUrl}?${query}`)}" width="${width}" height="${height}" style="border:0;max-width:100%" allow="fullscreen; picture-in-picture" allowfullscreen title="${escapeHtml(title)}"></iframe>`;
 }
 
+/**
+ * The iframe that places a shared folder's page on a website: the page's embed view (`?embed=1`, cards open their
+ * videos in a new tab), the full width of where it is pasted and tall enough for two rows of cards, with its address
+ * and title escaped. `folderUrl` is the folder's page (`…/collection/:id`).
+ */
+export function folderEmbedSnippet(folderUrl: string, title: string): string {
+  return `<iframe src="${escapeHtml(`${folderUrl}?embed=1`)}" width="100%" height="640" style="border:0;max-width:100%" loading="lazy" title="${escapeHtml(title)}"></iframe>`;
+}
+
 /** A consumer's `maxwidth` or `maxheight`: a whole number of pixels from 1, or no limit for anything else. */
 export function sizeLimit(raw: string | null): number | undefined {
   if (!raw || !/^\d{1,5}$/.test(raw.trim())) return undefined;

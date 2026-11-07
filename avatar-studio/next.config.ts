@@ -21,10 +21,12 @@ const nextConfig: NextConfig = {
       { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=()" },
     ];
     return [
-      // Share pages may be embedded anywhere (the "Embed" snippet relies on it).
+      // Share pages and shared folder pages may be embedded anywhere (their "Embed" snippets rely on it); neither
+      // carries an action a framing site could trick a visitor into.
       { source: "/share/:path*", headers: common },
+      { source: "/collection/:path*", headers: common },
       // Everything else refuses to be framed.
-      { source: "/((?!share/|talk/).*)", headers: [...common, { key: "X-Frame-Options", value: "DENY" }] },
+      { source: "/((?!share/|talk/|collection/).*)", headers: [...common, { key: "X-Frame-Options", value: "DENY" }] },
     ];
   },
 };

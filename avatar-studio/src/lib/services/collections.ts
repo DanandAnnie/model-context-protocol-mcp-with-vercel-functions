@@ -24,6 +24,8 @@ export interface Collection {
   updatedAt: string;
   /** How often the public page was opened (one per visitor per window; see the view route). */
   views?: number;
+  /** Of `views`, those of the page framed on another website (its embed code), so the owner can tell them apart. */
+  embedViews?: number;
   lastViewedAt?: string;
   /** The heading of the public page in place of the folder's name (one line of plain text); none shows the name. */
   title?: string;
@@ -238,17 +240,24 @@ export async function followFolderRename(from: string, to: string, ownerId: stri
 }
 
 /**
- * Counts an open of a shared folder's public page. Public: no owner check. A share whose folder holds no video (its
+ * Counts an open of a shared folder's public page, and of those, the ones framed on another website (`place` "embed",
+ * which any site can load, so the owner sees them apart). Public: no owner check. A share whose folder holds no video (its
  * page answers not found) is a NotFoundError and counts nothing. `gate` is the route's per-visitor window, asked only
  * for a page that shows, so a visit to a dead link does not use up the visitor's slot.
  */
-export function recordCollectionView(id: string, gate: () => boolean = () => true, now = Date.now()): Promise<{ views: number; counted: boolean }> {
+export function recordCollectionView(
+  id: string,
+  gate: () => boolean = () => true,
+  now = Date.now(),
+  place: "page" | "embed" = "page",
+): Promise<{ views: number; counted: boolean }> {
   return withShareLock(id, async () => {
     const collection = await getStore().get<Collection>("collection", id);
     if (!collection || !foldersHeld(await videosOf(collection.ownerId), now).has(collection.folder)) throw new NotFoundError("Collection not found");
     if (!gate()) return { views: collection.views ?? 0, counted: false };
     const views = (collection.views ?? 0) + 1;
-    await getStore().put("collection", { ...collection, views, lastViewedAt: new Date(now).toISOString() });
+    const embedViews = (collection.embedViews ?? 0) + (place === "embed" ? 1 : 0);
+    await getStore().put("collection", { ...collection, views, ...(embedViews ? { embedViews } : {}), lastViewedAt: new Date(now).toISOString() });
     return { views, counted: true };
   });
 }

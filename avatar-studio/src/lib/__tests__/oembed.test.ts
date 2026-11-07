@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { embedSize, oembedFor, sectionEmbedSnippet, shareLinkTarget, sizeLimit } from "../oembed";
+import { embedSize, folderEmbedSnippet, oembedFor, sectionEmbedSnippet, shareLinkTarget, sizeLimit } from "../oembed";
 
 const BASE = "https://studio.example.com";
 
@@ -120,5 +120,14 @@ describe("sectionEmbedSnippet", () => {
     // What the embed asks for, the share page reads back as the same section.
     const src = /src="([^"]+)"/.exec(html)![1].replace(/&amp;/g, "&");
     assert.deepEqual(shareLinkTarget(src, [BASE]), { id: "vid_1", start: 65, end: 90 });
+  });
+});
+
+describe("folderEmbedSnippet", () => {
+  it("frames the folder page's embed view across the space it is pasted into, its address and title escaped", () => {
+    assert.equal(
+      folderEmbedSnippet(`${BASE}/collection/col_1`, 'Spring "homes" & <lofts>'),
+      `<iframe src="${BASE}/collection/col_1?embed=1" width="100%" height="640" style="border:0;max-width:100%" loading="lazy" title="Spring &quot;homes&quot; &amp; &lt;lofts&gt;"></iframe>`,
+    );
   });
 });

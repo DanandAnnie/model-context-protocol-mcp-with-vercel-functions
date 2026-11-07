@@ -160,6 +160,21 @@ describe("shared folders", () => {
     assert.deepEqual(await listCollections(owner), []);
   });
 
+  it("counts opens of the page framed on a website among its opens, and apart", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    await recordCollectionView(collection.id, () => true, Date.now(), "page");
+    let [listed] = await listCollections(owner);
+    assert.equal(listed.views, 1);
+    assert.equal(listed.embedViews ?? 0, 0);
+    assert.deepEqual(await recordCollectionView(collection.id, () => true, Date.now(), "embed"), { views: 2, counted: true });
+    // One not let through the visitor's window counts in neither.
+    assert.deepEqual(await recordCollectionView(collection.id, () => false, Date.now(), "embed"), { views: 2, counted: false });
+    [listed] = await listCollections(owner);
+    assert.equal(listed.views, 2);
+    assert.equal(listed.embedViews, 1);
+  });
+
   it("counts opens of the public page, keeps them through a rename, and counts nothing for a dead link", async () => {
     await getStore().put("video", made("v1"));
     const { collection } = await shareFolder({ folder: "Listings" }, owner);

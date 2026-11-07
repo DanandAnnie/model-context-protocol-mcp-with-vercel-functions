@@ -1,7 +1,7 @@
 import { errorResponse, json } from "@/lib/api-utils";
 import { beaconAllowed, crossSiteBeacon } from "@/lib/beacon";
 import { clientIp, rateLimitPair } from "@/lib/rate-limit";
-import { recordCollectionView } from "@/lib/services";
+import { recordCollectionView, viewSchema } from "@/lib/services";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,8 @@ const HITS_PER_VISITOR = 30;
 const HITS_PER_FOLDER = 3000;
 
 /**
- * Public beacon from a shared folder's page: one open per visitor per folder per window; the body is ignored. A
+ * Public beacon from a shared folder's page: one open per visitor per folder per window; `{ "place": "embed" }` marks
+ * one framed on a website (counted apart too), and a place that is neither is refused. A
  * request from another site is `{ "counted": false }` without looking at the folder, and one past the visitor's or the
  * folder's ceiling on beacons is a 429. A link that no longer shows a page is 404; repeats are never an error.
  */
@@ -27,8 +28,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   try {
     const { id } = await ctx.params;
     if (crossSiteBeacon(req)) return json({ counted: false });
+    // `{ "place": "embed" }` from the page framed on a website; no body (or one that is not JSON) is the page itself.
+    let raw: unknown = {};
+    try {
+      const text = (await req.text()).trim();
+      if (text) raw = JSON.parse(text);
+    } catch {
+      raw = {};
+    }
+    const { place = "page" } = viewSchema.parse(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {});
     if (!rateLimitPair(`folderhit:${clientIp(req)}:${id}`, HITS_PER_VISITOR, `folderhit:folder:${id}`, HITS_PER_FOLDER, VIEW_WINDOW_MS).allowed) return json({ counted: false }, { status: 429 });
-    return json(await recordCollectionView(id, () => beaconAllowed(req, "folder", id, VIEWS_PER_FOLDER, VIEW_WINDOW_MS)));
+    return json(await recordCollectionView(id, () => beaconAllowed(req, "folder", id, VIEWS_PER_FOLDER, VIEW_WINDOW_MS), Date.now(), place));
   } catch (err) {
     return errorResponse(err);
   }

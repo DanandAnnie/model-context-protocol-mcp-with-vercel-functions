@@ -2,10 +2,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { api, formatDate } from "@/lib/client";
+import { folderEmbedSnippet } from "@/lib/oembed";
 import { ShareQrCode } from "./ShareQrCode";
 
 type Order = "newest" | "oldest" | "title";
-type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null; ctaClicks?: number; lastCtaClickAt?: string | null };
+type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; embedViews?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null; ctaClicks?: number; lastCtaClickAt?: string | null };
 
 /** The page's orders as the panel names them (the server's COLLECTION_ORDERS). */
 const ORDERS: { value: Order; label: string; saved: string }[] = [
@@ -331,6 +332,17 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     }
   };
 
+  const copyEmbed = async () => {
+    if (!shared) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("No clipboard");
+      await navigator.clipboard.writeText(folderEmbedSnippet(shared.url, shared.title || folder));
+      setNote("Embed code copied. Paste it into your website's HTML; its videos open in a new tab.");
+    } catch {
+      setNote("Your browser would not copy the embed code. Copy the link instead and add ?embed=1 to it.");
+    }
+  };
+
   // The button as typed differs from the saved one.
   const ctaUnsaved = !!shared && (ctaLabel.trim() !== (shared.cta?.label ?? "") || ctaUrl.trim() !== (shared.cta?.url ?? ""));
 
@@ -392,7 +404,11 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
             <>
               <p className="mt-1 text-slate-500">One page lists the folder&apos;s videos whose own links can be sent now.</p>
               <p className="mt-1 text-slate-600" data-testid="folder-share-views">
-                {!shared.views ? "Not opened yet." : `Opened ${shared.views === 1 ? "once" : `${shared.views} times`}${shared.lastViewedAt ? `, last on ${formatDate(shared.lastViewedAt)}` : ""}.`}
+                {!shared.views
+                  ? "Not opened yet."
+                  : `Opened ${shared.views === 1 ? "once" : `${shared.views} times`}${
+                      shared.embedViews ? ` (${shared.embedViews === 1 ? "once" : `${shared.embedViews} times`} embedded on a website)` : ""
+                    }${shared.lastViewedAt ? `, last on ${formatDate(shared.lastViewedAt)}` : ""}.`}
               </p>
               {(shared.cta || !!shared.ctaClicks) && (
                 <p className="text-slate-600" data-testid="folder-share-cta-clicks">
@@ -405,6 +421,9 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
               <div className="mt-2 flex flex-wrap gap-2">
                 <button type="button" onClick={copy} className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50" autoFocus>
                   Copy link
+                </button>
+                <button type="button" onClick={copyEmbed} className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50" title="Copy an iframe snippet that shows this page on your website">
+                  Copy embed code
                 </button>
                 <a href={shared.url} target="_blank" rel="noopener noreferrer" className="rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50">
                   Open

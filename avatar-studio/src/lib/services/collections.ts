@@ -273,16 +273,36 @@ export function recordCollectionCtaClick(id: string, gate: () => boolean = () =>
 }
 
 /**
- * The way back to a shared folder's page from one of its videos' share pages, for a viewer who opened it (the folder
- * page notes its share id in the viewer's browser, see folder-visit.ts): its address and heading. None unless that
- * share exists, belongs to the video's owner, and shows the video's folder, so a made-up or stale id adds nothing to the
- * page and reveals nothing. The video itself is in the folder and its share page shows, so the folder's page shows too.
+ * The way through a shared folder from one of its videos' share pages, for a viewer who opened the folder's page (it
+ * notes its share id in the viewer's browser, see folder-visit.ts): the folder page's address and heading, and the
+ * video after this one in the page's order, if the page lists one. None unless that share exists, belongs to the
+ * video's owner, and shows the video's folder, so a made-up or stale id adds nothing to the page and reveals nothing.
+ * The video itself is in the folder and its share page shows, so the folder's page shows too.
  */
-export async function collectionBackLink(from: unknown, video: Pick<Video, "ownerId" | "folder">): Promise<{ href: string; label: string } | null> {
+export async function collectionNav(
+  from: unknown,
+  video: Pick<Video, "id" | "ownerId" | "folder">,
+  now = Date.now(),
+): Promise<{ href: string; label: string; next: { href: string; title: string } | null } | null> {
   if (typeof from !== "string" || !/^col_[0-9a-f]{1,64}$/.test(from) || !video.folder) return null;
   const collection = await getStore().get<Collection>("collection", from);
   if (!collection || collection.ownerId !== (video.ownerId ?? LOCAL_OWNER) || collection.folder !== video.folder) return null;
-  return { href: `/collection/${encodeURIComponent(collection.id)}`, label: collection.title || collection.folder };
+  // The folder's page lists at most COLLECTION_MAX_VIDEOS; the way on follows that list and stops where it does.
+  const listed = sendableIn(await videosOf(collection.ownerId), collection, now).slice(0, COLLECTION_MAX_VIDEOS);
+  const at = listed.findIndex((v) => v.id === video.id);
+  const after = at >= 0 ? listed[at + 1] : undefined;
+  return {
+    href: `/collection/${encodeURIComponent(collection.id)}`,
+    label: collection.title || collection.folder,
+    next: after ? { href: `/share/${encodeURIComponent(after.id)}`, title: after.title } : null,
+  };
+}
+
+/** A shared folder's videos whose own links can be sent now, in its page's order. */
+function sendableIn(all: Video[], collection: Collection, now: number): Video[] {
+  return all
+    .filter((v) => v.folder === collection.folder && v.status === "completed" && !shareOffline(v, now))
+    .sort(videoOrder(collection.order));
 }
 
 const newestFirst = (a: Video, b: Video) => b.createdAt.localeCompare(a.createdAt);
@@ -306,9 +326,7 @@ export async function collectionPage(id: string, now = Date.now()): Promise<{ co
   const all = await videosOf(collection.ownerId);
   // Read only: a share whose folder holds no video answers not found (the write that emptied it drops it).
   if (!foldersHeld(all, now).has(collection.folder)) throw new NotFoundError("Collection not found");
-  const sendable = all
-    .filter((v) => v.folder === collection.folder && v.status === "completed" && !shareOffline(v, now))
-    .sort(videoOrder(collection.order));
+  const sendable = sendableIn(all, collection, now);
   const videos = sendable.slice(0, COLLECTION_MAX_VIDEOS).map((v) => ({
     id: v.id,
     title: v.title,

@@ -4355,6 +4355,55 @@ test("a share page opened from a shared folder's page links back to it, and only
   await visitor.close();
 });
 
+test("a share page opened from a shared folder's page leads on to the folder's next video, in the page's order", async ({ page, browser }) => {
+  const tag = `Next ${Date.now().toString(36)}`;
+  // Made in this order, so newest first is Attic 2, Cellar, attic 10, and A-Z is Attic 2, attic 10, Cellar.
+  const made = [];
+  for (const title of ["attic 10 tour", "Cellar tour", "Attic 2 tour"]) {
+    const v = await createVideoViaApi(page, title);
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+    made.push(v);
+  }
+  const [attic10, cellar, attic2] = made;
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { title: "Open houses" } })).status()).toBe(200);
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  // Newest first: each video leads on to the one listed after it.
+  await guest.getByTestId("collection-video").first().click();
+  await expect(guest.getByRole("heading", { name: "Attic 2 tour" })).toBeVisible();
+  const next = guest.getByTestId("share-next-in-folder");
+  await expect(next).toHaveText(/Next in “Open houses”\s*Cellar tour/);
+  await next.click();
+  await expect(guest).toHaveURL(new RegExp(`/share/${cellar.id}$`));
+  await expect(guest.getByRole("heading", { name: "Cellar tour" })).toBeVisible();
+  await guest.getByTestId("share-next-in-folder").click();
+  await expect(guest.getByRole("heading", { name: "attic 10 tour" })).toBeVisible();
+  // The last listed video has nothing after it, and still links back.
+  await expect(guest.getByTestId("share-next-in-folder")).toHaveCount(0);
+  await expect(guest.getByTestId("share-back-to-folder")).toBeVisible();
+  // The owner orders the page by title, and the way on follows: Attic 2, attic 10, Cellar.
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { order: "title" } })).status()).toBe(200);
+  await guest.goto(`/share/${attic2.id}`);
+  await expect(guest.getByTestId("share-next-in-folder")).toContainText("attic 10 tour");
+  await guest.goto(`/share/${attic10.id}`);
+  await expect(guest.getByTestId("share-next-in-folder")).toContainText("Cellar tour");
+  // A video whose link is switched off is stepped over.
+  expect((await page.request.patch(`/api/videos/${attic10.id}`, { data: { shareDisabled: true } })).status()).toBe(200);
+  await guest.goto(`/share/${attic2.id}`);
+  await expect(guest.getByTestId("share-next-in-folder")).toContainText("Cellar tour");
+  // Someone sent the video's address alone gets no way on.
+  const forwarded = await browser.newContext();
+  const friend = await forwarded.newPage();
+  await friend.goto(`/share/${attic2.id}`);
+  await expect(friend.getByRole("heading", { name: "Attic 2 tour" })).toBeVisible();
+  await expect(friend.getByTestId("share-next-in-folder")).toHaveCount(0);
+  await forwarded.close();
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

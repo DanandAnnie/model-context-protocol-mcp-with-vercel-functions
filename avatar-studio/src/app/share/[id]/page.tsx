@@ -6,7 +6,7 @@ import { Sparkles } from "lucide-react";
 import {
   NotFoundError,
   PUBLIC_ACCESS,
-  collectionBackLink,
+  collectionNav,
   getBrandKit,
   getVideo,
 } from "@/lib/services";
@@ -170,8 +170,8 @@ export default async function SharePage({
   }
 
   // A viewer who came from the owner's shared folder page (noted in their browser, not in this page's address) gets a
-  // way back to it.
-  const back = await collectionBackLink(jar.get(FOLDER_VISIT_COOKIE)?.value, video);
+  // way back to it, and on to the folder's next video.
+  const back = await collectionNav(jar.get(FOLDER_VISIT_COOKIE)?.value, video);
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
@@ -229,6 +229,19 @@ export default async function SharePage({
           ) : (
             <ShareWatch body={shareBodyFor(video, brand)} autoplay={autoplay} loop={loop} start={start} end={end} />
           )
+        )}
+        {back?.next && (
+          <Link
+            href={back.next.href}
+            className="mt-8 flex max-w-full items-center justify-between gap-3 rounded-xl border border-slate-800 px-4 py-3 hover:border-slate-600 hover:bg-slate-900"
+            data-testid="share-next-in-folder"
+          >
+            <span className="min-w-0">
+              <span className="block text-xs text-slate-400 [overflow-wrap:anywhere]">Next in “{back.label}”</span>
+              <span className="block font-medium [overflow-wrap:anywhere]">{back.next.title}</span>
+            </span>
+            <span aria-hidden className="shrink-0 text-slate-400">→</span>
+          </Link>
         )}
         {brand && (brand.name || brand.logoUrl) && (
           <p className="mt-10 text-xs text-slate-500">

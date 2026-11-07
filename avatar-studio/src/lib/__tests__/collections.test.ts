@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, collectionBackLink, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, collectionNav, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -337,31 +337,73 @@ describe("shared folders", () => {
     await assert.rejects(recordCollectionCtaClick(collection.id, untouched), NotFoundError);
   });
 
+  it("leads on to the next video in the folder page's order, and only to one the page lists", async () => {
+    // Made v1, v2, v3 in that order, with titles whose A-Z order differs from both made orders.
+    for (const [id, title] of [["v1", "Attic 2"], ["v2", "Cellar"], ["v3", "attic 10"]]) await getStore().put("video", made(id, { title }));
+    // Another folder's video, made before all of them, so it would follow v1 if the folder were not checked.
+    await getStore().put("video", made("v4", { folder: "Sold", createdAt: "2026-10-01T00:00:00Z" }));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const at = async (id: string) => (await collectionNav(collection.id, (await getStore().get<Video>("video", id))!))?.next ?? null;
+    // Newest first (the default): v3, v2, v1; the last has nothing after it, and another folder's video is never next.
+    assert.deepEqual(await at("v3"), { href: "/share/v2", title: "Cellar" });
+    assert.deepEqual(await at("v2"), { href: "/share/v1", title: "Attic 2" });
+    assert.equal(await at("v1"), null);
+    // The page's own order is followed. Oldest first: v1, v2, v3.
+    await updateCollection(collection.id, { order: "oldest" }, owner);
+    assert.equal((await at("v1"))?.href, "/share/v2");
+    assert.equal((await at("v2"))?.href, "/share/v3");
+    assert.equal(await at("v3"), null);
+    // By title: "Attic 2" (v1), "attic 10" (v3), "Cellar" (v2).
+    await updateCollection(collection.id, { order: "title" }, owner);
+    assert.equal((await at("v1"))?.href, "/share/v3");
+    assert.equal((await at("v3"))?.href, "/share/v2");
+    assert.equal(await at("v2"), null);
+    await updateCollection(collection.id, { order: "newest" }, owner);
+    // A video the page does not list is stepped over: switched off, in the trash, not rendered, or not live yet.
+    for (const patch of [{ shareDisabled: true }, { deletedAt: "2026-10-20T00:00:00Z" }, { status: "processing" }, { shareStartsAt: "2999-01-01T00:00:00Z" }] as Partial<Video>[]) {
+      await getStore().put("video", made("v2", { title: "Cellar", ...patch }));
+      assert.deepEqual(await at("v3"), { href: "/share/v1", title: "Attic 2" }, JSON.stringify(patch));
+    }
+  });
+
+  it("leads on only within the first COLLECTION_MAX_VIDEOS videos the folder's page lists", async () => {
+    const start = Date.UTC(2026, 9, 1);
+    for (let i = 1; i <= COLLECTION_MAX_VIDEOS + 1; i++) await getStore().put("video", made(`c${i}`, { createdAt: new Date(start + i * 60_000).toISOString() }));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const nav = async (id: string) => collectionNav(collection.id, (await getStore().get<Video>("video", id))!);
+    // Newest first lists c101 down to c2; c2 is the last listed, and c1 is past the page's end.
+    assert.equal((await nav("c3"))?.next?.href, "/share/c2");
+    assert.equal((await nav("c2"))?.next, null);
+    const past = await nav("c1");
+    assert.equal(past?.next, null);
+    assert.equal(past?.href, `/collection/${collection.id}`, "the way back still shows");
+  });
+
   it("links a share page back to the shared folder it was opened from, and only to that one", async () => {
     await getStore().put("video", made("v1"));
     await getStore().put("video", made("v2", { folder: "Sold" }));
     const { collection } = await shareFolder({ folder: "Listings" }, owner);
     const sold = (await shareFolder({ folder: "Sold" }, owner)).collection;
     const v1 = (await getStore().get<Video>("video", "v1"))!;
-    assert.deepEqual(await collectionBackLink(collection.id, v1), { href: `/collection/${collection.id}`, label: "Listings" });
+    assert.deepEqual(await collectionNav(collection.id, v1), { href: `/collection/${collection.id}`, label: "Listings", next: null });
     await updateCollection(collection.id, { title: "Spring listings" }, owner);
-    assert.equal((await collectionBackLink(collection.id, v1))?.label, "Spring listings", "the page's heading");
+    assert.equal((await collectionNav(collection.id, v1))?.label, "Spring listings", "the page's heading");
     // Another folder's share, someone else's video, a made-up or odd id, or no id: no link.
-    assert.equal(await collectionBackLink(sold.id, v1), null);
-    assert.equal(await collectionBackLink(collection.id, { ...v1, ownerId: "someone_else" }), null);
-    for (const from of ["col_0000000000", "../col_x", "", undefined, ["a"], `col_${"a".repeat(65)}`]) assert.equal(await collectionBackLink(from, v1), null);
-    assert.equal(await collectionBackLink(collection.id, { ...v1, folder: undefined }), null);
+    assert.equal(await collectionNav(sold.id, v1), null);
+    assert.equal(await collectionNav(collection.id, { ...v1, ownerId: "someone_else" }), null);
+    for (const from of ["col_0000000000", "../col_x", "", undefined, ["a"], `col_${"a".repeat(65)}`]) assert.equal(await collectionNav(from, v1), null);
+    assert.equal(await collectionNav(collection.id, { ...v1, folder: undefined }), null);
     // A plain rename carries the share along with the videos, so the way back stays.
     await renameFolder({ from: "Listings", to: "Spring" }, owner);
     const renamed = (await getStore().get<Video>("video", "v1"))!;
-    assert.equal((await collectionBackLink(collection.id, renamed))?.href, `/collection/${collection.id}`);
+    assert.equal((await collectionNav(collection.id, renamed))?.href, `/collection/${collection.id}`);
     // A merge into another shared folder stops the moving share: its id links nowhere, the other folder's still does.
     await renameFolder({ from: "Spring", to: "Sold" }, owner);
     const merged = (await getStore().get<Video>("video", "v1"))!;
-    assert.equal(await collectionBackLink(collection.id, merged), null);
-    assert.equal((await collectionBackLink(sold.id, merged))?.href, `/collection/${sold.id}`);
+    assert.equal(await collectionNav(collection.id, merged), null);
+    assert.equal((await collectionNav(sold.id, merged))?.href, `/collection/${sold.id}`);
     // A stopped share links nowhere.
     await stopSharingFolder(sold.id, owner);
-    assert.equal(await collectionBackLink(sold.id, merged), null);
+    assert.equal(await collectionNav(sold.id, merged), null);
   });
 });

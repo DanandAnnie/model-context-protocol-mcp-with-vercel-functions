@@ -3925,11 +3925,18 @@ test("the share folder panel stays on a phone's screen and closes when focus or 
   await expect(panel).toBeVisible();
   await page.getByRole("heading", { name: "My videos" }).click();
   await expect(panel).toBeHidden();
-  // With room it opens right under its button; narrowing the window moves it back on screen while it is open.
+  // On a wide window it opens under its button, or as far left of it as it must to end 16px inside the library's
+  // scrolling area (where the button sits depends on the filters beside it); narrowing the window while it is open
+  // moves it back on screen.
   await page.setViewportSize({ width: 1280, height: 800 });
   await shareButton.click();
   await expect(panel.getByRole("button", { name: "Share this folder" })).toBeVisible();
-  expect(Math.abs((await panel.boundingBox())!.x - (await shareButton.boundingBox())!.x)).toBeLessThan(1);
+  const mainRight = await page.evaluate(() => {
+    const m = document.querySelector("main")!;
+    return m.getBoundingClientRect().left + m.clientWidth;
+  });
+  const wide = (await panel.boundingBox())!;
+  expect(Math.abs(wide.x - Math.min((await shareButton.boundingBox())!.x, mainRight - 16 - wide.width))).toBeLessThan(1);
   await page.setViewportSize({ width: 375, height: 740 });
   await expect
     .poll(async () => {

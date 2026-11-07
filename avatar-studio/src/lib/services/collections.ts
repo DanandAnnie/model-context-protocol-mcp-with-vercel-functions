@@ -272,6 +272,19 @@ export function recordCollectionCtaClick(id: string, gate: () => boolean = () =>
   });
 }
 
+/**
+ * The way back to a shared folder's page from one of its videos' share pages, for a viewer who opened it (the folder
+ * page notes its share id in the viewer's browser, see folder-visit.ts): its address and heading. None unless that
+ * share exists, belongs to the video's owner, and shows the video's folder, so a made-up or stale id adds nothing to the
+ * page and reveals nothing. The video itself is in the folder and its share page shows, so the folder's page shows too.
+ */
+export async function collectionBackLink(from: unknown, video: Pick<Video, "ownerId" | "folder">): Promise<{ href: string; label: string } | null> {
+  if (typeof from !== "string" || !/^col_[0-9a-f]{1,64}$/.test(from) || !video.folder) return null;
+  const collection = await getStore().get<Collection>("collection", from);
+  if (!collection || collection.ownerId !== (video.ownerId ?? LOCAL_OWNER) || collection.folder !== video.folder) return null;
+  return { href: `/collection/${encodeURIComponent(collection.id)}`, label: collection.title || collection.folder };
+}
+
 const newestFirst = (a: Video, b: Video) => b.createdAt.localeCompare(a.createdAt);
 /** The page's order: newest made first, oldest first, or by title (as a person reads it: case aside, "2" before "10"), newest first among equal titles. */
 function videoOrder(order: CollectionOrder = "newest"): (a: Video, b: Video) => number {

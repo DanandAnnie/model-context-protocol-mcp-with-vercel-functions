@@ -4300,6 +4300,52 @@ test("a shared folder's page can carry a button the owner sets, in a new tab, an
   await visitor.close();
 });
 
+test("a share page opened from a shared folder's page links back to it, and only to that folder", async ({ page, browser }) => {
+  const tag = `Back ${Date.now().toString(36)}`;
+  const other = `${tag} other`;
+  const v = await createVideoViaApi(page, "Attic tour");
+  const w = await createVideoViaApi(page, "Cellar tour");
+  for (const [video, folder] of [[v, tag], [w, other]] as const) {
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${video.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${video.id}`, { data: { folder } })).status()).toBe(200);
+  }
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  const otherShare = (await (await page.request.post("/api/collections", { data: { folder: other } })).json()).collection;
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { title: "Spring listings" } })).status()).toBe(200);
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(collection.url);
+  await guest.getByTestId("collection-video").click();
+  // The video's address carries nothing of the folder's link, so forwarding it forwards only the video.
+  await expect(guest).toHaveURL(new RegExp(`/share/${v.id}$`));
+  const back = guest.getByTestId("share-back-to-folder");
+  await expect(back).toHaveText("← Back to “Spring listings”");
+  await back.click();
+  await expect(guest).toHaveURL(collection.url);
+  await expect(guest.getByTestId("collection-title")).toHaveText("Spring listings");
+  // Someone the video's address is forwarded to gets the video alone, and a folder's id in the address does nothing.
+  const forwarded = await browser.newContext();
+  const friend = await forwarded.newPage();
+  for (const query of ["", `?from=${collection.id}`]) {
+    await friend.goto(`/share/${v.id}${query}`);
+    await expect(friend.getByRole("heading", { name: "Attic tour" })).toBeVisible();
+    await expect(friend.getByTestId("share-back-to-folder")).toHaveCount(0);
+  }
+  await forwarded.close();
+  // After visiting another folder's page, this folder's video links back to neither.
+  await guest.goto(otherShare.url);
+  await guest.goto(`/share/${v.id}`);
+  await expect(guest.getByRole("heading", { name: "Attic tour" })).toBeVisible();
+  await expect(guest.getByTestId("share-back-to-folder")).toHaveCount(0);
+  // Once the folder is no longer shared the link goes, and the video's own page still plays.
+  await guest.goto(collection.url);
+  expect((await page.request.delete(`/api/collections/${collection.id}`)).status()).toBe(204);
+  await guest.goto(`/share/${v.id}`);
+  await expect(guest.getByRole("heading", { name: "Attic tour" })).toBeVisible();
+  await expect(guest.getByTestId("share-back-to-folder")).toHaveCount(0);
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

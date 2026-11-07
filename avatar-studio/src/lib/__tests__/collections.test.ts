@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, collectionBackLink, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -335,5 +335,33 @@ describe("shared folders", () => {
     await deleteVideo("v1", owner);
     await emptyTrash({ expected: 1 }, owner);
     await assert.rejects(recordCollectionCtaClick(collection.id, untouched), NotFoundError);
+  });
+
+  it("links a share page back to the shared folder it was opened from, and only to that one", async () => {
+    await getStore().put("video", made("v1"));
+    await getStore().put("video", made("v2", { folder: "Sold" }));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const sold = (await shareFolder({ folder: "Sold" }, owner)).collection;
+    const v1 = (await getStore().get<Video>("video", "v1"))!;
+    assert.deepEqual(await collectionBackLink(collection.id, v1), { href: `/collection/${collection.id}`, label: "Listings" });
+    await updateCollection(collection.id, { title: "Spring listings" }, owner);
+    assert.equal((await collectionBackLink(collection.id, v1))?.label, "Spring listings", "the page's heading");
+    // Another folder's share, someone else's video, a made-up or odd id, or no id: no link.
+    assert.equal(await collectionBackLink(sold.id, v1), null);
+    assert.equal(await collectionBackLink(collection.id, { ...v1, ownerId: "someone_else" }), null);
+    for (const from of ["col_0000000000", "../col_x", "", undefined, ["a"], `col_${"a".repeat(65)}`]) assert.equal(await collectionBackLink(from, v1), null);
+    assert.equal(await collectionBackLink(collection.id, { ...v1, folder: undefined }), null);
+    // A plain rename carries the share along with the videos, so the way back stays.
+    await renameFolder({ from: "Listings", to: "Spring" }, owner);
+    const renamed = (await getStore().get<Video>("video", "v1"))!;
+    assert.equal((await collectionBackLink(collection.id, renamed))?.href, `/collection/${collection.id}`);
+    // A merge into another shared folder stops the moving share: its id links nowhere, the other folder's still does.
+    await renameFolder({ from: "Spring", to: "Sold" }, owner);
+    const merged = (await getStore().get<Video>("video", "v1"))!;
+    assert.equal(await collectionBackLink(collection.id, merged), null);
+    assert.equal((await collectionBackLink(sold.id, merged))?.href, `/collection/${sold.id}`);
+    // A stopped share links nowhere.
+    await stopSharingFolder(sold.id, owner);
+    assert.equal(await collectionBackLink(sold.id, merged), null);
   });
 });

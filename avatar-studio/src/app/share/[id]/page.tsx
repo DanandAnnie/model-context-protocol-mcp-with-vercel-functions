@@ -6,6 +6,7 @@ import { Sparkles } from "lucide-react";
 import {
   NotFoundError,
   PUBLIC_ACCESS,
+  collectionBackLink,
   getBrandKit,
   getVideo,
 } from "@/lib/services";
@@ -22,6 +23,7 @@ import { ShareLeadGate } from "@/components/ShareLeadGate";
 import { ShareWatch } from "@/components/ShareWatch";
 import { parseEndTime, parseStartTime, shareSectionLink } from "@/lib/share-time";
 import { isWebm, shareBodyFor } from "@/lib/share-body";
+import { FOLDER_VISIT_COOKIE } from "@/lib/folder-visit";
 
 export const dynamic = "force-dynamic";
 
@@ -167,6 +169,10 @@ export default async function SharePage({
     );
   }
 
+  // A viewer who came from the owner's shared folder page (noted in their browser, not in this page's address) gets a
+  // way back to it.
+  const back = await collectionBackLink(jar.get(FOLDER_VISIT_COOKIE)?.value, video);
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       {accent && (
@@ -206,6 +212,11 @@ export default async function SharePage({
         )}
       </header>
       <section className="mx-auto max-w-4xl px-6 pb-16">
+        {back && (
+          <Link href={back.href} className="mb-3 inline-flex max-w-full items-center gap-1 text-sm text-slate-300 [overflow-wrap:anywhere] hover:text-white hover:underline" data-testid="share-back-to-folder">
+            <span aria-hidden>←</span> Back to “{back.label}”
+          </Link>
+        )}
         <h1 className="mb-4 text-xl font-semibold">{video.title}</h1>
         {!unlocked ? (
           <ShareUnlock videoId={video.id} />

@@ -4548,6 +4548,10 @@ test("Play all on a shared folder's page opens the first video playing, and only
   await expect(playAll).toHaveAccessibleName("Play all 2 videos");
   await expect(playAll).toHaveAttribute("href", `/share/${loft.id}`);
   await expect(guest.getByTestId("collection-cta")).toBeVisible();
+  // The two buttons sit level, the same height (Play all's border included).
+  const [playBox, ctaBox] = [await playAll.boundingBox(), await guest.getByTestId("collection-cta").boundingBox()];
+  expect(Math.abs(playBox!.height - ctaBox!.height)).toBeLessThan(0.5);
+  expect(Math.abs(playBox!.y - ctaBox!.y)).toBeLessThan(0.5);
   // A click that opens a new tab notes nothing in this one.
   const opened = visitor.waitForEvent("page");
   await playAll.click({ modifiers: ["Control"] });

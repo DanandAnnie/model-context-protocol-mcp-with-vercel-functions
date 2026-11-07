@@ -21,7 +21,7 @@ export function CollectionPlayAll({ collectionId, firstId, count }: { collection
         noteFolderVisit(collectionId);
         notePlayOnArrival(firstId);
       }}
-      className="inline-flex items-center gap-2 rounded-lg border border-slate-500 px-4 py-2.5 text-sm font-medium text-slate-100 hover:border-slate-300 hover:bg-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
+      className="inline-flex items-center gap-2 rounded-lg border border-slate-500 px-4 py-[9px] text-sm font-medium text-slate-100 hover:border-slate-300 hover:bg-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400"
       data-testid="collection-play-all"
     >
       <Play className="h-4 w-4" aria-hidden />

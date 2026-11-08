@@ -2560,3 +2560,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Tests.**
     - Unit tests for queries, names (including an emoji at the limit), replacing, the cap, removal, comparing views, and reading back.
     - An e2e test saves a folder and Starred view, with Escape and Enter. It clears the filters, reopens the view, re-saves the same name with the folder alone, and reopens it after a reload. It removes the last view on the plain library and checks the announcement and focus.
+- QA pass 47: the library's address and saved views in a browser (`08037ab`).
+  - **Checked.**
+    - Filters for folder, shape, and search went into the address and came back on a reload. They also came back in a fresh browser opened at the copied link, and on Back from a video.
+    - Changing filters added no history entries.
+    - Saved views: saving with Enter, the focus back on Save view, and the view shown marked. Enter on a chip opens it. The keyboard order is chip, then its remove button, then the next chip.
+    - A view saved in another tab appeared in this one, and neither tab's views were lost.
+    - At 390 pixels the chips wrap without spilling sideways.
+    - No console errors or failed requests.
+  - **Fixed.** A long name cut at 40 characters could end on the comma before the words it lost ("…the spring campaign,"). A name cut short now drops trailing commas, dashes, and spaces. A name that fits keeps its own ending. Unit tests cover both.

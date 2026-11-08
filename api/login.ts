@@ -1,4 +1,4 @@
-import { buildSessionCookie, verifyToken } from "./services/auth.js";
+import { buildSessionCookie, verifyToken } from "./_services/auth.js";
 
 async function handler(req: Request): Promise<Response> {
   if (!process.env.MISSION_CONTROL_TOKEN) {

@@ -1,0 +1,527 @@
+"use client";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Check, CopyPlus, Languages, RotateCcw, Trash2 } from "lucide-react";
+import { refocusIfLost } from "@/lib/focus";
+import { Button, Card, EmptyState, ErrorBanner, Field, SectionTitle, StatusBadge, inputClass } from "@/components/ui";
+import { useApi } from "@/hooks/useApi";
+import { useCanEdit } from "@/hooks/useCanEdit";
+import { useFocusAfterRender } from "@/hooks/useFocusAfterRender";
+import { ViewOnlyNotice } from "@/components/ViewOnlyNotice";
+import { ListSearch, useListSearch } from "@/components/ListSearch";
+import { ApiError, api, formatDate } from "@/lib/client";
+import { TRANSLATION_FILTERS, TRANSLATION_SORTS, TRANSLATION_SORT_KEY, sortTranslations, translationCounts, translationFilterFrom, translationSortFrom, translationState, translationTexts, type TranslationFilter, type TranslationSort } from "@/lib/translation-filter";
+import { MAX_TRANSLATION_SPEAKERS, type BrandKit, type Translation, type TranslationQuality } from "@/lib/types";
+
+/** A job worth polling for: lines being translated or a dub running, but not lines waiting on someone to read them. */
+const moving = (t: Translation) => (t.status === "processing" || t.status === "queued") && t.proofreadStage !== "ready";
+
+/** A line's start as m:ss. */
+const at = (ms: number) => `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}`;
+
+/** Matches the server's limit per request. */
+const MAX_LANGUAGES = 5;
+
+export default function TranslatePage() {
+  return (
+    <Suspense>
+      <TranslateInner />
+    </Suspense>
+  );
+}
+
+function TranslateInner() {
+  const canEdit = useCanEdit();
+  const params = useSearchParams();
+  const { data, error, refetch, setData } = useApi<{ translations: Translation[]; languages: string[] }>("/api/translate", {
+    pollMs: 6000,
+    pollWhile: (d) => d.translations.some(moving),
+  });
+  const [title, setTitle] = useState(params.get("title") ?? "");
+  const [sourceVideoUrl, setSource] = useState(params.get("source") ?? "");
+  // Up to five languages per request, one dubbing job each.
+  const [languages, setLanguages] = useState<string[]>(["Spanish"]);
+  const toggle = (l: string) => setLanguages((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : prev.length >= MAX_LANGUAGES ? prev : [...prev, l]));
+  const [lipSync, setLipSync] = useState(true);
+  const [speakers, setSpeakers] = useState(0);
+  const [quality, setQuality] = useState<TranslationQuality>("speed");
+  const [removeMusic, setRemoveMusic] = useState(false);
+  const [enhanceSpeech, setEnhanceSpeech] = useState(false);
+  const [proofread, setProofread] = useState(false);
+  const { data: brandData } = useApi<{ brand: BrandKit | null }>("/api/brand");
+  const glossary = brandData?.brand?.glossary ?? [];
+  const forcedRules = brandData?.brand?.forcedTranslations ?? [];
+  // Rules for several languages can share a term; the page counts terms.
+  const forcedTerms = new Set(forcedRules.map((r) => r.term.trim().toLowerCase())).size;
+  // On by default: the server keeps the kit's terms when it has some (even if the kit has not loaded here yet).
+  const [keepGlossary, setKeepGlossary] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // A search over the translations below: by title, language, or the source video's site.
+  const search = useListSearch();
+  // And by where each dub is: in progress, ready to proofread, finished, or failed.
+  const [statusFilter, setStatusFilter] = useState<TranslationFilter>("all");
+  const statusSelect = useRef<HTMLSelectElement>(null);
+  const listHeading = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const focusAfterRender = useFocusAfterRender();
+  // What happened to the list (a delete), read out to screen readers; errors from it show above the list.
+  const [listNote, setListNote] = useState<string | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  // The translation being deleted: the Delete buttons wait for it, so a second click does not ask (and send) again.
+  const [deleting, setDeleting] = useState<string | null>(null);
+  // The failed dub being tried again: its button waits, so a second click does not start a second dub.
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const filterBy = (f: TranslationFilter) => {
+    setStatusFilter(f);
+    // What was pinned stays in view until a filter changes, as with the search.
+    search.unpin();
+  };
+  // Once a dub starts the form is cleared and its button disabled; the focus moves to the URL field for the next one.
+  const sourceInput = useRef<HTMLInputElement>(null);
+  async function submit() {
+    setSubmitting(true);
+    setErr(null);
+    try {
+      const fallback = languages.length === 1 ? `Translation to ${languages[0]}` : "Translation";
+      const made = await api<{ translations?: Translation[] }>("/api/translate", { method: "POST", body: JSON.stringify({ title: title || fallback, sourceVideoUrl, targetLanguages: languages, ...(lipSync ? {} : { audioOnly: true }), ...(speakers ? { speakers } : {}), ...(quality === "precision" ? { quality } : {}), ...(removeMusic ? { removeMusic } : {}), ...(enhanceSpeech ? { enhanceSpeech } : {}), ...(proofread ? { proofread } : {}), ...(keepGlossary ? { keepGlossary: true } : {}) }) });
+      // Dubs just started stay in view whatever the search says, so the person sees them start.
+      for (const t of made.translations ?? []) search.pin(t.id);
+      setSource("");
+      setTitle("");
+      // The next video may have a different cast; the lip-sync choice is a preference and stays.
+      setSpeakers(0);
+      refetch();
+      refocusIfLost(sourceInput.current);
+    } catch (e) {
+      // Dubs that failed to start still come back as records; they stay in view the same way.
+      if (e instanceof ApiError) for (const t of (e.body?.translations as Translation[] | undefined) ?? []) search.pin(t.id);
+      setErr(e instanceof Error ? e.message : "Translation failed");
+      refetch();
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // The list's order, remembered by this browser; read after the first render so the server's markup still matches.
+  const [sort, setSort] = useState<TranslationSort>("newest");
+  useEffect(() => {
+    try {
+      const saved = translationSortFrom(window.localStorage.getItem(TRANSLATION_SORT_KEY));
+      if (saved !== "newest") setSort(saved);
+    } catch {
+      // Storage blocked (a private window, say): newest first it is.
+    }
+  }, []);
+  const sortBy = (next: TranslationSort) => {
+    setSort(next);
+    setListNote(`Sorted: ${TRANSLATION_SORTS.find((o) => o.value === next)?.label ?? next}.`);
+    try {
+      window.localStorage.setItem(TRANSLATION_SORT_KEY, next);
+    } catch {
+      // Not remembered, but the order holds for this visit.
+    }
+  };
+  const items = sortTranslations(data?.translations ?? [], sort);
+  const found = items.filter((t) => search.matches(t.id, ...translationTexts(t)));
+  // The counts beside each status are of what the search finds, so they say what picking one would show.
+  const counts = translationCounts(found);
+  const shown = statusFilter === "all" ? found : found.filter((t) => search.isPinned(t.id) || translationState(t) === statusFilter);
+  async function remove(t: Translation) {
+    if (deleting || retrying) return;
+    const lose =
+      t.status === "completed"
+        ? "The dubbed video and its subtitle links go with it."
+        : t.proofreadStage === "ready"
+          ? "Its translated lines and any corrections go with it."
+          : moving(t)
+            ? "The dub is no longer followed here, though the provider may finish it."
+            : "";
+    if (!window.confirm(`Delete “${t.title}”? ${lose}`.trim())) return;
+    setListErr(null);
+    setListNote(null);
+    const at = shown.indexOf(t);
+    const next = shown[at + 1] ?? shown[at - 1];
+    // Kept in view under the current search and filter while the delete is sent, so the focus has somewhere to go.
+    if (next) search.pin(next.id);
+    setDeleting(t.id);
+    const drop = () => setData((prev) => (prev ? { ...prev, translations: prev.translations.filter((x) => x.id !== t.id) } : prev));
+    try {
+      await api(`/api/translate/${t.id}`, { method: "DELETE" });
+      drop();
+      setListNote(`Deleted ${t.title}.`);
+    } catch (e) {
+      if (!(e instanceof ApiError && e.status === 404)) {
+        setDeleting(null);
+        setListErr(e instanceof Error ? e.message : "The translation could not be deleted");
+        return;
+      }
+      // Deleted already (another tab or editor): the list catches up.
+      drop();
+      setListNote(`${t.title} was already deleted.`);
+    }
+    setDeleting(null);
+    refetch();
+    // The focus moves to the next translation's Delete, or to the list's heading (also when that one went meanwhile),
+    // rather than being lost with the button.
+    focusAfterRender(() => (next ? listRef.current?.querySelector<HTMLElement>(`[data-translation-delete="${next.id}"]:not([hidden] *)`) : null) ?? listHeading.current);
+  }
+
+  async function retry(t: Translation) {
+    if (retrying || deleting) return;
+    setListErr(null);
+    // Said at once: with the real provider the new attempt can take a few seconds to start.
+    setListNote(t.proofreadCues?.length ? `Opening the lines of ${t.title} again…` : `Trying ${t.title} again…`);
+    setRetrying(t.id);
+    try {
+      const { translation: next } = await api<{ translation: Translation }>(`/api/translate/${t.id}/retry`, { method: "POST" });
+      // The new dub takes the failed one's card, and stays in view whatever the search or filter says (being new, it
+      // sorts as just started, so under "Oldest first" it moves to the end).
+      search.pin(next.id);
+      setData((prev) => (prev ? { ...prev, translations: prev.translations.map((x) => (x.id === t.id ? next : x)) } : prev));
+      setListNote(
+        next.status === "failed"
+          ? `${t.title} failed again: ${next.error ?? "the provider refused it"}.`
+          : next.proofreadStage === "ready"
+            ? `The lines of ${t.title} are open again, with your corrections, to approve.`
+            : `Trying ${t.title} again.`,
+      );
+      refetch();
+      // The focus moves to the new dub's Delete (its Try again went with the failed one), or to the list's heading.
+      focusAfterRender(() => listRef.current?.querySelector<HTMLElement>(next.status === "failed" ? `[data-translation-retry="${next.id}"]` : `[data-translation-delete="${next.id}"]`) ?? listHeading.current);
+    } catch (e) {
+      setListNote(null);
+      setListErr(e instanceof Error ? e.message : "The dub could not be tried again");
+      // The list catches up whatever happened (a new attempt may have been stored before the error).
+      refetch();
+    } finally {
+      setRetrying(null);
+    }
+  }
+
+  // The form is filled from a dub, so the same video goes into more languages without setting it all up again.
+  const languagePicker = useRef<HTMLDivElement>(null);
+  function dubAgain(t: Translation) {
+    // Not while the form, or this list, is busy: what finishes then would undo the filling or take the focus away.
+    if (submitting || retrying || deleting) return;
+    setErr(null);
+    setSource(t.sourceVideoUrl);
+    // A dub made with others in one go is titled "<title> (<language>)"; the form takes the title it was given. A title
+    // the page made up itself ("Translation to German") is left out, so the new dub gets one naming its own language.
+    const suffix = ` (${t.targetLanguage})`;
+    const given = t.title.endsWith(suffix) ? t.title.slice(0, -suffix.length) : t.title;
+    setTitle(given === "Translation" || given === `Translation to ${t.targetLanguage}` ? "" : given);
+    setLipSync(!t.audioOnly);
+    setSpeakers(t.speakers ?? 0);
+    setQuality(t.quality ?? "speed");
+    setRemoveMusic(!!t.removeMusic);
+    setEnhanceSpeech(!!t.enhanceSpeech);
+    setProofread(!!t.proofread);
+    // A dub that kept brand terms or fixed translations followed the glossary; one with none may still have asked
+    // (the kit had none for it), so the form's own choice stays then.
+    if (t.glossary?.length || t.forcedTranslations?.length) setKeepGlossary(true);
+    // The languages are left to pick: this dub's own one is already made.
+    setLanguages([]);
+    setListNote(`The form has the video and settings of ${t.title}. Pick the languages to dub it into.`);
+    focusAfterRender(() => languagePicker.current?.querySelector<HTMLInputElement>(`input[type="checkbox"]:not(:disabled):not([data-language="${CSS.escape(t.targetLanguage)}"])`) ?? sourceInput.current);
+  }
+
+  const filterNote = found.length > 0 && shown.length === 0 ? TRANSLATION_FILTERS.find((f) => f.value === statusFilter)?.none : undefined;
+  // Cards a search leaves out are hidden rather than removed, so corrections being proofread in one are kept.
+  const shownIds = new Set(shown.map((t) => t.id));
+
+  return (
+    <>
+      <SectionTitle title="Video translate" subtitle="Dub an existing video into other languages, lip-synced or voice only." />
+      {canEdit === false && <ViewOnlyNotice what="start translations" />}
+      <ErrorBanner message={error ?? err} />
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr]">
+        <Card className="p-5">
+          <div className="space-y-4">
+            <Field label="Video URL" hint="A direct link to an MP4 the provider can download.">
+              <input ref={sourceInput} className={inputClass} value={sourceVideoUrl} onChange={(e) => setSource(e.target.value)} placeholder="https://…/video.mp4" />
+            </Field>
+            <fieldset>
+              <legend className="mb-1.5 block text-sm font-medium text-slate-700">
+                Target languages <span className="font-normal text-slate-500">· {languages.length} of up to {MAX_LANGUAGES}, one dub each</span>
+              </legend>
+              <div ref={languagePicker} className="flex flex-wrap gap-1.5" data-testid="target-languages">
+                {(data?.languages ?? ["Spanish"]).map((l) => {
+                  const on = languages.includes(l);
+                  return (
+                    <label key={l} className={`cursor-pointer rounded-full border px-2.5 py-1 text-xs font-medium has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500 ${on ? "border-brand-500 bg-brand-50 text-brand-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} ${!on && languages.length >= MAX_LANGUAGES ? "cursor-not-allowed opacity-50" : ""}`}>
+                      <input type="checkbox" className="sr-only" data-language={l} checked={on} disabled={!on && languages.length >= MAX_LANGUAGES} onChange={() => toggle(l)} />
+                      {l}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="mt-0.5" checked={lipSync} disabled={canEdit === false} onChange={(e) => setLipSync(e.target.checked)} />
+                <span>
+                  Lip-sync the dub
+                  <span className="block text-xs text-slate-500">Off dubs the voice only: faster, and fine when the speaker is often off screen.</span>
+                </span>
+              </label>
+              <Field label="Speakers" hint="People talking in the video, so each keeps a voice of their own.">
+                <select className={inputClass} value={speakers} disabled={canEdit === false} onChange={(e) => setSpeakers(Number(e.target.value))}>
+                  <option value={0}>Detect automatically</option>
+                  {Array.from({ length: MAX_TRANSLATION_SPEAKERS }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>
+                      {n} {n === 1 ? "speaker" : "speakers"}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Quality" hint="Precision takes longer for a more natural translation and delivery; it matters most when the dub is lip-synced.">
+                <select className={inputClass} value={quality} disabled={canEdit === false} onChange={(e) => setQuality(e.target.value as TranslationQuality)}>
+                  <option value="speed">Speed</option>
+                  <option value="precision">Precision</option>
+                </select>
+              </Field>
+              <div className="space-y-2 pt-1">
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="mt-0.5" checked={removeMusic} disabled={canEdit === false} onChange={(e) => setRemoveMusic(e.target.checked)} />
+                  <span>Remove background music</span>
+                </label>
+                <label className="flex items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" className="mt-0.5" checked={enhanceSpeech} disabled={canEdit === false} onChange={(e) => setEnhanceSpeech(e.target.checked)} />
+                  <span>Enhance speech</span>
+                </label>
+              </div>
+            </div>
+            {(glossary.length > 0 || forcedRules.length > 0) && (
+              <label className="flex items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="mt-0.5" checked={keepGlossary} disabled={canEdit === false} onChange={(e) => setKeepGlossary(e.target.checked)} />
+                <span>
+                  Follow the brand glossary
+                  <span className="block text-xs text-slate-500">
+                    {glossary.length > 0 && (
+                      <>
+                        {glossary.slice(0, 4).join(", ")}
+                        {glossary.length > 4 ? `, and ${glossary.length - 4} more` : ""} stay untranslated.{" "}
+                      </>
+                    )}
+                    {forcedTerms > 0 && `${forcedTerms} ${forcedTerms === 1 ? "term is" : "terms are"} always translated one way (where a rule covers the language). `}
+                    Edit them in the brand kit.
+                  </span>
+                </span>
+              </label>
+            )}
+            <label className="flex items-start gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="mt-0.5" checked={proofread} disabled={canEdit === false} onChange={(e) => setProofread(e.target.checked)} />
+              <span>
+                Proofread the lines first
+                <span className="block text-xs text-slate-500">The translated lines wait for you to correct names, terms, and tone; the dub is made once you approve them.</span>
+              </span>
+            </label>
+            <Field label="Title (optional)">
+              <input className={inputClass} value={title} onChange={(e) => setTitle(e.target.value)} placeholder={languages.length > 1 ? "Product walkthrough (each dub adds its language)" : "Product walkthrough – Spanish"} />
+            </Field>
+            <Button onClick={submit} loading={submitting} disabled={!/^https?:\/\//.test(sourceVideoUrl) || canEdit === false || languages.length === 0} className="w-full">
+              <Languages className="h-4 w-4" /> {languages.length > 1 ? `Translate into ${languages.length} languages` : "Translate video"}
+            </Button>
+          </div>
+        </Card>
+
+        <div>
+          <h2 ref={listHeading} tabIndex={-1} className="mb-3 text-sm font-semibold text-slate-900 focus:outline-none">
+            Translations
+          </h2>
+          <p role="status" className="sr-only">
+            {listNote}
+          </p>
+          {listErr && (
+            <div className="mb-3">
+              <ErrorBanner message={listErr} />
+            </div>
+          )}
+          {data && (items.length > 0 || search.q) && (
+            <ListSearch search={search} label="Search translations" placeholder="Search by title, language, or site" maxLength={200} shown={shown.length} found={found.length} filtered={statusFilter !== "all"} total={items.length} noun="translations">
+              {items.length > 1 && (
+                <select aria-label="Sort translations" value={sort} onChange={(e) => sortBy(translationSortFrom(e.target.value))} data-testid="translation-sort" className={`${inputClass} w-auto`}>
+                  {TRANSLATION_SORTS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {(items.length > 1 || statusFilter !== "all") && (
+                <select ref={statusSelect} aria-label="Show translations" value={statusFilter} onChange={(e) => filterBy(translationFilterFrom(e.target.value))} data-testid="translation-status-filter" className={`${inputClass} w-auto`}>
+                  {TRANSLATION_FILTERS.map((f) => (
+                    <option key={f.value} value={f.value}>
+                      {f.label} ({counts[f.value]})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </ListSearch>
+          )}
+          {filterNote && (
+            <p className="mb-3 text-sm text-slate-600">
+              {filterNote}{" "}
+              <button type="button" className="font-medium text-brand-700 underline" onClick={() => {
+                  filterBy("all");
+                  // The button goes with the note; the focus moves to the filter it reset.
+                  statusSelect.current?.focus();
+                }}>
+                Show all
+              </button>
+            </p>
+          )}
+          {!data ? null : items.length === 0 ? (
+            <EmptyState icon={<Languages className="h-8 w-8" />} title="No translations yet" body="Submit a video on the left to get started." />
+          ) : (
+            <div className="space-y-3" ref={listRef}>
+              {items.map((t) => (
+                <Card key={t.id} className="p-4" data-testid="translation" hidden={!shownIds.has(t.id)}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900" data-testid="translation-title">{t.title}</div>
+                      <div className="mt-0.5 text-xs text-slate-500" data-testid="translation-meta">
+                        → {t.targetLanguage}
+                        {t.audioOnly ? " · voice only" : ""}
+                        {t.speakers ? ` · ${t.speakers} ${t.speakers === 1 ? "speaker" : "speakers"}` : ""}
+                        {t.quality === "precision" ? " · precision" : ""}
+                        {t.removeMusic ? " · no music" : ""}
+                        {t.enhanceSpeech ? " · enhanced speech" : ""}
+                        {t.proofread ? " · proofread" : ""}
+                        {t.glossary?.length ? ` · keeps ${t.glossary.length} brand ${t.glossary.length === 1 ? "term" : "terms"}` : ""}
+                        {t.forcedTranslations?.length ? ` · ${t.forcedTranslations.length} fixed ${t.forcedTranslations.length === 1 ? "translation" : "translations"}` : ""} · {formatDate(t.createdAt)}
+                      </div>
+                      {t.proofreadStage === "preparing" && <div className="mt-1 text-xs text-slate-500">Translating the lines for you to proofread…</div>}
+                      {t.proofreadStage === "dubbing" && <div className="mt-1 text-xs text-slate-500">Starting the dub…</div>}
+                      {t.error && <div className="mt-1 text-xs text-rose-600">{t.error}</div>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {t.proofreadStage === "ready" ? (
+                        <span className="inline-flex shrink-0 items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">Ready to proofread</span>
+                      ) : (
+                        <StatusBadge status={t.status} />
+                      )}
+                      {canEdit !== false && (
+                        <button type="button" onClick={() => dubAgain(t)} aria-disabled={submitting || !!retrying || !!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700 aria-disabled:opacity-50" aria-label={`Dub ${t.title} into another language`} title="Dub into another language">
+                          <CopyPlus className="h-4 w-4" aria-hidden />
+                        </button>
+                      )}
+                      {canEdit !== false && t.status === "failed" && (
+                        <button type="button" onClick={() => retry(t)} data-translation-retry={t.id} aria-disabled={!!retrying || !!deleting || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-brand-700 aria-disabled:opacity-50" aria-label={`Try ${t.title} again`} title="Try again">
+                          <RotateCcw className="h-4 w-4" aria-hidden />
+                        </button>
+                      )}
+                      {canEdit !== false && (
+                        <button type="button" onClick={() => remove(t)} data-translation-delete={t.id} aria-disabled={!!deleting || !!retrying || undefined} className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-rose-600 aria-disabled:opacity-50" aria-label={`Delete ${t.title}`} title="Delete">
+                          <Trash2 className="h-4 w-4" aria-hidden />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {t.proofreadStage === "ready" && t.proofreadCues && <Proofread key={t.id} translation={t} canEdit={canEdit !== false} onChange={refetch} onPin={() => search.pin(t.id)} />}
+                  {t.status === "completed" && t.videoUrl && <video src={t.videoUrl} controls className="mt-3 w-full rounded-lg bg-black" />}
+                  {t.status === "completed" && (t.captionUrls?.srt || t.captionUrls?.vtt) && (
+                    <div className="mt-2 flex flex-wrap gap-3 text-xs" data-testid="translation-captions">
+                      <span className="text-slate-500">Subtitles in {t.targetLanguage}:</span>
+                      {t.captionUrls.srt && (
+                        <a href={t.captionUrls.srt} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">
+                          SRT
+                        </a>
+                      )}
+                      {t.captionUrls.vtt && (
+                        <a href={t.captionUrls.vtt} target="_blank" rel="noreferrer" className="font-medium text-brand-700 hover:underline">
+                          VTT
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** The translated lines of a proofread dub, to correct and then dub. Each line keeps its timing; only the words change. */
+function Proofread({ translation, canEdit, onChange, onPin }: { translation: Translation; canEdit: boolean; onChange: () => void; onPin: () => void }) {
+  const cues = translation.proofreadCues ?? [];
+  const [lines, setLines] = useState(() => cues.map((c) => c.text));
+  const [busy, setBusy] = useState<"save" | "dub" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  // The version these lines were opened at; a save or a refused dub moves it on, someone else's change does not.
+  const [basedOn, setBasedOn] = useState(translation.updatedAt);
+  const changed = lines.some((l, i) => l !== cues[i]?.text);
+  const blank = lines.some((l) => !l.trim());
+
+  async function send(kind: "save" | "dub") {
+    setBusy(kind);
+    setErr(null);
+    setSaved(false);
+    // Approved lines move the dub on to being made; it stays in view (and the focus in it) whatever the list shows.
+    onPin();
+    try {
+      const body = JSON.stringify({ lines: lines.map((l) => l.trim()), basedOn });
+      if (kind === "save") {
+        const res = await api<{ translation: Translation }>(`/api/translate/${translation.id}`, { method: "PATCH", body });
+        setBasedOn(res.translation.updatedAt);
+        setSaved(true);
+      } else {
+        await api(`/api/translate/${translation.id}/dub`, { method: "POST", body });
+      }
+      onChange();
+    } catch (e) {
+      // A refused dub kept these lines; the next try builds on that version.
+      const kept = e instanceof ApiError ? (e.body as { translation?: Translation } | undefined)?.translation : undefined;
+      if (kept?.updatedAt) setBasedOn(kept.updatedAt);
+      setErr(e instanceof Error ? e.message : "Something went wrong");
+      onChange();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-slate-100 pt-3" data-testid="proofread">
+      <p className="text-xs text-slate-500">
+        Read the {cues.length} translated {cues.length === 1 ? "line" : "lines"} and fix anything the dub should say differently. Nothing is dubbed until you approve them.
+      </p>
+      <ol className="max-h-96 space-y-2 overflow-y-auto pr-1">
+        {cues.map((c, i) => (
+          <li key={i} className="flex items-start gap-2">
+            <span className="w-10 shrink-0 pt-2 text-right text-xs tabular-nums text-slate-500">{at(c.startMs)}</span>
+            <textarea
+              aria-label={`Line ${i + 1}`}
+              className={`${inputClass} min-h-[2.5rem] flex-1 resize-y`}
+              rows={1}
+              value={lines[i]}
+              maxLength={300}
+              disabled={!canEdit || !!busy}
+              onChange={(e) => setLines((prev) => prev.map((l, j) => (j === i ? e.target.value : l)))}
+            />
+          </li>
+        ))}
+      </ol>
+      {err && <div className="text-xs text-rose-600">{err}</div>}
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => send("dub")} loading={busy === "dub"} disabled={!!busy || blank}>
+            <Check className="h-4 w-4" /> Approve and dub
+          </Button>
+          <Button variant="secondary" onClick={() => send("save")} loading={busy === "save"} disabled={!!busy || blank || !changed}>
+            Save corrections
+          </Button>
+          {saved && !changed && <span className="text-xs text-slate-500">Saved</span>}
+          {blank && <span className="text-xs text-rose-600">Every line needs some text.</span>}
+        </div>
+      )}
+    </div>
+  );
+}

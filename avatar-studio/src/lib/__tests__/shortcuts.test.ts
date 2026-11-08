@@ -1,0 +1,96 @@
+// The keyboard shortcuts dialog: the keys that open it and the list it shows.
+// Run with: npm test
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { isCommentKey, isShortcutsKey, isSubmitKey, shortcutGroups } from "../shortcuts";
+
+const press = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">>) => ({ key: "/", code: "Slash", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...over });
+
+describe("keyboard shortcuts", () => {
+  it("opens on Ctrl+/ elsewhere and ⌘/ on a Mac, not the other way round", () => {
+    assert.equal(isShortcutsKey(press({ ctrlKey: true }), false), true);
+    assert.equal(isShortcutsKey(press({ metaKey: true }), true), true);
+    assert.equal(isShortcutsKey(press({ metaKey: true }), false), false);
+    assert.equal(isShortcutsKey(press({ ctrlKey: true }), true), false);
+    assert.equal(isShortcutsKey(press({}), false), false);
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, altKey: true }), false), false);
+  });
+
+  it("finds / wherever the layout puts it", () => {
+    // A German keyboard's / is Shift+7; the character is what counts.
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, shiftKey: true, code: "Digit7" }), false), true);
+    // The key's place on a US layout counts only when it types no Latin character (a Cyrillic layout's ".").
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, key: "." }), false), false);
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, key: "ю" }), false), true);
+    // There German, Spanish, and Nordic keyboards have "-" and Belgian "=": Ctrl+- and Ctrl+= zoom, left to the browser.
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, key: "-" }), false), false);
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, key: "=" }), false), false);
+    // Shift with the US place is ? and not this shortcut.
+    assert.equal(isShortcutsKey(press({ ctrlKey: true, shiftKey: true, key: "?" }), false), false);
+  });
+
+  it("posts a comment on Ctrl+Enter, ⌘Enter on a Mac, and on nothing else", () => {
+    const enter = (over: Partial<KeyboardEvent>) => ({ key: "Enter", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 13, ...over });
+    assert.equal(isSubmitKey(enter({ ctrlKey: true }), false), true);
+    assert.equal(isSubmitKey(enter({ metaKey: true }), true), true);
+    assert.equal(isSubmitKey(enter({ metaKey: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true }), true), false);
+    // A plain Enter is a new line in the box.
+    assert.equal(isSubmitKey(enter({}), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, shiftKey: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, altKey: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, key: "m" }), false), false);
+    // Held down it would post again once the box clears; ending an input method's text is not posting.
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, repeat: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, isComposing: true }), false), false);
+    assert.equal(isSubmitKey(enter({ ctrlKey: true, keyCode: 229 }), false), false);
+    const listed = shortcutGroups(true).find((g) => g.title === "In a video's comments")!.shortcuts;
+    assert.deepEqual(listed[0].keys, [["⌘", "Enter"]]);
+    assert.deepEqual(shortcutGroups(false).find((g) => g.title === "In a video's comments")!.shortcuts[0].keys, [["Ctrl", "Enter"]]);
+  });
+
+  it("lists the keys as each computer has them", () => {
+    const mac = shortcutGroups(true).flatMap((g) => g.shortcuts);
+    const pc = shortcutGroups(false).flatMap((g) => g.shortcuts);
+    assert.deepEqual(mac.find((s) => s.does.startsWith("Quick find"))!.keys, [["⌘", "K"]]);
+    assert.deepEqual(pc.find((s) => s.does.startsWith("Quick find"))!.keys, [["Ctrl", "K"]]);
+    // Ctrl+Y redoes only off a Mac, where ⌘Y is the browser's history.
+    assert.deepEqual(mac.find((s) => s.does === "Redo it")!.keys, [["⌘", "⇧", "Z"]]);
+    assert.deepEqual(pc.find((s) => s.does === "Redo it")!.keys, [["Ctrl", "Shift", "Z"], ["Ctrl", "Y"]]);
+    // Quick find's first and last result take Ctrl on a Mac too, as its handler does.
+    assert.deepEqual(mac.find((s) => s.does === "Go to the first or last result")!.keys, [["Ctrl", "Home"], ["Ctrl", "End"]]);
+    // The scene row's keys are the same on every computer.
+    for (const list of [mac, pc]) {
+      assert.deepEqual(list.find((s) => s.does.startsWith("Go to the scene before or after"))!.keys, [["←"], ["→"]]);
+      assert.deepEqual(list.find((s) => s.does.startsWith("Go to the first or last scene"))!.keys, [["Home"], ["End"]]);
+    }
+  });
+});
+
+describe("isCommentKey", () => {
+  const c = (over: Partial<Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "repeat" | "isComposing" | "keyCode">> = {}) => ({
+    key: "c", code: "KeyC", ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 67, ...over,
+  });
+  const on = { editable: false, enabled: true };
+
+  it("is C on its own, where it would not be typed, on any layout", () => {
+    assert.equal(isCommentKey(c(), on), true);
+    assert.equal(isCommentKey(c({ key: "C" }), on), true, "with Caps Lock on, which gives a capital without Shift");
+    assert.equal(isCommentKey(c({ code: "KeyJ" }), on), true, "a layout that types c elsewhere (Dvorak)");
+    assert.equal(isCommentKey(c({ key: "с" }), on), true, "the C key on a Cyrillic layout");
+    assert.equal(isCommentKey(c({ key: "j", code: "KeyC" }), on), false, "the C key where a layout types another Latin letter");
+  });
+
+  it("leaves C to text, to a key with Shift, Ctrl, ⌘, or Alt, to a held key, to an input method, and to a reader who turned single keys off", () => {
+    assert.equal(isCommentKey(c(), { editable: true, enabled: true }), false);
+    assert.equal(isCommentKey(c(), { editable: false, enabled: false }), false);
+    for (const over of [{ shiftKey: true, key: "C" }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { repeat: true }, { isComposing: true }, { keyCode: 229 }]) {
+      assert.equal(isCommentKey(c(over), on), false, JSON.stringify(over));
+    }
+  });
+
+  it("is listed with the comments' shortcuts", () => {
+    const listed = shortcutGroups(false).find((g) => g.title === "In a video's comments")!.shortcuts;
+    assert.deepEqual(listed.find((s) => s.does.startsWith("Write a comment"))!.keys, [["C"]]);
+  });
+});

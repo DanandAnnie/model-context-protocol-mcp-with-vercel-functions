@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { COLLECTION_MAX_VIDEOS, collectionNav, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
+import { COLLECTION_MAX_VIDEOS, collectionExpired, collectionNav, COLLECTION_NOTE_MAX, COLLECTION_TITLE_MAX, bulkVideos, collectionPage, deleteVideo, emptyTrash, listCollections, recordCollectionCtaClick, recordCollectionView, renameFolder, setCollectionNote, updateCollection, shareFolder, stopSharingFolder, updateVideo } from "../services";
 import { NotFoundError, ValidationError } from "../errors";
 import type { Video } from "../types";
 
@@ -271,7 +271,7 @@ describe("shared folders", () => {
     assert.equal("note" in saved, false);
     assert.equal((await listCollections(owner))[0].order, undefined);
     await assert.rejects(updateCollection(collection.id, { order: "random" }, owner), (err: Error) => err instanceof ValidationError && err.message === "The order is newest, oldest, or title");
-    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a title, a note, an order, or a button");
+    await assert.rejects(updateCollection(collection.id, {}, owner), (err: Error) => err instanceof ValidationError && err.message === "Send a title, a note, an order, a button, or an expiry");
     await assert.rejects(updateCollection(collection.id, { order: "title" }, "someone_else"), NotFoundError);
   });
 
@@ -420,5 +420,59 @@ describe("shared folders", () => {
     // A stopped share links nowhere.
     await stopSharingFolder(sold.id, owner);
     assert.equal(await collectionNav(sold.id, merged), null);
+  });
+
+  it("stops the link at its expiry: page, opens, clicks, and the way back answer as for no share, while the owner keeps it", async () => {
+    await getStore().put("video", made("v1"));
+    await getStore().put("video", made("v2"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    await updateCollection(collection.id, { cta: { label: "Book a showing", url: "https://example.com/book" } }, owner);
+    const at = new Date(Date.now() + 3_600_000);
+    // Written with any UTC offset, kept as the instant in UTC.
+    const offset = new Date(at.getTime() + 2 * 3_600_000).toISOString().replace("Z", "+02:00");
+    const set = await updateCollection(collection.id, { expiresAt: offset }, owner);
+    assert.equal(set.expiresAt, at.toISOString());
+    assert.equal(set.cta?.label, "Book a showing", "the rest of the page is left as it was");
+    const before = at.getTime() - 1;
+    const after = at.getTime();
+    assert.equal(collectionExpired(set, before), false);
+    assert.equal(collectionExpired(set, after), true, "expired from the instant itself");
+    // Before it: everything works.
+    assert.equal((await collectionPage(collection.id, before)).videos.length, 2);
+    assert.equal((await recordCollectionView(collection.id, () => true, before)).counted, true);
+    assert.equal((await recordCollectionCtaClick(collection.id, () => true, before)).counted, true);
+    const v2 = (await getStore().get<Video>("video", "v2"))!;
+    assert.equal((await collectionNav(collection.id, v2, before))?.next?.id, "v1");
+    // From it: the page, its beacons, and the way back from a video answer as for no share, and count nothing.
+    await assert.rejects(collectionPage(collection.id, after), NotFoundError);
+    let gateAsked = false;
+    await assert.rejects(recordCollectionView(collection.id, () => (gateAsked = true), after), NotFoundError);
+    await assert.rejects(recordCollectionCtaClick(collection.id, () => (gateAsked = true), after), NotFoundError);
+    assert.equal(gateAsked, false, "a visitor's window is not used up on an expired link");
+    assert.equal(await collectionNav(collection.id, v2, after), null);
+    const kept = (await getStore().get<{ views?: number; ctaClicks?: number }>("collection", collection.id))!;
+    assert.deepEqual([kept.views, kept.ctaClicks], [1, 1]);
+    // The owner still lists it with its expiry, and sharing the folder again hands back the same link.
+    assert.equal((await listCollections(owner))[0].expiresAt, at.toISOString());
+    assert.equal((await shareFolder({ folder: "Listings" }, owner)).collection.id, collection.id);
+    // The videos' own links are untouched.
+    assert.equal((await getStore().get<Video>("video", "v1"))!.shareExpiresAt, undefined);
+    // Clearing it opens the link again.
+    const cleared = await updateCollection(collection.id, { expiresAt: null }, owner);
+    assert.equal(cleared.expiresAt, undefined);
+    assert.equal((await collectionPage(collection.id, after)).videos.length, 2);
+  });
+
+  it("takes only a future expiry with a UTC offset, and only from the owner", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    for (const bad of [new Date(Date.now() - 60_000).toISOString(), "2026-12-01T10:00", "tomorrow", "", 5])
+      await assert.rejects(updateCollection(collection.id, { expiresAt: bad }, owner), ValidationError, `refused: ${String(bad)}`);
+    await assert.rejects(updateCollection(collection.id, { expiresAt: future }, "someone_else"), NotFoundError);
+    assert.equal((await getStore().get<{ expiresAt?: string }>("collection", collection.id))!.expiresAt, undefined);
+    // An expiry alone is a change; an empty body still is not.
+    assert.equal((await updateCollection(collection.id, { expiresAt: future }, owner)).expiresAt, future);
+    await assert.rejects(updateCollection(collection.id, {}, owner), /Send a title, a note, an order, a button, or an expiry/);
   });
 });

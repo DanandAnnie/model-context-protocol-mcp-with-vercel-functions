@@ -22,7 +22,7 @@ const HITS_PER_FOLDER = 3000;
  * Public beacon from a shared folder's page: one open per visitor per folder per window; `{ "place": "embed" }` marks
  * one framed on a website (counted apart too), and a place that is neither is refused. A
  * request from another site is `{ "counted": false }` without looking at the folder, and one past the visitor's or the
- * folder's ceiling on beacons is a 429. A link that no longer shows a page is 404; repeats are never an error.
+ * folder's ceiling on beacons is a 429. A link that no longer shows a page (not shared, past its expiry, or its folder empty) is 404; repeats are never an error.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {

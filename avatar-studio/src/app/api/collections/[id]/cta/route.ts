@@ -22,7 +22,7 @@ const HITS_PER_FOLDER = 3000;
  * Public beacon from a shared folder's button: one click per visitor per folder per window; the body is ignored. A
  * request from another site is `{ "counted": false }` without looking at the folder, one past the visitor's or the
  * folder's ceiling on beacons (shared with its opens) is a 429, a page without a button counts nothing, and a link that
- * is not shared, or a button on a folder that holds no video, is a 404. Repeats are never an error.
+ * is not shared or is past its expiry, or a button on a folder that holds no video, is a 404. Repeats are never an error.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {

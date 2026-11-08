@@ -33,7 +33,7 @@ import { clearCover, readCover, setCover } from "../cover";
 import { LENGTH_FILTERS, SHAPE_FILTERS, SHARE_FILTERS, VIEWED_FILTERS, inLength, inShape, inShareFilter, inViewed, madeWithin, posterUrl, shareOffline } from "../client";
 import { bumpViewsByDay } from "../insights";
 
-import { MORE_BLINKING_NEEDS_V, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
+import { MORE_BLINKING_NEEDS_V, shareExpiresAtSchema, accentSchema, avatarEngineSchema, moreBlinkingSchema, transparentSchema, backgroundSchema, captionStyleSchema, emotionSchema, expressivenessSchema, motionPromptSchema, pitchSchema, sceneLayoutSchema, sceneNameSchema, sceneTextSchema } from "./schemas";
 import { getBrandKit } from "./brand";
 import { agentKitFor } from "./agent-brand";
 import { pronunciationsFor, spokenCopy } from "../pronounce";
@@ -1070,11 +1070,8 @@ export const shareStartsAtSchema = z.iso
   .refine((v) => Date.parse(v) > Date.now(), "The go-live time must be in the future")
   .nullable();
 
-/** When a share link stops working: ISO 8601 with a UTC offset, in the future; null keeps it open indefinitely. */
-export const shareExpiresAtSchema = z.iso
-  .datetime({ offset: true, message: "The expiry must be an ISO 8601 date and time with a UTC offset" })
-  .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
-  .nullable();
+// When a share link stops working; kept with the other schemas so the shared folders module can use it too.
+export { shareExpiresAtSchema };
 
 /** A share link's password (4–64 characters, trimmed); null removes it. Kept only as a salted hash. */
 export const sharePasswordSchema = z

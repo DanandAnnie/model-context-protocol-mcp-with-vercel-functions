@@ -10,6 +10,7 @@ import { MAX_FOLDER_NAME } from "../types";
 import { owned } from "./shared";
 import { shareCtaSchema } from "../share-cta";
 import { purgeDue } from "./videos";
+import { shareExpiresAtSchema } from "./schemas";
 
 /** The most videos a collection page lists, the first ones in its order. */
 export const COLLECTION_MAX_VIDEOS = 100;
@@ -38,6 +39,13 @@ export interface Collection {
   /** Clicks on the page's button (one per visitor per window; see the cta route), kept when the button changes. */
   ctaClicks?: number;
   lastCtaClickAt?: string;
+  /** When the link stops working (an ISO instant): the page, its beacons, and the way back to it from a video answer as for no share. */
+  expiresAt?: string;
+}
+
+/** Whether a shared folder's link has passed its expiry: its public page then answers not found, while the owner still sees and can change it. */
+export function collectionExpired(c: Pick<Collection, "expiresAt">, now = Date.now()): boolean {
+  return !!c.expiresAt && Date.parse(c.expiresAt) <= now;
 }
 
 /** One video as a collection page shows it: what its own share page would preview, and no more. */
@@ -62,7 +70,8 @@ export const COLLECTION_ORDERS = ["newest", "oldest", "title"] as const;
 export type CollectionOrder = (typeof COLLECTION_ORDERS)[number];
 /**
  * A change to a shared folder's page: its title and its note (an empty one, or one with nothing visible, takes it off),
- * its order, its button (null takes it off), or any of them together. A field left out is left as it is. The title's and the note's lengths are checked
+ * its order, its button (null takes it off), its link's expiry (an ISO time in the future; null keeps it open), or any
+ * of them together. A field left out is left as it is. The title's and the note's lengths are checked
  * by updateCollection once they are tidied, so spaces that tidying removes do not count against them.
  */
 export const collectionUpdateSchema = z
@@ -71,9 +80,10 @@ export const collectionUpdateSchema = z
     note: z.string().optional(),
     order: z.enum(COLLECTION_ORDERS, { error: "The order is newest, oldest, or title" }).optional(),
     cta: shareCtaSchema.optional(),
+    expiresAt: shareExpiresAtSchema.optional(),
   })
-  .refine((v) => v.title !== undefined || v.note !== undefined || v.order !== undefined || v.cta !== undefined, {
-    error: "Send a title, a note, an order, or a button",
+  .refine((v) => v.title !== undefined || v.note !== undefined || v.order !== undefined || v.cta !== undefined || v.expiresAt !== undefined, {
+    error: "Send a title, a note, an order, a button, or an expiry",
   });
 
 /**
@@ -174,7 +184,7 @@ export async function updateCollection(id: string, input: z.input<typeof collect
   const parsed = collectionUpdateSchema.safeParse(input);
   // Said plainly to an API client too, not only as a schema issue.
   if (!parsed.success) throw new ValidationError(parsed.error.issues[0]?.message ?? "Invalid change");
-  const { order, cta } = parsed.data;
+  const { order, cta, expiresAt } = parsed.data;
   let title = parsed.data.title?.replace(TITLE_STRIP, " ").replace(/\s+/g, " ").trim();
   let note = parsed.data.note
     ?.trim()
@@ -203,6 +213,10 @@ export async function updateCollection(id: string, input: z.input<typeof collect
     if (cta !== undefined) {
       if (cta) next.cta = cta;
       else delete next.cta;
+    }
+    if (expiresAt !== undefined) {
+      if (expiresAt) next.expiresAt = new Date(expiresAt).toISOString();
+      else delete next.expiresAt;
     }
     await getStore().put("collection", next);
     return next;
@@ -253,7 +267,7 @@ export function recordCollectionView(
 ): Promise<{ views: number; counted: boolean }> {
   return withShareLock(id, async () => {
     const collection = await getStore().get<Collection>("collection", id);
-    if (!collection || !foldersHeld(await videosOf(collection.ownerId), now).has(collection.folder)) throw new NotFoundError("Collection not found");
+    if (!collection || collectionExpired(collection, now) || !foldersHeld(await videosOf(collection.ownerId), now).has(collection.folder)) throw new NotFoundError("Collection not found");
     if (!gate()) return { views: collection.views ?? 0, counted: false };
     const views = (collection.views ?? 0) + 1;
     const embedViews = (collection.embedViews ?? 0) + (place === "embed" ? 1 : 0);
@@ -271,7 +285,7 @@ export function recordCollectionView(
 export function recordCollectionCtaClick(id: string, gate: () => boolean = () => true, now = Date.now()): Promise<{ clicks: number; counted: boolean }> {
   return withShareLock(id, async () => {
     const collection = await getStore().get<Collection>("collection", id);
-    if (!collection) throw new NotFoundError("Collection not found");
+    if (!collection || collectionExpired(collection, now)) throw new NotFoundError("Collection not found");
     if (!collection.cta) return { clicks: collection.ctaClicks ?? 0, counted: false };
     if (!foldersHeld(await videosOf(collection.ownerId), now).has(collection.folder)) throw new NotFoundError("Collection not found");
     if (!gate()) return { clicks: collection.ctaClicks ?? 0, counted: false };
@@ -295,7 +309,7 @@ export async function collectionNav(
 ): Promise<{ href: string; label: string; next: { id: string; href: string; title: string } | null } | null> {
   if (typeof from !== "string" || !/^col_[0-9a-f]{1,64}$/.test(from) || !video.folder) return null;
   const collection = await getStore().get<Collection>("collection", from);
-  if (!collection || collection.ownerId !== (video.ownerId ?? LOCAL_OWNER) || collection.folder !== video.folder) return null;
+  if (!collection || collectionExpired(collection, now) || collection.ownerId !== (video.ownerId ?? LOCAL_OWNER) || collection.folder !== video.folder) return null;
   // The folder's page lists at most COLLECTION_MAX_VIDEOS; the way on follows that list and stops where it does.
   const listed = sendableIn(await videosOf(collection.ownerId), collection, now).slice(0, COLLECTION_MAX_VIDEOS);
   const at = listed.findIndex((v) => v.id === video.id);
@@ -331,7 +345,7 @@ function videoOrder(order: CollectionOrder = "newest"): (a: Video, b: Video) => 
  */
 export async function collectionPage(id: string, now = Date.now()): Promise<{ collection: Collection; videos: CollectionVideo[]; total: number }> {
   const collection = await getStore().get<Collection>("collection", id);
-  if (!collection) throw new NotFoundError("Collection not found");
+  if (!collection || collectionExpired(collection, now)) throw new NotFoundError("Collection not found");
   const all = await videosOf(collection.ownerId);
   // Read only: a share whose folder holds no video answers not found (the write that emptied it drops it).
   if (!foldersHeld(all, now).has(collection.folder)) throw new NotFoundError("Collection not found");

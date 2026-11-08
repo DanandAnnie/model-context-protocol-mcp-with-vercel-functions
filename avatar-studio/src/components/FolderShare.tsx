@@ -6,7 +6,14 @@ import { folderEmbedSnippet } from "@/lib/oembed";
 import { ShareQrCode } from "./ShareQrCode";
 
 type Order = "newest" | "oldest" | "title";
-type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; embedViews?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null; ctaClicks?: number; lastCtaClickAt?: string | null };
+type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; embedViews?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null; ctaClicks?: number; lastCtaClickAt?: string | null; expiresAt?: string | null };
+
+/** A time as a datetime-local field shows it, in the browser's own time zone (minutes, no seconds). */
+function localInput(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 /** The page's orders as the panel names them (the server's COLLECTION_ORDERS). */
 const ORDERS: { value: Order; label: string; saved: string }[] = [
@@ -49,6 +56,9 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setCtaLabel(cta?.label ?? "");
     setCtaUrl(cta?.url ?? "");
   };
+  // The link's expiry as typed (a local date and time), empty until one is picked.
+  const [expiryDraft, setExpiryDraft] = useState("");
+  const expiryFieldRef = useRef<HTMLInputElement>(null);
   const [failed, setFailed] = useState(false);
   // The QR code of the folder's link, shown on request so the panel stays short.
   const [showQr, setShowQr] = useState(false);
@@ -100,10 +110,22 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     setPageTitle("");
     ctaDirty.current = false;
     setCtaDraft(null);
+    setExpiryDraft("");
     lastSaved.current = null;
     queuedOrder.current = null;
     setPendingOrder(null);
   }, [folder]);
+
+  // Drawn again when the link expires while the panel is open, so it says so without a reload.
+  const [, setExpiryTick] = useState(0);
+  const expiresAt = shared?.expiresAt ?? undefined;
+  useEffect(() => {
+    const left = expiresAt ? Date.parse(expiresAt) - Date.now() : NaN;
+    if (!(left > 0 && left <= 2 ** 31 - 1)) return;
+    const timer = setTimeout(() => setExpiryTick((t) => t + 1), left + 50);
+    return () => clearTimeout(timer);
+  }, [expiresAt]);
+  const expired = !!expiresAt && Date.parse(expiresAt) <= Date.now();
 
   // Looked up afresh each time the panel opens (or Try again is pressed), so it never shows a stale link.
   useEffect(() => {
@@ -217,6 +239,7 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
       setPageTitle("");
       ctaDirty.current = false;
       setCtaDraft(null);
+      setExpiryDraft("");
       setNote("The folder's link no longer works.");
     } catch (e) {
       setNote((e as Error).message);
@@ -285,6 +308,37 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
     } finally {
       setBusy(false);
       refocus(ctaFieldRef.current);
+    }
+  };
+
+  // Sets the link's expiry to the time typed, or takes it off (`clear`), so the link stays open until sharing stops.
+  const saveExpiry = async (clear = false) => {
+    if (!shared) return;
+    let at: Date | null = null;
+    if (!clear) {
+      at = new Date(expiryDraft);
+      if (!expiryDraft || Number.isNaN(at.getTime())) return;
+      if (at.getTime() <= Date.now()) {
+        setNote("The expiry must be in the future.");
+        // Back to the field, so the time can be put right at once.
+        expiryFieldRef.current?.focus();
+        return;
+      }
+    }
+    setBusy(true);
+    setNote("");
+    try {
+      const asked = folder;
+      const r = await api<{ collection: Shared }>(`/api/collections/${encodeURIComponent(shared.id)}`, { method: "PATCH", body: JSON.stringify({ expiresAt: at ? at.toISOString() : null }) });
+      if (current.current !== asked) return;
+      keepFresher(r.collection);
+      setExpiryDraft("");
+      setNote(r.collection.expiresAt ? `The folder's link stops working on ${formatDate(r.collection.expiresAt)}.` : "Expiry removed. The folder's link works until you stop sharing it.");
+    } catch (e) {
+      setNote((e as Error).message);
+    } finally {
+      setBusy(false);
+      refocus(expiryFieldRef.current);
     }
   };
 
@@ -403,6 +457,12 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
           ) : shared ? (
             <>
               <p className="mt-1 text-slate-500">One page lists the folder&apos;s videos whose own links can be sent now.</p>
+              {/* For editors, who can set a later expiry; a viewer sees the expiry line further down. */}
+              {expired && canEdit && (
+                <p className="mt-1 rounded bg-rose-50 px-2 py-1 font-medium text-rose-800" data-testid="folder-share-expired">
+                  This link expired on {formatDate(expiresAt!)}. Its page answers &ldquo;not found&rdquo; until you set a later expiry or remove it.
+                </p>
+              )}
               <p className="mt-1 text-slate-600" data-testid="folder-share-views">
                 {!shared.views
                   ? "Not opened yet."
@@ -448,6 +508,57 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                   <p className="text-slate-600">Scanning it opens the folder&apos;s page. For a sign at an open house, a flyer, or a slide.</p>
                   <ShareQrCode url={shared.url} title={shared.title || folder} subject="folder" />
                 </div>
+              )}
+              {canEdit ? (
+                <form
+                  className="mt-3"
+                  data-testid="folder-share-expiry"
+                  // A time already past is answered in the panel's status line rather than a browser bubble.
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!busy && expiryDraft) void saveExpiry();
+                  }}
+                >
+                  <label htmlFor="folder-share-expiry-at" className="font-medium text-slate-700">
+                    Link expiry
+                  </label>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <input
+                      ref={expiryFieldRef}
+                      id="folder-share-expiry-at"
+                      type="datetime-local"
+                      value={expiryDraft}
+                      min={localInput(new Date().toISOString())}
+                      onChange={(e) => setExpiryDraft(e.target.value)}
+                      readOnly={busy}
+                      aria-describedby="folder-share-expiry-hint"
+                      className="min-w-0 flex-1 rounded border border-slate-200 px-2 py-1"
+                      data-testid="folder-share-expiry-at"
+                    />
+                    <button type="submit" disabled={busy || !expiryDraft} className="shrink-0 rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50 disabled:opacity-50">
+                      {expiresAt ? "Change expiry" : "Set expiry"}
+                    </button>
+                    {expiresAt && (
+                      <button type="button" onClick={() => void saveExpiry(true)} disabled={busy} className="shrink-0 rounded-full border border-slate-200 px-3 py-1 font-medium hover:bg-slate-50 disabled:opacity-50">
+                        No expiry
+                      </button>
+                    )}
+                  </div>
+                  <span id="folder-share-expiry-hint" className="mt-1 block text-slate-500" data-testid="folder-share-expiry-hint">
+                    {expiresAt
+                      ? expired
+                        ? `Expired on ${formatDate(expiresAt)}.`
+                        : `The link stops working on ${formatDate(expiresAt)}. The videos' own links are not affected.`
+                      : "The link works until you stop sharing it. Pick a time for it to stop, such as the end of an open house."}
+                  </span>
+                </form>
+              ) : (
+                expiresAt && (
+                  <p className="mt-2 text-slate-600" data-testid="folder-share-expiry-text">
+                    {expired ? `Link expired on ${formatDate(expiresAt)}.` : `Link expires on ${formatDate(expiresAt)}.`}
+                  </p>
+                )
               )}
               {canEdit ? (
                 <form

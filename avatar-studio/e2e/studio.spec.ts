@@ -4728,6 +4728,94 @@ test("a shared folder's page of six videos or more can be searched by title, the
   await visitor.close();
 });
 
+test("a shared folder's link can expire: the panel sets and removes it, and the page, its beacons, and the way back stop at it", async ({ page, browser }) => {
+  // Two renders and a 20-second wait for the expiry to pass: more than the default minute on a slow runner.
+  test.setTimeout(120_000);
+  const tag = `Expiry ${Date.now().toString(36)}`;
+  const made: Array<{ id: string }> = [];
+  for (const title of ["Attic tour", "Cellar tour"]) {
+    const v = await createVideoViaApi(page, title);
+    await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+    expect((await page.request.patch(`/api/videos/${v.id}`, { data: { folder: tag } })).status()).toBe(200);
+    made.push(v);
+  }
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  expect(collection.expiresAt).toBeNull();
+  const shared = async () => (await (await page.request.get("/api/collections")).json()).collections.find((c: { id: string }) => c.id === collection.id);
+  // The panel sets an expiry from a local date and time, and says when the link stops.
+  await page.goto("/videos");
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  const panel = page.getByTestId("folder-share-panel");
+  const field = panel.getByLabel("Link expiry");
+  const status = page.getByTestId("folder-share-note");
+  await expect(panel.getByTestId("folder-share-expiry-hint")).toContainText("The link works until you stop sharing it.");
+  await expect(panel.getByRole("button", { name: "No expiry" })).toHaveCount(0);
+  // A time already past is refused in the panel, and nothing is saved.
+  await field.fill("2020-01-01T10:00");
+  await panel.getByRole("button", { name: "Set expiry" }).click();
+  await expect(status).toHaveText("The expiry must be in the future.");
+  await expect(field).toBeFocused();
+  expect((await shared()).expiresAt).toBeNull();
+  const local = await page.evaluate(() => {
+    const d = new Date(Date.now() + 86_400_000);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T10:00`;
+  });
+  const instant = await page.evaluate((v) => new Date(v).toISOString(), local);
+  await field.fill(local);
+  await panel.getByRole("button", { name: "Set expiry" }).click();
+  await expect(status).toContainText("The folder's link stops working on");
+  await expect(panel.getByTestId("folder-share-expiry-hint")).toContainText("The link stops working on");
+  await expect(field).toHaveValue("");
+  expect((await shared()).expiresAt).toBe(instant);
+  await expect(panel.getByRole("button", { name: "Change expiry" })).toBeVisible();
+  // No expiry keeps the link open again.
+  await panel.getByRole("button", { name: "No expiry" }).click();
+  await expect(status).toHaveText("Expiry removed. The folder's link works until you stop sharing it.");
+  expect((await shared()).expiresAt).toBeNull();
+  await expect(panel.getByRole("button", { name: "No expiry" })).toHaveCount(0);
+  // A visitor finds the page and, from a video, the way back to it while the link is open (20 seconds, room enough for
+  // a slow runner to load both pages before it passes).
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  const soon = new Date(Date.now() + 20_000).toISOString();
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { expiresAt: soon, cta: { label: "Book a showing", url: "https://example.com/book" } } })).status()).toBe(200);
+  await guest.goto(collection.url);
+  await expect(guest.getByTestId("collection-video")).toHaveCount(2);
+  await guest.getByTestId("collection-video").first().click();
+  await expect(guest.getByTestId("share-back-to-folder")).toBeVisible();
+  await expect(guest.getByTestId("share-next-in-folder")).toBeVisible();
+  const videoUrl = guest.url();
+  // Once it passes, the page answers not found, counts nothing, and the video's page leads nowhere, while the video
+  // itself still plays from its own link.
+  expect(Date.now()).toBeLessThan(Date.parse(soon));
+  await expect.poll(() => Date.now() > Date.parse(soon) + 200, { timeout: 30_000 }).toBe(true);
+  const gone = await guest.goto(collection.url);
+  expect(gone?.status()).toBe(404);
+  expect((await guest.goto(`${collection.url}?embed=1`))?.status()).toBe(404);
+  // A fresh visitor (whose window would count an open) and the button's beacon are refused too.
+  const stranger = await browser.newContext();
+  expect((await stranger.request.post(`/api/collections/${collection.id}/view`)).status()).toBe(404);
+  expect((await stranger.request.post(`/api/collections/${collection.id}/cta`)).status()).toBe(404);
+  await stranger.close();
+  const after = await shared();
+  expect([after.views, after.ctaClicks]).toEqual([1, 0]);
+  await guest.goto(videoUrl);
+  await expect(guest.getByTestId("share-player")).toBeVisible();
+  await expect(guest.getByTestId("share-back-to-folder")).toHaveCount(0);
+  await expect(guest.getByTestId("share-next-in-folder")).toHaveCount(0);
+  // The owner still sees the link, marked expired, and can open it again.
+  await page.reload();
+  await page.getByLabel("Folder", { exact: true }).selectOption(tag);
+  await page.getByRole("button", { name: "Share folder" }).click();
+  await expect(panel.getByTestId("folder-share-expired")).toContainText("This link expired on");
+  await panel.getByRole("button", { name: "No expiry" }).click();
+  await expect(panel.getByTestId("folder-share-expired")).toHaveCount(0);
+  expect((await guest.goto(collection.url))?.status()).toBe(200);
+  await visitor.close();
+});
+
 test("library sorts by the share of share-page viewers who watched to the end", async ({ page }) => {
   const tag = `keptsort${Date.now().toString(36)}`;
   const kept = await createVideoViaApi(page, `Kept ${tag}`);

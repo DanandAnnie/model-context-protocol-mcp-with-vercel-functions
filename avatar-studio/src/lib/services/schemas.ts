@@ -87,3 +87,13 @@ export const sceneTextSchema = z
   }))
   // Blank text is no text, so a cleared field is stored as absent.
   .transform((t) => (t.text ? t : undefined));
+
+/**
+ * When a share link stops working, a video's or a shared folder's: ISO 8601 with a UTC offset, in the future; null
+ * keeps it open indefinitely. Here rather than with videos so the shared folders module, which videos imports, can use
+ * it without reading it before it is defined.
+ */
+export const shareExpiresAtSchema = z.iso
+  .datetime({ offset: true, message: "The expiry must be an ISO 8601 date and time with a UTC offset" })
+  .refine((v) => Date.parse(v) > Date.now(), "The expiry must be in the future")
+  .nullable();

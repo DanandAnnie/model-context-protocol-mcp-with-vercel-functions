@@ -21,7 +21,8 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
 /**
  * Changes the folder's page: `{ "title" }` (its heading, up to 100 characters; empty shows the folder's name again),
  * `{ "note" }` (up to 500 characters; empty takes it off), `{ "order" }` (newest, oldest, or title),
- * `{ "cta": { "label", "url" } }` (a button above the videos; null takes it off), or any of them together. Editors only.
+ * `{ "cta": { "label", "url" } }` (a button above the videos; null takes it off), `{ "expiresAt" }` (an ISO time in the
+ * future when the link stops working; null keeps it open), or any of them together. Editors only.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {

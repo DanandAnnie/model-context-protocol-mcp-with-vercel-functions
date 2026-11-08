@@ -2482,3 +2482,16 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - The studio now answers with one in the share pages' dark style: "This link isn't available". It says the person who shared it may have set it to expire, switched it off, or not made it live yet, and to ask them for a new link.
     - It names no reason in particular, so a link that never existed looks the same as one that stopped. It is kept out of search results.
   - **Tests.** The folder expiry e2e test now checks that the expired page reads in those words.
+- Opens per day for a shared folder (`a65d885`).
+  - **What it does.** The Share folder panel shows the folder page's opens over the last two weeks as a row of fourteen bars, the chart the video page uses for its views. Each bar names its day and count, and the chart says "N in 14 days".
+  - **How they are kept.**
+    - Each counted open, embedded ones included, is kept on its UTC day, up to 90 days, as a video's share views are. Older days are dropped at the next counted open.
+    - An open the visitor's 10-minute window refuses is not a day's open.
+    - The days follow the link through a rename, and `GET /api/collections` lists them as `viewsByDay`.
+  - **Review findings fixed before commit.**
+    - A link opened only before opens were kept by day would have shown a flat "0 in 14 days" beside "Opened 12 times". The chart now shows once an open has been kept by day.
+    - The e2e test read today's date after the open was counted, so a run across midnight UTC could fail. It reads the open's own day.
+    - The docs said "the last 90 days" where older days are dropped only at the next open. A README clause put the visitor's window against the chart.
+  - **Tests.**
+    - A unit test counts opens on either side of midnight UTC, an embedded one, and one the window refuses. It also checks the days through a rename, and the dropping of days past the history kept.
+    - The folder opens e2e test checks that there is no chart before the first open, the day kept, and the chart's total, its accessible name, and "1 in 14 days".

@@ -2594,3 +2594,21 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Tests.**
     - Unit tests for tidying, limits (an emoji tag at the limit included), counts, updates, the filter and search, a slower edit not undoing tags, and the query's character count.
     - An e2e test adds tags with Enter, a typed comma, and a pasted list. It checks the field keeps the focus, removes tags by keyboard with the focus moving on, and reloads. It filters the library by a tag (with its count and address, any case, and a tag named "all") and finds a video by its tag.
+- Tags on many videos at once (`91d9e44`).
+  - **What it does.**
+    - The library's multi-select bar has a Tags field that takes a tag, or several with commas. "Add tag" puts them on every selected video and "Remove tag" takes them off, case aside. Each video keeps its other tags in their order and spelling.
+    - The library's tags are suggested for the tag being typed, with the ones before it kept in front.
+    - A video the new tags would take past 10 is left as it was and stays selected, with a note saying so, so a tag can be taken off it first.
+    - "Remove tag" when none of the selected videos has the tag says so and sends nothing, as "No cover" does.
+    - The field follows the bar's conventions: it takes the focus, Escape or its close button puts it back on its button, and only one field is open at a time.
+  - **API.** `POST /api/videos/bulk` takes `{ "action": "tags", "ids", "add"?, "remove"? }`. Tags are tidied and held to the `PATCH` rules, and at least one is needed. Videos that would have more than 10 tags are reported in `refused`.
+  - **How it writes.** Each video's new tags are worked out from the record as stored, under its lock, so tags set meanwhile stay. Its approval, star, and counts are kept. A video the request does not change is not written.
+  - **Review findings fixed before commit.**
+    - A remove-only request could be refused for a video already holding more than 10 tags (an older limit), and the client then showed the go-live note. Only an add that grows a video past the limit is refused now.
+    - "Remove tag" sent a request when no selected video had the tag.
+    - Suggestions only helped with the first tag in a comma list.
+    - The field could not hold ten full-length tags.
+    - The docs now say the lock is per server instance, and that `done` counts unchanged videos.
+  - **Tests.**
+    - Unit tests: adding and removing case aside; a full video refused and left alone; ids not there or someone else's reported as missing; approval, star, and views kept; no write when nothing changes; a video over the limit can still have tags removed; requests with no tag or too long a tag refused.
+    - An e2e test selects two videos, checks Escape returns to the Tags button, and adds two tags. The full video is named and stays selected. It checks "Remove tag" with a tag none has, removes one case aside, and confirms the library's tag filter counts both.

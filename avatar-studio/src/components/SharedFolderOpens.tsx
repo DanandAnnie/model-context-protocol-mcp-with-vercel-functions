@@ -15,7 +15,8 @@ export function SharedFolderOpens({ collections }: { collections: FolderOpensInp
   const data = useMemo(() => folderOpens(collections, Date.now(), DAYS), [collections]);
   if (!data.shared) return null;
   return (
-    <Card className="p-5" data-testid="shared-folder-opens">
+    // min-w-0: a grid item otherwise grows to its longest heading on a phone, pushing the counts off the screen.
+    <Card className="min-w-0 p-5" data-testid="shared-folder-opens">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500">Shared folders</h3>
         <span className="text-xs text-slate-500">

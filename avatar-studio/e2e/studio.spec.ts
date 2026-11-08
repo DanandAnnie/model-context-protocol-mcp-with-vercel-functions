@@ -15965,7 +15965,8 @@ test("home names the shared folders opened most in two weeks, each opening the l
   for (const v of [inside, outside]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
   expect((await page.request.patch(`/api/videos/${inside.id}`, { data: { folder: tag } })).status()).toBe(200);
   const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
-  const heading = `Most opened ${Date.now().toString(36)}`;
+  // Long enough to be cut off on a phone, where it must not push the counts off the screen.
+  const heading = `Most opened ${Date.now().toString(36)} for the spring open houses on the east side of town`;
   expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { title: heading } })).status()).toBe(200);
   // Six visitors (six addresses) open the page, so it is among the folders opened most whatever else the account shares.
   for (let i = 0; i < 6; i++) {
@@ -15980,6 +15981,13 @@ test("home names the shared folders opened most in two weeks, each opening the l
     const row = card.getByRole("listitem").filter({ hasText: heading });
     // Named by its page's heading, with its opens.
     await expect(row).toContainText("6 opens");
+    // On a phone the card stays on the screen, the opens beside the cut-off heading.
+    await page.setViewportSize({ width: 390, height: 800 });
+    const cardBox = await card.boundingBox();
+    expect(cardBox!.x + cardBox!.width).toBeLessThanOrEqual(390);
+    const count = await row.getByText("6 opens").boundingBox();
+    expect(count!.x + count!.width).toBeLessThanOrEqual(390);
+    await page.setViewportSize({ width: 1280, height: 720 });
     expect(Number(await page.getByTestId("shared-folder-opens-total").innerText())).toBeGreaterThanOrEqual(6);
     // It opens the library at that folder: its video shown, the one outside it not, and the folder picked.
     await row.getByRole("link", { name: heading }).click();

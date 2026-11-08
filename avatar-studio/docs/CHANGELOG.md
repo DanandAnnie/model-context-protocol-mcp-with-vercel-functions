@@ -2443,3 +2443,26 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - An e2e test searches a six-video folder by part of a word, by two words, and without accents. It checks the count, the empty state with Clear search, and Escape (sent so the browser itself does not act on it).
     - It checks Back after Play all and after a card, a link with a search, the embedded view's address, and that a folder down to five offers no search.
     - Run against the code before review, the test fails at Back after Play all.
+- Expiry for a shared folder's link (`3e57771`).
+  - **What it does.** The Share folder panel has a Link expiry field. A realtor sharing an open house folder can have its link stop at the end of the weekend, as a video's own link can.
+    - The field takes a local date and time. Set expiry (Change expiry once one is set) saves it, and No expiry takes it off.
+    - The panel says when the link stops. For editors, it marks an expired link and says how to open it again. Viewers see a line saying when it expires or expired.
+    - `PATCH /api/collections/:id` takes `expiresAt` (an ISO time with a UTC offset, in the future, kept in UTC; `null` reopens the link), and `GET /api/collections` lists it.
+  - **From the expiry on.**
+    - The folder's page and its embedded view answer not found.
+    - Its open and button beacons answer 404 and count nothing, without using up a visitor's window.
+    - A video's share page no longer shows the "Back to" or "Next in" links to the folder.
+    - The videos' own links work as they are set.
+    - The owner still lists the share, and sharing the folder again hands back the same link until the expiry is moved or removed.
+  - **Kept straight.**
+    - The expiry rule used to live in the videos module, which imports the shared folders module. Reading it from there while that module loaded could find it not yet defined. It now lives with the other shared rules, which both modules import.
+    - A time already past is refused in the panel, which puts the focus back in the field.
+  - **Review findings fixed before commit.**
+    - The e2e test gave a slow runner only 6 seconds to load two pages before the expiry. It now has 20, and checks the time had not passed before the expiry steps.
+    - The expired notice told viewers to set a later expiry, which only editors can do. It shows to editors only.
+    - The docs for the page and the two beacons did not name the expired case.
+    - The test did not check the embedded view or the button beacon after expiry. It also checked the open count with a visitor whose repeat would not have counted anyway. It now uses a fresh visitor.
+  - **Tests.**
+    - Unit tests cover the expiry kept in UTC from any offset, and the page, opens, clicks, and the way back before and from the instant itself. They check that nothing is counted after it, and that the visitor's window is not asked.
+    - They also cover the owner's listing, sharing again, clearing, and refusing a past time, a time without an offset, other values, and another account.
+    - An e2e test sets, refuses, and removes an expiry from the panel. It then lets a 20-second expiry pass and checks the page, the embedded view, both beacons, the back and next links on a video's page, and the counts. It finally reopens the link from the panel.

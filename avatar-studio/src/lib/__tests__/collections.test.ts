@@ -475,4 +475,24 @@ describe("shared folders", () => {
     assert.equal((await updateCollection(collection.id, { expiresAt: future }, owner)).expiresAt, future);
     await assert.rejects(updateCollection(collection.id, {}, owner), /Send a title, a note, an order, a button, or an expiry/);
   });
+
+  it("keeps counted opens per UTC day, carried through a rename, and leaves uncounted ones out", async () => {
+    await getStore().put("video", made("v1"));
+    const { collection } = await shareFolder({ folder: "Listings" }, owner);
+    const day1 = Date.parse("2026-11-03T23:30:00Z");
+    const day2 = Date.parse("2026-11-04T00:30:00Z");
+    await recordCollectionView(collection.id, () => true, day1);
+    await recordCollectionView(collection.id, () => true, day1 + 60_000, "embed");
+    await recordCollectionView(collection.id, () => false, day1 + 120_000);
+    await recordCollectionView(collection.id, () => true, day2);
+    const read = async () => (await getStore().get<{ viewsByDay?: Record<string, number>; views?: number }>("collection", collection.id))!;
+    assert.deepEqual((await read()).viewsByDay, { "2026-11-03": 2, "2026-11-04": 1 }, "an open the visitor's window refused is not a day's open");
+    assert.equal((await read()).views, 3);
+    // Kept through a rename, and listed for the owner.
+    await renameFolder({ from: "Listings", to: "Spring" }, owner);
+    assert.deepEqual((await listCollections(owner))[0].viewsByDay, { "2026-11-03": 2, "2026-11-04": 1 });
+    // Days older than the history kept drop off as a new open is counted.
+    await recordCollectionView(collection.id, () => true, Date.parse("2027-03-01T12:00:00Z"));
+    assert.deepEqual((await read()).viewsByDay, { "2027-03-01": 1 });
+  });
 });

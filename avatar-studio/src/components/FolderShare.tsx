@@ -4,9 +4,10 @@ import { Share2 } from "lucide-react";
 import { api, formatDate } from "@/lib/client";
 import { folderEmbedSnippet } from "@/lib/oembed";
 import { ShareQrCode } from "./ShareQrCode";
+import { DaySparkline } from "./ViewSparkline";
 
 type Order = "newest" | "oldest" | "title";
-type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; embedViews?: number; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null; ctaClicks?: number; lastCtaClickAt?: string | null; expiresAt?: string | null };
+type Shared = { id: string; folder: string; url: string; updatedAt?: string; views?: number; embedViews?: number; viewsByDay?: Record<string, number>; lastViewedAt?: string | null; title?: string | null; note?: string | null; order?: Order; cta?: { label: string; url: string } | null; ctaClicks?: number; lastCtaClickAt?: string | null; expiresAt?: string | null };
 
 /** A time as a datetime-local field shows it, in the browser's own time zone (minutes, no seconds). */
 function localInput(iso: string): string {
@@ -470,6 +471,13 @@ export function FolderShare({ folder, canEdit }: { folder: string; canEdit: bool
                       shared.embedViews ? ` (${shared.embedViews === 1 ? "once" : `${shared.embedViews} times`} embedded on a website)` : ""
                     }${shared.lastViewedAt ? `, last on ${formatDate(shared.lastViewedAt)}` : ""}.`}
               </p>
+              {/* Not for a link opened only before opens were kept by day: its chart would read "0" beside the count above. */}
+              {!!shared.views && Object.keys(shared.viewsByDay ?? {}).length > 0 && (
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-600">
+                  <span>Opens by day</span>
+                  <DaySparkline byDay={shared.viewsByDay} one="open" many="opens" testId="folder-share-opens-by-day" />
+                </div>
+              )}
               {(shared.cta || !!shared.ctaClicks) && (
                 <p className="text-slate-600" data-testid="folder-share-cta-clicks">
                   {!shared.ctaClicks

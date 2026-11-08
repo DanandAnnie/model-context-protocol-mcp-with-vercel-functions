@@ -3959,6 +3959,8 @@ test("a shared folder counts the opens of its public page and shows them to the 
   const shareButton = page.getByRole("button", { name: "Share folder" });
   await shareButton.click();
   await expect(page.getByTestId("folder-share-views")).toHaveText("Not opened yet.");
+  // No opens yet, so no picture of them by day.
+  await expect(page.getByTestId("folder-share-opens-by-day")).toHaveCount(0);
   await page.keyboard.press("Escape");
   // A visitor without a session opens the page; a reload in the same window is the same open.
   const visitor = await browser.newContext();
@@ -3973,8 +3975,15 @@ test("a shared folder counts the opens of its public page and shows them to the 
   const after = await views();
   expect(after.views).toBe(1);
   expect(Date.now() - Date.parse(after.lastViewedAt!)).toBeLessThan(120_000);
+  // The open is kept on its UTC date (the day it was counted, not the day the test reads it), for the panel's opens by day.
+  const day = after.lastViewedAt!.slice(0, 10);
+  expect((after as unknown as { viewsByDay: Record<string, number> }).viewsByDay).toEqual({ [day]: 1 });
   await shareButton.click();
   await expect(page.getByTestId("folder-share-views")).toHaveText(/^Opened once, last on .+\.$/);
+  const byDay = page.getByTestId("folder-share-opens-by-day");
+  await expect(byDay).toHaveAttribute("data-total", "1");
+  await expect(byDay.getByRole("img")).toHaveAccessibleName("Opens per day for the last 14 days, 1 in total");
+  await expect(byDay).toContainText("1 in 14 days");
   // A page from another site cannot count opens, and a link that shows nothing answers not found.
   expect(await (await page.request.post(`/api/collections/${collection.id}/view`, { headers: { "sec-fetch-site": "cross-site" } })).json()).toEqual({ counted: false });
   expect((await views()).views).toBe(1);

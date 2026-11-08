@@ -11,6 +11,7 @@ import { owned } from "./shared";
 import { shareCtaSchema } from "../share-cta";
 import { purgeDue } from "./videos";
 import { shareExpiresAtSchema } from "./schemas";
+import { bumpViewsByDay } from "../insights";
 
 /** The most videos a collection page lists, the first ones in its order. */
 export const COLLECTION_MAX_VIDEOS = 100;
@@ -27,6 +28,8 @@ export interface Collection {
   views?: number;
   /** Of `views`, those of the page framed on another website (its embed code), so the owner can tell them apart. */
   embedViews?: number;
+  /** Counted opens per UTC day ("YYYY-MM-DD" → count), the last VIEW_HISTORY_DAYS days, as a video's views are kept. */
+  viewsByDay?: Record<string, number>;
   lastViewedAt?: string;
   /** The heading of the public page in place of the folder's name (one line of plain text); none shows the name. */
   title?: string;
@@ -271,7 +274,8 @@ export function recordCollectionView(
     if (!gate()) return { views: collection.views ?? 0, counted: false };
     const views = (collection.views ?? 0) + 1;
     const embedViews = (collection.embedViews ?? 0) + (place === "embed" ? 1 : 0);
-    await getStore().put("collection", { ...collection, views, ...(embedViews ? { embedViews } : {}), lastViewedAt: new Date(now).toISOString() });
+    const viewsByDay = bumpViewsByDay(collection.viewsByDay, now);
+    await getStore().put("collection", { ...collection, views, ...(embedViews ? { embedViews } : {}), viewsByDay, lastViewedAt: new Date(now).toISOString() });
     return { views, counted: true };
   });
 }

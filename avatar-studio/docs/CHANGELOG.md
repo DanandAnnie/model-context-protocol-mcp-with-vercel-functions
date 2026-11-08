@@ -2537,3 +2537,26 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Tests.**
     - Unit tests for setting, changing, and taking off filters, for keeping other parameters in place, for a repeated filter, and for the key telling Unfiled from every folder.
     - An e2e test picks a folder, Completed, Starred, and a search, then checks the address, a reload, and Back from a video. It turns Starred off and types on with pauses longer than the search's own, checking nothing typed is undone. It covers Unfiled through the sidebar's My videos, Back, and a reload, then Clear filters.
+- Saved views in the library (`79c3efb`).
+  - **What it does.**
+    - With a search or filter on, Save view names what the library shows. The view appears as a chip over the list and opens the library at that search and those filters again in one click. The chip for the view on screen is marked.
+    - Each chip has its own remove button.
+    - A name already used (case aside) takes the new filters where it is.
+    - Up to 12 views are kept, the oldest going first.
+  - **Where they are kept.** In this browser, for each person and space (a workspace, or their own). They are not shown in the trash or over a batch's results, which a view does not keep. Another tab's changes are read when made, and a save starts from what storage holds then.
+  - **Keyboard and screen readers.** Save view opens a name field that takes the focus. Enter saves and Escape puts it away, back on Save view. Saving, updating, and removing are said aloud. After a removal the focus goes to the next view, the one before it, Save view, or the search box when none is left.
+  - **Helpers.** `src/lib/saved-views.ts` holds the rules:
+    - Names have their spaces folded and are cut at 40 characters, never through an emoji.
+    - Queries are cut down to the library's own search and filters.
+    - A view of the same name is replaced, up to the cap.
+    - Only well-formed views are read back.
+  - **Review findings fixed before commit.**
+    - Removing the last view on the plain library lost the focus and its announcement.
+    - Over a batch's results a view was marked as the one shown, and Save view offered to keep a list it would not open.
+    - In a workspace, two people on one browser shared their views. They are now kept per person.
+    - The name form could come back half typed after Clear filters.
+    - Two tabs saving could drop each other's views.
+    - A name cut at the limit could split an emoji.
+  - **Tests.**
+    - Unit tests for queries, names (including an emoji at the limit), replacing, the cap, removal, comparing views, and reading back.
+    - An e2e test saves a folder and Starred view, with Escape and Enter. It clears the filters, reopens the view, re-saves the same name with the folder alone, and reopens it after a reload. It removes the last view on the plain library and checks the announcement and focus.

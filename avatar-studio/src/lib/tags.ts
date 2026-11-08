@@ -38,6 +38,16 @@ export function retagged(current: string[] | undefined, add: string[], remove: s
   return cleanTags([...kept, ...add]);
 }
 
+/**
+ * A video's tags with `from` (case aside) renamed to `to` where it stands, or taken off when `to` is empty; a video that
+ * already has `to` keeps one of it (the first), so a rename onto an existing tag merges the two.
+ */
+export function renamedTags(current: string[] | undefined, from: string, to: string): string[] {
+  const name = tagText(to);
+  // The new name in one spelling wherever it lands, so a merge leaves no second spelling behind on the video.
+  return cleanTags((current ?? []).flatMap((t) => (sameTag(t, from) || (name && sameTag(t, name)) ? (name ? [name] : []) : [t])));
+}
+
 export interface TagCount {
   name: string;
   count: number;

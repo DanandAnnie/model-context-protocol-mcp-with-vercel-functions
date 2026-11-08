@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, AtSign, Tag, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, AtSign, Pencil, Tag, TagX, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { CREATED_WITHIN_DAYS, LENGTH_FILTERS, LIBRARY_SEARCH_MAX, SHAPE_FILTERS, SHARE_FILTERS, VIEWED_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, libraryAddress, libraryFilterKey, withoutLibraryFilters } from "@/lib/client";
 import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { useMobileNav } from "@/components/MobileNav";
@@ -454,6 +454,49 @@ function VideosInner() {
       setFolderBusy(false);
     }
   }
+  // Tag management: rename the chosen tag on every video (merging into a tag of that name) or take it off them all.
+  const [tagBusy, setTagBusy] = useState(false);
+  // A rename shows the same videos (or more, on a merge) and a removal every one, so the selection and the bar's
+  // drafts are kept through the filter's move to the new name.
+  const keepSelection = useRef(false);
+  const tagSelectRef = useRef<HTMLSelectElement>(null);
+  async function manageTag(remove: boolean) {
+    if (!tagFilter) return;
+    // As the library spells it (the address may not), so the prompt starts from that and a respelling can be asked for.
+    const used = tagsUsed.find((t) => sameTag(t.name, tagFilter));
+    const from = used?.name ?? tagFilter;
+    const which = !used ? "the videos in the trash carrying it" : `${used.count === 1 ? "the 1 video" : `the ${used.count} videos`} carrying it (and any in the trash)`;
+    let to = "";
+    if (remove) {
+      if (!window.confirm(`Remove the tag "${from}" from ${which}? The videos stay in the library.`)) return;
+    } else {
+      const answer = window.prompt(`New name for the tag "${from}" on ${which}`, from);
+      if (answer === null) return;
+      to = tagText(answer);
+      if (!to || to === from) return;
+      if (Array.from(to).length > VIDEO_TAG_MAX) return setBulkErr(`A tag is at most ${VIDEO_TAG_MAX} characters`);
+    }
+    setTagBusy(true);
+    setBulkErr(null);
+    try {
+      const done = await api<{ changed: number; name: string }>("/api/videos/tags", { method: "POST", body: JSON.stringify({ from, to }) });
+      // The filter follows the tag to its name as saved (a merge takes the library's spelling); a removed tag leaves none.
+      const next = remove ? "" : done.name;
+      // Only when the filter moves: the reset it skips runs on that change, and must not be skipped on a later one.
+      if (next !== tagFilter) keepSelection.current = true;
+      setTagFilter(next);
+      await refetch();
+      const videos = done.changed === 1 ? "1 video" : `${done.changed} videos`;
+      setFilterNote("");
+      requestAnimationFrame(() => setFilterNote(remove ? `Tag “${from}” removed from ${videos}` : `Tag “${from}” renamed to “${done.name}” on ${videos}`));
+      // The buttons go with a removed tag's filter: the keyboard goes back to the tag filter, or to the search box.
+      if (remove) requestAnimationFrame(() => (tagSelectRef.current ?? searchRef.current)?.focus());
+    } catch (e) {
+      setBulkErr(e instanceof Error ? e.message : "Could not update the tag");
+    } finally {
+      setTagBusy(false);
+    }
+  }
   // The refusal of an over-limit selection goes once the selection is back within what one action takes.
   useEffect(() => {
     if (selected.size <= BULK_MAX) setBulkErr((note) => (note?.startsWith("One action takes up to") ? null : note));
@@ -499,6 +542,10 @@ function VideosInner() {
   // A new filter (or sort, which starts the page again) hides cards; drop the selection so bulk actions only ever touch
   // what is visible, and any "Select all matching" still loading for the old filters.
   useEffect(() => {
+    if (keepSelection.current) {
+      keepSelection.current = false;
+      return;
+    }
     setSelected(new Set());
     anchor.current = null;
     setSelectAllFor(null);
@@ -1393,7 +1440,7 @@ function VideosInner() {
           )}
           {/* The tags on this view's videos, most used first, once any video has one, or while one is chosen. */}
           {(tagsUsed.length > 0 || !!tagFilter) && (
-            <select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className={`${inputClass} w-auto max-w-[14rem]`}>
+            <select ref={tagSelectRef} aria-label="Filter by tag" value={tagFilter} disabled={tagBusy} onChange={(e) => setTagFilter(e.target.value)} className={`${inputClass} w-auto max-w-[14rem]`}>
               <option value="">Any tag</option>
               {tagsUsed.map((t) => (
                 <option key={t.name} value={t.name}>
@@ -1409,6 +1456,16 @@ function VideosInner() {
                 </option>
               )}
             </select>
+          )}
+          {!!tagFilter && !trash && canEdit && (
+            <span className="flex gap-1" data-testid="tag-actions">
+              <button type="button" onClick={() => manageTag(false)} disabled={tagBusy} aria-label="Rename tag" title="Rename this tag on every video carrying it" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={() => manageTag(true)} disabled={tagBusy} aria-label="Remove tag" title="Take this tag off every video carrying it" className="rounded p-1.5 text-slate-500 hover:bg-slate-100 disabled:opacity-50">
+                <TagX className="h-4 w-4" />
+              </button>
+            </span>
           )}
           {folder !== "all" && folder !== "unfiled" && !trash && (
             <span className="flex gap-1" data-testid="folder-actions">

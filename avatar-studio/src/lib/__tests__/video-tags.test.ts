@@ -5,9 +5,9 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
 import { getStore } from "../store";
-import { bulkVideoSchema, bulkVideos, createVideo, filterVideos, getVideo, queryVideos, updateVideo, videoPatchSchema, videoQuerySchema, videoRequestSchema } from "../services";
+import { bulkVideoSchema, bulkVideos, deleteVideo, renameTag, tagRenameSchema, createVideo, filterVideos, getVideo, queryVideos, updateVideo, videoPatchSchema, videoQuerySchema, videoRequestSchema } from "../services";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
-import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, retagged, sameTag, tagsProblem } from "../tags";
+import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, renamedTags, retagged, sameTag, tagsProblem } from "../tags";
 import type { Video } from "../types";
 
 const OWNER = "user_video_tags";
@@ -184,5 +184,57 @@ describe("tags on many videos at once", () => {
     assert.equal(bulkVideoSchema.safeParse({ action: "tags", ids: ["a"] }).success, false);
     assert.equal(bulkVideoSchema.safeParse({ action: "tags", ids: ["a"], add: ["  "] }).success, false);
     assert.equal(bulkVideoSchema.safeParse({ action: "tags", ids: ["a"], add: ["x".repeat(VIDEO_TAG_MAX + 1)] }).success, false);
+  });
+});
+
+describe("renaming a tag across the library", () => {
+  const put = (id: string, patch: Partial<Video>) => getStore().put("video", made(id, { ownerId: OWNER, ...patch } as Partial<Video>));
+
+  it("renames in place, merges onto a tag already there, or takes it off", () => {
+    assert.deepEqual(renamedTags(["Kitchen", "spring", "Tour"], "SPRING", "Spring sale"), ["Kitchen", "Spring sale", "Tour"]);
+    assert.deepEqual(renamedTags(["Fall", "Spring"], "spring", "Fall"), ["Fall"], "onto a tag it has: one of it");
+    assert.deepEqual(renamedTags(["spring", "fall"], "spring", "Fall"), ["Fall"], "in the new name's spelling, whichever came first");
+    assert.deepEqual(renamedTags(["Spring", "Tour"], "spring", ""), ["Tour"]);
+  });
+
+  it("renames the tag on every video carrying it, trash too, and leaves the rest alone", async () => {
+    await put("a", { tags: ["spring", "Kitchen"], views: 3 });
+    await put("bb", { tags: ["Spring"] });
+    await put("ccc", { tags: ["Fall"] });
+    await put("dddd", { tags: ["SPRING", "Spring sale"] });
+    await deleteVideo("bb", OWNER);
+    const result = await renameTag(tagRenameSchema.parse({ from: "Spring", to: " Spring  sale " }), OWNER);
+    assert.deepEqual(result, { changed: 3, name: "Spring sale" });
+    assert.deepEqual((await getStore().get<Video>("video", "a"))?.tags, ["Spring sale", "Kitchen"]);
+    assert.equal((await getStore().get<Video>("video", "a"))?.views, 3, "counters kept");
+    assert.deepEqual((await getStore().get<Video>("video", "bb"))?.tags, ["Spring sale"], "a trashed video comes back renamed");
+    assert.deepEqual((await getStore().get<Video>("video", "dddd"))?.tags, ["Spring sale"], "merged with the tag it had");
+    assert.deepEqual((await getStore().get<Video>("video", "ccc"))?.tags, ["Fall"]);
+    // Taking it off: videos left with none keep no key; a respelling is a rename too.
+    assert.deepEqual(await renameTag(tagRenameSchema.parse({ from: "spring sale", to: "" }), OWNER), { changed: 3, name: "" });
+    assert.equal((await getStore().get<Video>("video", "bb"))?.tags, undefined);
+    assert.deepEqual(await renameTag(tagRenameSchema.parse({ from: "fall", to: "FALL" }), OWNER), { changed: 1, name: "FALL" });
+    assert.deepEqual((await getStore().get<Video>("video", "ccc"))?.tags, ["FALL"]);
+  });
+
+  it("merges onto a tag the library has in the spelling it has there", async () => {
+    await put("a", { tags: ["spring"] });
+    await put("bb", { tags: ["Fall"] });
+    // Made before the "Fall" one, so the library names the tag "Fall" (the newest spelling).
+    await put("ccc", { tags: ["spring", "fall"], createdAt: "2026-10-01T10:00:00.000Z" });
+    const result = await renameTag(tagRenameSchema.parse({ from: "spring", to: "FALL" }), OWNER);
+    assert.equal(result.name, "Fall", "named as the library names it");
+    assert.deepEqual((await getStore().get<Video>("video", "a"))?.tags, ["Fall"]);
+    assert.deepEqual((await getStore().get<Video>("video", "ccc"))?.tags, ["Fall"]);
+    // A new spelling of the tag itself is taken as asked.
+    assert.equal((await renameTag(tagRenameSchema.parse({ from: "fall", to: "FALL" }), OWNER)).name, "FALL");
+  });
+
+  it("refuses a blank or too long name, and leaves someone else's videos alone", async () => {
+    assert.equal(tagRenameSchema.safeParse({ from: "  ", to: "x" }).success, false);
+    assert.equal(tagRenameSchema.safeParse({ from: "a", to: "x".repeat(VIDEO_TAG_MAX + 1) }).success, false);
+    await getStore().put("video", made("theirs", { ownerId: "someone_else", tags: ["Spring"] } as Partial<Video>));
+    assert.deepEqual(await renameTag(tagRenameSchema.parse({ from: "Spring", to: "Fall" }), OWNER), { changed: 0, name: "Fall" });
+    assert.deepEqual((await getStore().get<Video>("video", "theirs"))?.tags, ["Spring"]);
   });
 });

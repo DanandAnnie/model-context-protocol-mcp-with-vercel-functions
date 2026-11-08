@@ -16184,6 +16184,30 @@ test("tags on many videos at once: the library's Tags field adds and removes the
   await page.getByTestId("bulk-tags").getByRole("button", { name: "Add tag" }).click();
   await expect(bar).toHaveCount(0);
   await expect(page.getByLabel("Filter by tag").locator("option", { hasText: `${tag} spring` })).toHaveText(`${tag} spring (2)`);
+  // Renaming the tag chosen in the filter renames it on every video carrying it, and the filter follows it.
+  const filter = page.getByLabel("Filter by tag");
+  await filter.selectOption(`${tag} spring`);
+  const answers: string[] = [];
+  page.on("dialog", (d) => {
+    answers.push(d.message());
+    void (d.type() === "prompt" ? d.accept(`${tag} summer`) : d.accept());
+  });
+  await page.getByTestId("tag-actions").getByRole("button", { name: "Rename tag" }).click();
+  await expect(filter).toHaveValue(`${tag} summer`);
+  await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(`${tag} summer`);
+  expect(answers[0]).toBe(`New name for the tag "${tag} spring" on the 2 videos carrying it (and any in the trash)`);
+  await expect(page.getByTestId("filter-note")).toHaveText(`Tag “${tag} spring” renamed to “${tag} summer” on 2 videos`);
+  expect(await tagsOf(one.id)).toContain(`${tag} summer`);
+  expect(await tagsOf(two.id)).toEqual([`${tag} summer`, `${tag} porch`]);
+  // Removing it takes it off them all; the filter goes back to any tag.
+  await page.getByTestId("tag-actions").getByRole("button", { name: "Remove tag" }).click();
+  await expect(filter).toHaveValue("");
+  expect(answers[1]).toBe(`Remove the tag "${tag} summer" from the 2 videos carrying it (and any in the trash)? The videos stay in the library.`);
+  await expect(page.getByTestId("filter-note")).toHaveText(`Tag “${tag} summer” removed from 2 videos`);
+  // The buttons went with the filter; the keyboard is back on the tag filter.
+  await expect(filter).toBeFocused();
+  expect(await tagsOf(two.id)).toEqual([`${tag} porch`]);
+  expect(await tagsOf(one.id)).not.toContain(`${tag} summer`);
 });
 
 test("tags on a video: added and removed on its page, shown on its card, and found by the library's tag filter and search", async ({ page }) => {

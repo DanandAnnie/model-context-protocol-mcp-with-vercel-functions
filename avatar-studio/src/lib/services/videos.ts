@@ -6,7 +6,7 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
 import { dropEmptyShares, followFolderRename } from "./collections";
-import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, retagged, sameTag, tagsProblem, type TagCount } from "../tags";
+import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, renamedTags, retagged, sameTag, tagText, tagsProblem, type TagCount } from "../tags";
 import { shareCtaSchema } from "../share-cta";
 import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
@@ -1700,6 +1700,56 @@ export async function renameFolder(input: z.infer<typeof folderRenameSchema>, ow
   // Anything the rename emptied (the old name) drops its link now.
   await dropEmptyShares(ownerId, [input.from]);
   return { moved };
+}
+
+const tagNameSchema = (min: number) =>
+  z
+    .string()
+    .transform(tagText)
+    .refine((t) => t.length >= min, "Name the tag")
+    .refine((t) => Array.from(t).length <= VIDEO_TAG_MAX, `A tag is at most ${VIDEO_TAG_MAX} characters`);
+
+export const tagRenameSchema = z.object({
+  /** The tag to rename or remove, case aside. */
+  from: tagNameSchema(1),
+  /** The new name; empty takes the tag off every video. Renaming onto a tag a video already has merges the two. */
+  to: tagNameSchema(0),
+});
+
+/**
+ * Renames a tag on every video carrying it (case aside; trashed ones too, so a restore comes back with the new name), or
+ * takes it off them all when the new name is empty. Each video is written from its tags as stored, under its lock, so a
+ * tag set on it meanwhile stays. Returns how many videos changed.
+ */
+export async function renameTag(input: z.infer<typeof tagRenameSchema>, ownerId: string = LOCAL_OWNER): Promise<{ changed: number; name: string }> {
+  if (input.from === input.to) return { changed: 0, name: input.to };
+  const now = Date.now();
+  const all = (await getStore().list<Video>("video", ownerId)).filter((v) => !purgeDue(v, now));
+  // A rename onto a tag the library already has merges into it in the spelling it has there (named as countTags names
+  // it), not a second spelling of it; a new spelling of the tag itself is what is asked for.
+  const existing = input.to && !sameTag(input.from, input.to) ? countTags(all).find((t) => sameTag(t.name, input.to))?.name : undefined;
+  const name = existing ?? input.to;
+  const carrying = all.filter((v) => v.tags?.some((t) => sameTag(t, input.from)));
+  let changed = 0;
+  for (const v of carrying) {
+    let wrote = false;
+    try {
+      await updateKeepingCounters(v.id, ownerId, (stored) => {
+        const tags = renamedTags(stored.tags, input.from, name);
+        if (JSON.stringify(tags) === JSON.stringify(stored.tags ?? [])) return stored;
+        wrote = true;
+        const next: Video = { ...stored, updatedAt: nowIso() };
+        if (tags.length) next.tags = tags;
+        else delete next.tags;
+        return next;
+      });
+      if (wrote) changed += 1;
+    } catch (err) {
+      // Deleted for good between the listing and its turn: nothing to rename, carry on with the rest.
+      if (!(err instanceof NotFoundError)) throw err;
+    }
+  }
+  return { changed, name };
 }
 
 /**

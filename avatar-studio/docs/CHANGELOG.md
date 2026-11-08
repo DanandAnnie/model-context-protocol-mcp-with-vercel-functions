@@ -2466,3 +2466,19 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Unit tests cover the expiry kept in UTC from any offset, and the page, opens, clicks, and the way back before and from the instant itself. They check that nothing is counted after it, and that the visitor's window is not asked.
     - They also cover the owner's listing, sharing again, clearing, and refusing a past time, a time without an offset, other values, and another account.
     - An e2e test sets, refuses, and removes an expiry from the panel. It then lets a 20-second expiry pass and checks the page, the embedded view, both beacons, the back and next links on a video's page, and the counts. It finally reopens the link from the panel.
+- QA pass 45: search on a shared folder's page and the folder link's expiry, in a browser (`715ddde`).
+  - **Checked and working.**
+    - **The folder page's search**, at 1280 and 390 pixels with nothing scrolling sideways:
+      - It sits after the owner's button in the tab order.
+      - "lodz" finds "Łódź loft" and the count reads "1 of 6 videos", with the search in the address.
+      - A search with no match shows the empty state with Clear search. Escape brings back all six videos with the focus kept in the box.
+      - The embedded view opened with `?q=` shows the search filled in.
+    - **The Link expiry field**, on desktop and on a 390-pixel phone, where the field and its button fit one row:
+      - Enter sets the expiry and the hint says when the link stops. No expiry takes it off.
+      - The focus stays in the field each time.
+      - An expired link shows the notice to its editor.
+    - No console errors or failed requests showed.
+  - **Fixed.** A visitor on an expired or switched-off link, a folder's or a video's, got the framework's bare white "404: This page could not be found." The app had no page of its own for it.
+    - The studio now answers with one in the share pages' dark style: "This link isn't available". It says the person who shared it may have set it to expire, switched it off, or not made it live yet, and to ask them for a new link.
+    - It names no reason in particular, so a link that never existed looks the same as one that stopped. It is kept out of search results.
+  - **Tests.** The folder expiry e2e test now checks that the expired page reads in those words.

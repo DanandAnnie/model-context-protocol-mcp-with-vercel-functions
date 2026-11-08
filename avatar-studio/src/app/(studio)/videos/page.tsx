@@ -10,6 +10,7 @@ import { fileToCover } from "@/lib/image-upload";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { FolderShare } from "@/components/FolderShare";
+import { SavedViews } from "@/components/SavedViews";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
 import { freshVideoIds, readSeenMark } from "@/lib/comment-list";
@@ -86,7 +87,10 @@ function VideosInner() {
   const [voice, setVoice] = useState<string>(() => presenterFrom(params.get("voice")));
   const [sort, setSort] = useState<SortKey>("newest");
   // Reviews exist only in a workspace, so the filter shows there.
-  const inWorkspace = !!useWorkspaceRole()?.workspaceId;
+  const where = useWorkspaceRole();
+  const inWorkspace = !!where?.workspaceId;
+  // Saved views are each person's own, kept apart for each space they work in.
+  const viewSpace = where ? (where.workspaceId ? `${where.workspaceId}:${where.userId}` : where.userId) : null;
   // Viewers can browse the trash but not empty it (the server refuses them too).
   const canEdit = useCanEdit() !== false;
   const trashToggleRef = useRef<HTMLButtonElement>(null);
@@ -129,6 +133,8 @@ function VideosInner() {
   };
   // The page's own writes to its address (below) still to come back through the router, oldest first.
   const ownWrites = useRef<string[]>([]);
+  // The search and filters as a saved view keeps them (the search once typing pauses).
+  const viewNow = libraryAddress("", filtersInAddress)?.replace(/^\?/, "") ?? "";
   if (askedFilters !== filtersAsked) {
     setFiltersAsked(askedFilters);
     // One of the page's own writes coming back is not read again (that would undo what is typed in the search box while
@@ -1606,6 +1612,8 @@ function VideosInner() {
           )}
         </div>
       )}
+      {/* Not over a batch's results, which a view does not keep: no view is the list shown there, and none is saved from it. */}
+      {hasAny && !trash && viewSpace && <SavedViews query={batch ? "" : viewNow} canSave={!!viewNow && !batch} space={viewSpace} onEmpty={() => searchRef.current?.focus()} />}
       {loading && !data ? (
         layout === "list" ? (
           <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">

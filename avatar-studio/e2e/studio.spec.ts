@@ -16069,3 +16069,72 @@ test("the library keeps its filters in its address: a reload and Back from a vid
   await expect(page).toHaveURL(/\/videos$/);
   await expect(search).toHaveValue("");
 });
+
+test("saved views name the library's search and filters, reopen them in one click, and are kept in this browser", async ({ page }) => {
+  const tag = `Saved ${Date.now().toString(36)}`;
+  const kept = await createVideoViaApi(page, `${tag} starred`);
+  const other = await createVideoViaApi(page, `${tag} plain`);
+  for (const v of [kept, other]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${kept.id}`, { data: { folder: tag, starred: true } })).status()).toBe(200);
+  expect((await page.request.patch(`/api/videos/${other.id}`, { data: { folder: tag } })).status()).toBe(200);
+  await page.goto("/videos");
+  const folder = page.getByLabel("Folder", { exact: true });
+  const starred = page.getByTestId("starred-toggle");
+  const saveView = page.getByTestId("save-view");
+  const note = page.getByTestId("saved-views-note");
+  const viewName = `Starred in ${tag}`;
+  const view = page.getByTestId("saved-views").getByRole("link", { name: viewName, exact: true });
+  // With no filter on there is nothing to name.
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  await expect(saveView).toHaveCount(0);
+  await folder.selectOption(tag);
+  await starred.click();
+  await saveView.click();
+  const field = page.getByLabel("View name");
+  await expect(field).toBeFocused();
+  // Escape puts the field away, back on Save view.
+  await field.press("Escape");
+  await expect(saveView).toBeFocused();
+  await saveView.click();
+  await field.fill(`  ${viewName} `);
+  await field.press("Enter");
+  await expect(note).toHaveText(`View “${viewName}” saved`);
+  await expect(view).toHaveAttribute("aria-current", "true");
+  await expect(saveView).toBeFocused();
+  // Clear filters, then the view opens the library at them again.
+  await page.getByTestId("clear-filters").click();
+  await expect(view).not.toHaveAttribute("aria-current", "true");
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  await view.click();
+  await expect(folder).toHaveValue(tag);
+  await expect(starred).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(`a[href="/videos/${kept.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${other.id}"]`)).toHaveCount(0);
+  await expect(view).toHaveAttribute("aria-current", "true");
+  // The same name takes the filters on now: the folder alone.
+  await starred.click();
+  await expect(starred).toHaveAttribute("aria-pressed", "false");
+  await saveView.click();
+  await field.fill(viewName.toUpperCase());
+  await field.press("Enter");
+  await expect(note).toHaveText(`View “${viewName.toUpperCase()}” updated`);
+  const renamed = page.getByTestId("saved-views").getByRole("link", { name: viewName.toUpperCase(), exact: true });
+  await expect(page.getByTestId("saved-view")).toHaveCount(1);
+  // Kept in this browser: the plain library still lists it, and it opens the folder without Starred.
+  await page.goto("/videos");
+  await renamed.click();
+  await expect(folder).toHaveValue(tag);
+  await expect(starred).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  // Removing the last one on the plain library, with nothing to save, still says so and leaves the focus in the search box.
+  await page.goto("/videos");
+  await expect(renamed).toBeVisible();
+  await expect(saveView).toHaveCount(0);
+  await page.getByRole("button", { name: `Remove view ${viewName.toUpperCase()}` }).click();
+  await expect(note).toHaveText(`View “${viewName.toUpperCase()}” removed`);
+  await expect(page.getByTestId("saved-view")).toHaveCount(0);
+  await expect(page.getByLabel("Search videos")).toBeFocused();
+  await page.reload();
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  await expect(page.getByTestId("saved-view")).toHaveCount(0);
+});

@@ -240,6 +240,7 @@ export function VideoCard({ video, selectable = false, selected = false, onToggl
         <div className="mt-0.5 text-xs text-slate-500">
           {video.aspect} · {formatDate(video.createdAt)}{video.batchId ? " · batch" : ""}{video.folder ? ` · ${video.folder}` : ""}{video.views ? ` · ${video.views} ${video.views === 1 ? "view" : "views"}` : ""}
         </div>
+        <TagChips tags={video.tags} />
       </div>
     </>
   );
@@ -324,6 +325,7 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
           {video.aspect} · {formatDate(video.createdAt)}
           {video.durationSec != null ? ` · ${formatSeconds(video.durationSec)}` : ""}
           {video.folder ? ` · ${video.folder}` : ""}
+          {video.tags?.length ? ` · ${video.tags.join(", ")}` : ""}
           {video.batchId ? " · batch" : ""}
           {video.views ? ` · ${video.views} ${video.views === 1 ? "view" : "views"}` : ""}
         </span>
@@ -373,6 +375,27 @@ export function VideoRow({ video, selectable = false, selected = false, onToggle
         <CopyShareLink video={video} origin={shareOrigin} onNote={onCopyNote} className="mr-2 shrink-0 rounded-md p-1.5 text-slate-600 hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500" />
       ) : (
         <span className="mr-2 h-[26px] w-[26px] shrink-0" aria-hidden />
+      )}
+    </div>
+  );
+}
+
+/** A card's tags, the first three as chips and how many more, all of them named for the pointer and screen readers. */
+function TagChips({ tags }: { tags?: string[] }) {
+  if (!tags?.length) return null;
+  const shown = tags.slice(0, 3);
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1" data-testid="card-tags" title={tags.join(", ")}>
+      <span className="sr-only">Tags: {tags.join(", ")}</span>
+      {shown.map((t) => (
+        <span key={t} aria-hidden className="max-w-[9rem] truncate rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+          {t}
+        </span>
+      ))}
+      {tags.length > shown.length && (
+        <span aria-hidden className="text-[11px] text-slate-500">
+          +{tags.length - shown.length}
+        </span>
       )}
     </div>
   );

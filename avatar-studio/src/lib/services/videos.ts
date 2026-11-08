@@ -6,6 +6,7 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
 import { dropEmptyShares, followFolderRename } from "./collections";
+import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, sameTag, tagsProblem, type TagCount } from "../tags";
 import { shareCtaSchema } from "../share-cta";
 import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
@@ -363,7 +364,7 @@ export function fourKProblem(
  * best-effort under concurrent requests; batches reserve their rows up front.
  */
 /** Library fields a caller may set on a new video alongside the render request (batch row, folder, star, retry link). */
-export type VideoExtras = Partial<Pick<Video, "folder" | "starred" | "description" | "batchId" | "rowLabel" | "batchTitle" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
+export type VideoExtras = Partial<Pick<Video, "folder" | "tags" | "starred" | "description" | "batchId" | "rowLabel" | "batchTitle" | "batchRow" | "retryOf" | "resizedFrom" | "captionCues" | "subtitles">> & {
   /** The video's id, when a client key decides it (a template render retried after a lost answer). */
   id?: string;
   /** Called once the renderer has started this render here, never for a replay of one started before (never stored). */
@@ -1089,6 +1090,16 @@ const coverDataUrlSchema = z
   .refine((v) => v.startsWith("data:image/"), "The cover must be an uploaded image")
   .nullable();
 
+/** A video's tags as a request sends them: tidied and deduplicated (cleanTags), then held to the limits. */
+export const videoTagsSchema = z
+  .array(z.string().max(200))
+  .max(VIDEO_TAGS_MAX * 5)
+  .transform(cleanTags)
+  .superRefine((tags, ctx) => {
+    const problem = tagsProblem(tags);
+    if (problem) ctx.addIssue({ code: "custom", message: problem });
+  });
+
 export const videoPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(120).optional(),
@@ -1096,6 +1107,8 @@ export const videoPatchSchema = z
     description: z.string().trim().max(500).optional(),
     /** Folder name; an empty string moves the video back to "unfiled". */
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
+    /** The video's tags, all of them (an empty list removes them): tidied, the same tag twice kept once. */
+    tags: videoTagsSchema.optional(),
     /** Marked to find again in the library (the Starred filter); not part of what the share page shows. */
     starred: z.boolean().optional(),
     /** Whether the public share page offers a download link. */
@@ -1133,6 +1146,7 @@ export const videoPatchSchema = z
       p.sceneNames !== undefined ||
       p.description !== undefined ||
       p.folder !== undefined ||
+      p.tags !== undefined ||
       p.starred !== undefined ||
       p.shareDownload !== undefined ||
       p.shareGate !== undefined ||
@@ -1184,6 +1198,10 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (patch.folder !== undefined) {
     if (patch.folder) next.folder = patch.folder;
     else delete next.folder;
+  }
+  if (patch.tags !== undefined) {
+    if (patch.tags.length) next.tags = patch.tags;
+    else delete next.tags;
   }
   if (patch.starred !== undefined) {
     if (patch.starred) next.starred = true;
@@ -1248,6 +1266,7 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (next.folder && next.folder !== existing.folder && !internal.keepShares) await dropEmptyShares(ownerId, [next.folder]);
   const saved = await putKeepingCounters(next, {
     ...(patch.starred !== undefined ? { starred: patch.starred } : {}),
+    ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
     dropApproval: (stored) => publicChange || (!!renames && [...renames].some(([i, name]) => stored.scenes?.[i]?.name !== name)),
     ...(renames ? { scenes: (stored) => renamedScenes(stored, renames) } : {}),
   });
@@ -1301,13 +1320,13 @@ const RENDER_FIELDS = ["status", "providerJobId", "agentSessionId", "agentWaitin
  * trip must not undo the views, watch marks, and clicks counted meanwhile, drop (or bring back) a
  * track a translation added or removed meanwhile, or undo a trash or restore. The scenes are the
  * stored ones too (`opts.scenes` renames them), so an edit cannot write back scene names it read
- * before another request changed them. The star is the stored one too unless `opts.starred` sets it, so an edit held up by
- * a cover upload or a password hash cannot take off (or put back) a star someone set meanwhile. Runs under the video's
- * counter lock.
+ * before another request changed them. The star and the tags are the stored ones too unless `opts.starred` or `opts.tags`
+ * sets them, so an edit held up by a cover upload or a password hash cannot take off (or put back) a star or a tag someone
+ * set meanwhile. Runs under the video's counter lock.
  */
 function putKeepingCounters(
   base: Video,
-  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined; starred?: boolean } = {},
+  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined; starred?: boolean; tags?: string[] } = {},
 ): Promise<Video> {
   return withCounterLock(base.id, async () => {
     const stored = await getStore().get<Video>("video", base.id);
@@ -1326,6 +1345,9 @@ function putKeepingCounters(
     else delete next.scenes;
     if (opts.starred ?? stored.starred) next.starred = true;
     else delete next.starred;
+    const tags = opts.tags ?? stored.tags;
+    if (tags?.length) next.tags = tags;
+    else delete next.tags;
     return getStore().put("video", { ...next, ...theirs });
   });
 }
@@ -1630,7 +1652,7 @@ export async function retryVideo(id: string, ownerId: string = LOCAL_OWNER): Pro
   if (failed.directed?.editOf) throw new ConflictError(`An edited cut is not retried; edit the scenes of “${failed.directed.editOf.title}” again`);
   const req = requestOf(failed);
   // One write: the provider's webhook can land as soon as the job exists, so nothing may overwrite the stored video afterwards.
-  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, starred: failed.starred, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchTitle: failed.batchTitle, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
+  return createVideo(req, ownerId, undefined, false, { folder: failed.folder, tags: failed.tags, starred: failed.starred, description: failed.description, batchId: failed.batchId, rowLabel: failed.rowLabel, batchTitle: failed.batchTitle, batchRow: failed.batchRow, retryOf: failed.id, resizedFrom: failed.resizedFrom });
 }
 
 /**
@@ -1705,7 +1727,7 @@ export async function editDirectedVideo(id: string, input: z.infer<typeof sceneE
     ...requestOf(video),
     title,
     directed: { ...video.directed!, editOf: { videoId: video.id, title: video.title, edits } },
-    ...stripUndefined({ folder: video.folder, avatarName: video.avatarName, voiceName: video.voiceName }),
+    ...stripUndefined({ folder: video.folder, tags: video.tags, avatarName: video.avatarName, voiceName: video.voiceName }),
     id: cutId,
     ownerId,
     status: "queued",
@@ -2317,6 +2339,7 @@ export async function resizeVideo(id: string, input: z.infer<typeof resizeSchema
   const base = source.resizedFrom ? source.title.replace(SIZE_SUFFIX, "") : source.title;
   const extras: VideoExtras = {
     folder: source.folder,
+    tags: source.tags,
     description: source.description,
     resizedFrom: source.resizedFrom ?? source.id,
     // The same scripts in the same voice: the corrections and translations hold for every shape.
@@ -2516,6 +2539,13 @@ export const videoQuerySchema = z.object({
   status: z.enum(["all", "processing", "completed", "failed"]).default("all"),
   /** A folder name; an empty string means unfiled; absent means every folder. */
   folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
+  /** Only the videos carrying a tag, case aside (in the trash too). */
+  tag: z
+    .string()
+    .trim()
+    .min(1)
+    .refine((t) => Array.from(t).length <= VIDEO_TAG_MAX, `A tag is at most ${VIDEO_TAG_MAX} characters`)
+    .optional(),
   batch: z.string().max(80).optional(),
   /**
    * `viewed` puts the latest counted viewer visit first (share page or embed; the studio's own visits do not count) and
@@ -2594,6 +2624,8 @@ export interface VideoPage {
   folders: string[];
   /** How many videos each folder holds, in this view (the library or the trash), whatever the other filters; `""` is unfiled. */
   folderCounts: Record<string, number>;
+  /** The tags on this view's videos (the library or the trash), whatever the other filters, most used first (see countTags). */
+  tags: TagCount[];
   /**
    * The presenters appearing in this view's videos (the library or the trash), whatever the other filters: each with
    * its name as the newest such video gave it and how many videos it is in, ordered by name.
@@ -2696,10 +2728,11 @@ export function filterVideos(
       if (query.review !== "all" && (v.review?.status ?? "none") !== query.review) return false;
       if (query.share !== "all" && !inShareFilter(v, query.share, now)) return false;
       if (query.folder !== undefined && (v.folder ?? "") !== query.folder) return false;
+      if (query.tag !== undefined && !v.tags?.some((t) => sameTag(t, query.tag!))) return false;
       if (query.presenter !== undefined && !videoPresenters(v).some((p) => p.id === query.presenter)) return false;
       if (query.voice !== undefined && !videoVoices(v).some((p) => p.id === query.voice)) return false;
       if (query.status === "processing" ? v.status !== "processing" && v.status !== "queued" : query.status !== "all" && v.status !== query.status) return false;
-      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""}`.toLowerCase().includes(needle);
+      return !needle || `${v.title} ${v.description ?? ""} ${stripPauses(v.script)} ${v.cinematic?.prompt ?? ""} ${v.directed?.prompt ?? ""} ${v.avatarName ?? ""} ${v.voiceName ?? ""} ${(v.tags ?? []).join(" ")}`.toLowerCase().includes(needle);
     })
     .sort(query.sort === "commented" ? byLastComment(lastComment!) : SORTERS[query.sort]);
 }
@@ -2771,6 +2804,7 @@ export async function queryVideos(ownerId: string = LOCAL_OWNER, query: VideoQue
     hasMore: videos.length < matched.length,
     folders: Array.from(new Set(all.map((v) => v.folder).filter((f): f is string => !!f))).sort(),
     folderCounts: countFolders(all),
+    tags: countTags(all),
     presenters: countPresenters(all),
     voices: countPresenters(all, videoVoices),
     needs: countNeeds([...split.live, ...split.trashed]),

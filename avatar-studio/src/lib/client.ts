@@ -424,7 +424,7 @@ export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: 
 }
 
 /** The library address's filter parameters (the ones the library reads, and a batch's results), which Clear filters takes off. */
-export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length", "viewed", "folder", "starred", "q"] as const;
+export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length", "viewed", "folder", "tag", "starred", "q"] as const;
 
 /**
  * The library address's filters as one string to compare, one part per parameter in LIBRARY_FILTER_PARAMS order: a

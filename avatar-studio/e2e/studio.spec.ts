@@ -5472,7 +5472,7 @@ test("the library counts each video's open comments and can show only the videos
   await expect(page.getByTestId("open-comments-toggle")).toHaveAttribute("aria-pressed", "true");
   await page.getByLabel("Search videos").fill(tag);
   await expect(notedCard).toHaveCount(0);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, share link, or turn off Open comments.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, tag, date, shape, length, views, share link, or turn off Open comments.")).toBeVisible();
   await page.getByTestId("open-comments-toggle").click();
   await expect(notedCard).toBeVisible();
   await expect(notedCard.getByTestId("open-comments-badge")).toHaveCount(0);
@@ -13502,7 +13502,7 @@ test("videos are starred from their page or in bulk, and the library filters by 
   expect((await a11y("main")).violations.map((v) => v.id)).toEqual([]);
   // With a search that hides every starred video, the empty state points at the filters rather than at starring.
   await page.getByLabel("Search videos").fill(`${tag} nothing like it`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, share link, or turn off Starred.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, tag, date, shape, length, views, share link, or turn off Starred.")).toBeVisible();
   await page.getByLabel("Search videos").fill(tag);
   await expect(card(one.id)).toBeVisible();
   // Starring in bulk from the whole library, then taking both stars off from the filtered view.
@@ -13586,7 +13586,7 @@ test("the library filters by shape: landscape (16:9 or 5:4), portrait (9:16 or 4
   await expect(card(tall)).toHaveCount(0);
   // A shape that hides every match is named in the empty state's advice.
   await page.getByLabel("Search videos").fill(`Tall ${tag}`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, or share link.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, tag, date, shape, length, views, or share link.")).toBeVisible();
   // Clear filters takes the shape back to any, and off the address.
   await page.getByTestId("clear-filters").click();
   await expect(filter.locator("option:checked")).toHaveText("Any shape");
@@ -13866,7 +13866,7 @@ test("the library filters by length: under a minute, one to three minutes, or ov
   await expect(card(medium)).toHaveCount(0);
   // A length that hides every match is named in the empty state's advice.
   await page.getByLabel("Search videos").fill(`Lengthy ${tag}`);
-  await expect(page.getByText("Try a different search, status, folder, presenter, voice, date, shape, length, views, or share link.")).toBeVisible();
+  await expect(page.getByText("Try a different search, status, folder, presenter, voice, tag, date, shape, length, views, or share link.")).toBeVisible();
   // Clear filters takes the length back to any, and off the address.
   await page.getByTestId("clear-filters").click();
   await expect(filter.locator("option:checked")).toHaveText("Any length");
@@ -16137,4 +16137,68 @@ test("saved views name the library's search and filters, reopen them in one clic
   await page.reload();
   await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
   await expect(page.getByTestId("saved-view")).toHaveCount(0);
+});
+
+test("tags on a video: added and removed on its page, shown on its card, and found by the library's tag filter and search", async ({ page }) => {
+  const tag = `T${Date.now().toString(36)}`;
+  const tagged = await createVideoViaApi(page, `${tag} kitchen`);
+  const other = await createVideoViaApi(page, `${tag} garden`);
+  for (const v of [tagged, other]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  await page.goto(`/videos/${tagged.id}`);
+  const editor = page.getByTestId("video-tags");
+  const field = editor.getByLabel("Add a tag");
+  const note = page.getByTestId("video-tags-note");
+  // Enter adds one and the field keeps the focus, so a comma typed on adds another; the same tag again (case aside) is
+  // not added twice; a pasted list with commas adds each.
+  await field.fill(`${tag} spring`);
+  await field.press("Enter");
+  await expect(note).toHaveText(`Tag “${tag} spring” added`);
+  await expect(field).toBeFocused();
+  await expect(field).toBeEditable();
+  await page.keyboard.type("open  house,");
+  await expect(note).toHaveText("Tag “open house” added");
+  await expect(field).toHaveValue("");
+  await field.fill(`${tag} SPRING`);
+  await field.press("Enter");
+  await expect(note).toHaveText(`Already tagged “${tag} SPRING”`);
+  await field.fill("porch, yard");
+  await field.press("Enter");
+  await expect(note).toHaveText("2 tags added: porch, yard");
+  await expect(editor.getByTestId("video-tag")).toHaveText([`${tag} spring`, "open house", "porch", "yard"]);
+  // Removing one says so and hands the focus to the next tag left, or the one before when it was the last.
+  await editor.getByRole("button", { name: "Remove tag open house" }).click();
+  await expect(note).toHaveText("Tag “open house” removed");
+  await expect(editor.getByRole("button", { name: "Remove tag porch" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(editor.getByRole("button", { name: "Remove tag yard" })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(note).toHaveText("Tag “yard” removed");
+  await expect(editor.getByRole("button", { name: `Remove tag ${tag} spring` })).toBeFocused();
+  await page.reload();
+  await expect(page.getByTestId("video-tags").getByTestId("video-tag")).toHaveText([`${tag} spring`]);
+  // Another tag on the other video, and one named "all", through the API.
+  expect((await page.request.patch(`/api/videos/${other.id}`, { data: { tags: [`${tag} harbor`, "all"] } })).status()).toBe(200);
+  // The library filters by tag, with its count, in the address too; the card shows its tag.
+  await page.goto("/videos");
+  const filter = page.getByLabel("Filter by tag");
+  await expect(filter.locator("option", { hasText: `${tag} spring` })).toHaveText(`${tag} spring (1)`);
+  await filter.selectOption(`${tag} spring`);
+  await expect.poll(() => new URL(page.url()).searchParams.get("tag")).toBe(`${tag} spring`);
+  await expect(page.locator(`a[href="/videos/${tagged.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${other.id}"]`)).toHaveCount(0);
+  await expect(page.getByTestId("card-tags").first()).toContainText(`${tag} spring`);
+  // A tag from the address, any case, opens the library at it.
+  await page.goto(`/videos?tag=${encodeURIComponent(`${tag} SPRING`)}`);
+  await expect(page.locator(`a[href="/videos/${tagged.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${other.id}"]`)).toHaveCount(0);
+  // A tag named "all" is a tag like any other, not "any tag".
+  await page.goto("/videos?tag=all");
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${tagged.id}"]`)).toHaveCount(0);
+  await expect(page.getByLabel("Filter by tag")).toHaveValue("all");
+  // The search box finds a video by its tag.
+  await page.getByTestId("clear-filters").click();
+  await page.getByLabel("Search videos").fill(`${tag} harbor`);
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${tagged.id}"]`)).toHaveCount(0);
 });

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { videoPresenters, videoVoices } from "@/lib/presenters";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { LANGUAGES } from "@/lib/stock";
@@ -28,6 +28,8 @@ import { captionsBurnedIn } from "@/lib/captions";
 import { silentSeconds, stripPauses } from "@/lib/pauses";
 import { languageLabel } from "@/lib/language";
 import { useApi } from "@/hooks/useApi";
+import { VideoTags } from "@/components/VideoTags";
+import type { TagCount } from "@/lib/tags";
 import { ApiError, api, formatDate, formatSeconds, isDarkHex, emailSnippet, posterUrl, purgeAt, shareExpired, shareNotYet } from "@/lib/client";
 import { embedSize } from "@/lib/oembed";
 import { socialShareLinks } from "@/lib/social";
@@ -153,7 +155,7 @@ export default function VideoDetailPage() {
   }, []);
 
   // Folder: free text with the owner's existing folders as suggestions.
-  const { data: libraryData } = useApi<{ videos: Video[] }>("/api/videos");
+  const { data: libraryData } = useApi<{ videos: Video[]; tags?: TagCount[] }>("/api/videos");
   const folders = Array.from(new Set((libraryData?.videos ?? []).map((v) => v.folder).filter((f): f is string => !!f))).sort();
   const [folderDraft, setFolderDraft] = useState<string | null>(null);
   // Enter or Escape in the folder field hands the focus back to the folder button, as the title does.
@@ -165,13 +167,21 @@ export default function VideoDetailPage() {
     folderButton.current?.focus();
   }, [folderDraft]);
   const [folderErr, setFolderErr] = useState<string | null>(null);
+  // Tags already used in the library (all of it, as the server counts them, not only the first page), most used first.
+  const tagSuggestions = useMemo(() => (libraryData?.tags ?? []).map((t) => t.name), [libraryData]);
+  async function saveTags(tags: string[]) {
+    if (!video) return;
+    const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ tags }) });
+    applyServer(res.video);
+    void refetch();
+  }
   /**
    * Folds a PATCH response into the page's record. Merging (rather than replacing) means two saves
    * in flight cannot let the earlier response undo the later one; keys the server dropped (a removed
    * description, a link turned back on) must disappear too, or the control flips back until the
    * refetch lands.
    */
-  const OPTIONAL_KEYS = ["description", "folder", "cover", "subtitles", "captionCues", "review", "starred", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt", "shareStartsAt"] as const;
+  const OPTIONAL_KEYS = ["description", "folder", "tags", "cover", "subtitles", "captionCues", "review", "starred", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt", "shareStartsAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
       const merged = { ...d?.video, ...next } as Video;
@@ -1172,6 +1182,9 @@ export default function VideoDetailPage() {
                         </datalist>
                       </>
                     )}
+                  </Row>
+                  <Row label="Tags" wrap>
+                    <VideoTags tags={video.tags ?? []} canEdit={canEdit === true && !video.deletedAt} suggestions={tagSuggestions} onSave={saveTags} />
                   </Row>
                   {video.studioTemplate && <Row label="HeyGen template">{video.studioTemplate.name}</Row>}
                   {video.directed && (

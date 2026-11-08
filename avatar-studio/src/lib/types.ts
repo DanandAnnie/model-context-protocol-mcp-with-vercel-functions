@@ -1255,6 +1255,8 @@ export interface Video extends VideoRequest {
   voiceName?: string;
   /** Library folder name; unfiled when absent. */
   folder?: string;
+  /** Labels to find the video by (the library's tag filter and search), at most VIDEO_TAGS_MAX; never on the share page. */
+  tags?: string[];
   /** Id of the failed render this one was retried from. */
   retryOf?: string;
   /** Id of the video this one was made from in another aspect ratio ("Make other sizes"). */

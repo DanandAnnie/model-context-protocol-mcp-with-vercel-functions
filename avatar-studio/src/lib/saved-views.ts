@@ -8,7 +8,7 @@ export const SAVED_VIEW_NAME_MAX = 40;
 const SAVED_VIEW_QUERY_MAX = 2000;
 
 /** The library's own search and filters: what a view keeps (not a batch's results, which belong to that one visit). */
-export const SAVED_VIEW_PARAMS = ["q", "status", "folder", "presenter", "voice", "review", "share", "comments", "created", "shape", "length", "viewed", "starred"] as const;
+export const SAVED_VIEW_PARAMS = ["q", "status", "folder", "presenter", "voice", "tag", "review", "share", "comments", "created", "shape", "length", "viewed", "starred"] as const;
 
 export interface SavedView {
   name: string;

@@ -10,6 +10,7 @@ import { fileToCover } from "@/lib/image-upload";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { FolderShare } from "@/components/FolderShare";
+import { VIDEO_TAG_MAX, sameTag } from "@/lib/tags";
 import { SavedViews } from "@/components/SavedViews";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -47,6 +48,11 @@ const presenterFrom = (asked: string | null) => asked?.trim().slice(0, 120) || "
  * select holds it, "unfiled" for an empty one (as the API reads it), or every folder when there is none.
  */
 const folderFrom = (asked: string | null) => (asked === null ? "all" : asked.trim().slice(0, MAX_FOLDER_NAME) || "unfiled");
+/**
+ * The tag the address asks for (`?tag=`), cut to the characters a tag takes (whole characters, as the server counts them),
+ * or "" for any tag: a blank one is no filter, and "" can never be a tag, so a tag named "all" is still one to filter on.
+ */
+const tagFrom = (asked: string | null) => Array.from(asked?.trim() ?? "").slice(0, VIDEO_TAG_MAX).join("").trim();
 /** The search the address asks for (`?q=`), cut to the length the server takes. */
 const searchFrom = (asked: string | null) => (asked ?? "").slice(0, LIBRARY_SEARCH_MAX);
 
@@ -85,6 +91,8 @@ function VideosInner() {
   const [presenter, setPresenter] = useState<string>(() => presenterFrom(params.get("presenter")));
   // Only the videos that speak in one voice, by voice id: "all" for any.
   const [voice, setVoice] = useState<string>(() => presenterFrom(params.get("voice")));
+  // Only the videos carrying one tag (case aside): "" for any.
+  const [tagFilter, setTagFilter] = useState<string>(() => tagFrom(params.get("tag")));
   const [sort, setSort] = useState<SortKey>("newest");
   // Reviews exist only in a workspace, so the filter shows there.
   const where = useWorkspaceRole();
@@ -122,6 +130,7 @@ function VideosInner() {
     folder: folder === "all" ? null : folder === "unfiled" ? "" : folder,
     presenter: presenter === "all" ? null : presenter,
     voice: voice === "all" ? null : voice,
+    tag: tagFilter || null,
     review: review === "all" ? null : review,
     share: share === "all" ? null : share,
     comments: commentFilter === "all" ? null : commentFilter,
@@ -158,6 +167,7 @@ function VideosInner() {
       setCommentFilter(commentFilterFrom(params.get("comments")));
       setPresenter(presenterFrom(params.get("presenter")));
       setVoice(presenterFrom(params.get("voice")));
+      setTagFilter(tagFrom(params.get("tag")));
       setFolder(folderFrom(params.get("folder")));
     }
   }
@@ -201,10 +211,10 @@ function VideosInner() {
     }
     // filtersInAddress is made from these on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needle, status, folder, presenter, voice, review, share, commentFilter, created, shape, lengthFilter, viewed, starred]);
+  }, [needle, status, folder, presenter, voice, tagFilter, review, share, commentFilter, created, shape, lengthFilter, viewed, starred]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
-  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created, shape, lengthFilter, viewed, presenter, voice].join("\u0000");
+  const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created, shape, lengthFilter, viewed, presenter, voice, tagFilter].join("\u0000");
   const [extent, setExtent] = useState({ key: filterKey, limit: PAGE });
   const limit = extent.key === filterKey ? extent.limit : PAGE;
   const path = useMemo(() => {
@@ -226,8 +236,9 @@ function VideosInner() {
     if (viewed !== "all") params.set("viewed", viewed);
     if (presenter !== "all") params.set("presenter", presenter);
     if (voice !== "all") params.set("voice", voice);
+    if (tagFilter) params.set("tag", tagFilter);
     return `/api/videos?${params}`;
-  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, shape, lengthFilter, viewed, presenter, voice]);
+  }, [limit, needle, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, shape, lengthFilter, viewed, presenter, voice, tagFilter]);
   // The share analytics of what the library shows now, every match rather than the page loaded, in the same order.
   const analyticsHref = useMemo(() => {
     const params = new URLSearchParams(path.split("?")[1]);
@@ -272,13 +283,14 @@ function VideosInner() {
   const folderCounts = data?.folderCounts ?? {};
   const presenters = data?.presenters ?? [];
   const voicesUsed = data?.voices ?? [];
+  const tagsUsed = data?.tags ?? [];
   const hasAny = (data?.total ?? 0) > 0 || (data?.trashed ?? 0) > 0;
   const trashed = data?.trashed ?? 0;
   const remaining = data ? data.matched - videos.length : 0;
   // The on/off filters an empty list names, so the way back is said.
   const toggledOn = [starred && "Starred", commentFilter === "open" && "Open comments", commentFilter === "mentions" && "Mentions me"].filter((t): t is string => !!t);
   // Whether a filter other than Starred, Open comments, and Mentions me narrows the list, for the empty state's advice.
-  const narrowed = !!needle || status !== "all" || folder !== "all" || presenter !== "all" || voice !== "all" || review !== "all" || share !== "all" || created !== "all" || shape !== "all" || lengthFilter !== "all" || viewed !== "all" || !!batch;
+  const narrowed = !!needle || status !== "all" || folder !== "all" || presenter !== "all" || voice !== "all" || !!tagFilter || review !== "all" || share !== "all" || created !== "all" || shape !== "all" || lengthFilter !== "all" || viewed !== "all" || !!batch;
   // Any filter at all, a search being typed included: what Clear filters takes back. The sort, the layout, and the trash
   // view are not filters, so they stay.
   const filtersOn = narrowed || toggledOn.length > 0 || q.trim() !== "";
@@ -290,6 +302,7 @@ function VideosInner() {
     setFolder("all");
     setPresenter("all");
     setVoice("all");
+    setTagFilter("");
     setReview("all");
     setShare("all");
     setCreated("all");
@@ -496,7 +509,7 @@ function VideosInner() {
     setCoverDraft(null);
     coverPick.current += 1;
     setCoverReading(false);
-  }, [q, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, shape, lengthFilter, viewed, presenter, voice]);
+  }, [q, status, folder, batch, sort, trash, review, share, starred, commentFilter, created, shape, lengthFilter, viewed, presenter, voice, tagFilter]);
   // The last purge empties both views; leave the trash so the "No videos yet" state (and the filter bar) comes back.
   useEffect(() => {
     if (trash && data && data.total === 0 && data.trashed === 0) setTrash(false);
@@ -1308,6 +1321,25 @@ function VideosInner() {
               {voice !== "all" && !voicesUsed.some((p) => p.id === voice) && <option value={voice}>{data ? `This voice${withCount(0)}` : "Chosen voice"}</option>}
             </select>
           )}
+          {/* The tags on this view's videos, most used first, once any video has one, or while one is chosen. */}
+          {(tagsUsed.length > 0 || !!tagFilter) && (
+            <select aria-label="Filter by tag" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} className={`${inputClass} w-auto max-w-[14rem]`}>
+              <option value="">Any tag</option>
+              {tagsUsed.map((t) => (
+                <option key={t.name} value={t.name}>
+                  {t.name}
+                  {withCount(t.count)}
+                </option>
+              ))}
+              {/* A tag from the address that no video in this view carries (or spelled otherwise): still the one shown. */}
+              {!!tagFilter && !tagsUsed.some((t) => t.name === tagFilter) && (
+                <option value={tagFilter}>
+                  {tagFilter}
+                  {data && !tagsUsed.some((t) => sameTag(t.name, tagFilter)) ? withCount(0) : ""}
+                </option>
+              )}
+            </select>
+          )}
           {folder !== "all" && folder !== "unfiled" && !trash && (
             <span className="flex gap-1" data-testid="folder-actions">
               <FolderShare folder={folder} canEdit={canEdit} />
@@ -1645,7 +1677,7 @@ function VideosInner() {
             trash
               ? // Trashed videos the filters hide are still counted on the toggle, so say what hides them.
                 trashed && (narrowed || toggledOn.length > 0)
-                ? `Try a different search, status, folder, presenter, voice, date, shape, length, or views${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
+                ? `Try a different search, status, folder, presenter, voice, tag, date, shape, length, or views${toggledOn.length ? `, or turn off ${toggledOn.join(" and ")}` : ""}.`
                 : `Deleted videos wait here for ${TRASH_RETENTION_DAYS} days before they are removed for good.`
               : hasAny
                 ? !narrowed && toggledOn.length === 1
@@ -1654,7 +1686,7 @@ function VideosInner() {
                     : commentFilter === "mentions"
                       ? "No open comment mentions you."
                       : "No video has an open comment."
-                  : `Try a different search, status, folder, presenter, voice, date, shape, length, views, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
+                  : `Try a different search, status, folder, presenter, voice, tag, date, shape, length, views, ${toggledOn.length ? `share link, or turn off ${toggledOn.join(" and ")}` : "or share link"}.`
                 : "Your rendered videos will show up here."
           }
         />

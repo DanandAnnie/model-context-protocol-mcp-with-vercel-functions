@@ -2511,3 +2511,12 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - Unit tests for the 14-day window's edges, the order and ties, the top three, and shares with no days kept.
     - A Clear filters test checks that `folder` comes off the address.
     - An e2e test: six visitors open a folder's page, and Home names it with "6 opens". Its link opens the library at that folder, showing its video but not one outside it, and Clear filters puts the library back.
+- QA pass 46: folder opens by day and Home's Shared folders card in a browser (`a7c113c`).
+  - **Checked.**
+    - The Share folder panel's opens chart, at desktop and phone widths. A folder never opened shows no chart.
+    - Home's card with four shared folders: one never opened, one with a long heading, one named with accents and an ampersand. The checks covered its order, its counts and links, and keyboard order.
+    - The library at `?folder=`: the right folder is picked and only its videos are shown, Back and Forward work, and a made-up folder shows as "Name (0)".
+    - A folder whose videos are all in the trash still opens from the card with its picker.
+    - No console errors or failed requests.
+  - **Fixed.** On a phone, a long page heading stretched the card past the screen, pushing the open counts out of sight; the card is a grid item that grew to its content. The card now keeps to the screen and cuts the heading off with an ellipsis. The Home card e2e test now uses a long heading and checks, at 390 pixels wide, that the card and the count stay on the screen. It failed before the fix (the card's right edge at 553 px) and passes after.
+  - **Noted for next.** The library reads its filters from the address but does not write them back. After picking another folder (or presenter, or voice), a reload brings back the one the address named.

@@ -2630,3 +2630,25 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - A unit test for `addTags` and `removeTags`: changes are kept beside a slower edit, removal ignores case, an add past ten is refused and leaves the video (and a password sent with it) as it was, and `tags` cannot be sent with either. The no-write check in the bulk test no longer races the mock renderer.
     - The e2e test now types three tags on while each save is held back for 300 ms, and checks all three land whole.
     - It then fills the video to ten through the API, checks an eleventh is refused, and checks the field stays read-only with the note as its description.
+- Rename or remove a tag across the library (`562d7e4`).
+  - **What it does.**
+    - With a tag chosen in the library's tag filter, editors see Rename tag and Remove tag beside it (not in the trash).
+    - Rename gives the tag a new name on every video carrying it, case aside, including those in the trash, so a restored video comes back renamed.
+    - A rename onto a tag the library already has merges the two, in the spelling the library gives it. A video that had both keeps one.
+    - Remove takes the tag off them all.
+    - Each asks first, naming how many library videos carry the tag (and that any in the trash go too).
+    - Afterwards the page says what it did and keeps the selection. The filter moves to the tag's name as saved, or back to any tag, with the keyboard on the filter.
+  - **API.**
+    - `POST /api/videos/tags { from, to }` (an empty `to` removes) answers `{ changed, name }`. It is for editors only.
+    - Each video is worked out from its tags as stored when it is written, under its lock.
+  - **Review findings fixed before commit.**
+    - A merge left two spellings of the tag in the library, and the filter showed it twice.
+    - The rename cleared the selection and the bar's drafts.
+    - Remove dropped the focus to the page.
+    - Nothing was announced.
+    - The confirm count left out trashed videos.
+    - The filter stayed usable while a rename ran.
+    - The prompt started from the address's spelling rather than the library's.
+  - **Tests.**
+    - Unit tests: renaming in place, merging in the new name's spelling (both orders), removing, trash included, counters kept, merging onto the library's spelling, a respelling, blank and too-long names refused, and other owners' videos left alone.
+    - The bulk tags e2e test renames a tag through the prompt and checks the question, the note, the filter, the address, and both videos. It then removes the tag and checks the note, the empty filter, and the focus back on it.

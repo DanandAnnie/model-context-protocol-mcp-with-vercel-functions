@@ -3,6 +3,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Activity, AlertTriangle, AtSign, BellDot, Camera, ClipboardCheck, Clapperboard, Clock, FilePenLine, Gauge, Languages, Layers3, LayoutTemplate, MessageSquare, Sparkles, TimerOff, Wand2 } from "lucide-react";
 import { Insights } from "@/components/Insights";
+import { SharedFolderOpens } from "@/components/SharedFolderOpens";
+import type { FolderOpensInput } from "@/lib/insights";
 import { VideoCard } from "@/components/VideoCard";
 import { EmptyState, SectionTitle, Skeleton } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -27,6 +29,8 @@ const QUICK = [
 export default function HomePage() {
   const { data, loading } = useApi<{ videos: Video[]; shareOrigin?: string; openComments?: Record<string, number>; mentions?: Record<string, number>; latestComment?: Record<string, string>; latestAnyComment?: Record<string, string>; you?: string }>("/api/videos");
   const recent = data?.videos.slice(0, 4) ?? [];
+  // Shared folders' opens by day, for the Insights card that names the folders opened most.
+  const { data: shares } = useApi<{ collections: FolderOpensInput[] }>("/api/collections");
   // This month's renders against the plan's allowance, once little or none of it is left.
   const { data: status } = useApi<{ renderLimitPerMonth?: number | null; usage?: { rendersThisMonth: number } }>("/api/status");
   const space = useWorkspaceRole();
@@ -317,6 +321,11 @@ export default function HomePage() {
         <div className="mt-10">
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Insights</h2>
           <Insights videos={data.videos} />
+          {!!shares?.collections.length && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <SharedFolderOpens collections={shares.collections} />
+            </div>
+          )}
         </div>
       )}
 

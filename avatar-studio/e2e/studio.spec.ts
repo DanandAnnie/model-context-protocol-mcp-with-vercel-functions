@@ -15957,3 +15957,42 @@ test("the video page shows how far share-page viewers got, tenth by tenth", asyn
   expect([row.retention_started, row.reached_10_pct, row.reached_50_pct, row.reached_100_pct]).toEqual(["4", "75", "50", "25"]);
   expect([row.most_left_between, row.most_left_points]).toEqual(["0%-10%", "25"]);
 });
+
+test("home names the shared folders opened most in two weeks, each opening the library at that folder", async ({ page }) => {
+  const tag = `Opened most ${Date.now().toString(36)}`;
+  const inside = await createVideoViaApi(page, "Garden path");
+  const outside = await createVideoViaApi(page, "Outside the folder");
+  for (const v of [inside, outside]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${inside.id}`, { data: { folder: tag } })).status()).toBe(200);
+  const { collection } = await (await page.request.post("/api/collections", { data: { folder: tag } })).json();
+  const heading = `Most opened ${Date.now().toString(36)}`;
+  expect((await page.request.patch(`/api/collections/${collection.id}`, { data: { title: heading } })).status()).toBe(200);
+  // Six visitors (six addresses) open the page, so it is among the folders opened most whatever else the account shares.
+  for (let i = 0; i < 6; i++) {
+    const r = await page.request.post(`/api/collections/${collection.id}/view`, { headers: { "x-forwarded-for": `203.0.113.${i + 10}` } });
+    expect(await r.json()).toMatchObject({ counted: true });
+  }
+  // Shared only for this test, so a rerun against a server still running starts without it in the top three.
+  try {
+    await page.goto("/home");
+    const card = page.getByTestId("shared-folder-opens");
+    await expect(card).toBeVisible();
+    const row = card.getByRole("listitem").filter({ hasText: heading });
+    // Named by its page's heading, with its opens.
+    await expect(row).toContainText("6 opens");
+    expect(Number(await page.getByTestId("shared-folder-opens-total").innerText())).toBeGreaterThanOrEqual(6);
+    // It opens the library at that folder: its video shown, the one outside it not, and the folder picked.
+    await row.getByRole("link", { name: heading }).click();
+    await expect(page).toHaveURL(new RegExp(`/videos\\?folder=${encodeURIComponent(tag).replace(/%20/g, "(%20|\\+)")}$`));
+    await expect(page.getByLabel("Folder", { exact: true })).toHaveValue(tag);
+    await expect(page.locator(`a[href="/videos/${inside.id}"]`).first()).toBeVisible();
+    await expect(page.locator(`a[href="/videos/${outside.id}"]`)).toHaveCount(0);
+    // Clear filters takes the folder off the address too.
+    await page.getByTestId("clear-filters").click();
+    await expect(page).toHaveURL(/\/videos$/);
+    await expect(page.getByLabel("Folder", { exact: true })).toHaveValue("all");
+    await expect(page.locator(`a[href="/videos/${outside.id}"]`).first()).toBeVisible();
+  } finally {
+    await page.request.delete(`/api/collections/${collection.id}`);
+  }
+});

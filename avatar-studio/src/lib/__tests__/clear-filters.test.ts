@@ -14,6 +14,8 @@ describe("withoutLibraryFilters", () => {
     assert.equal(withoutLibraryFilters("share=expiring"), "");
     assert.equal(withoutLibraryFilters("?status=failed&created=7d"), "");
     assert.equal(withoutLibraryFilters("batch=b1&skipped=2&failed=1"), "");
+    // Home's shared folders card opens the library at a folder.
+    assert.equal(withoutLibraryFilters("folder=Open%20house&ref=home"), "?ref=home");
     assert.equal(withoutLibraryFilters(LIBRARY_FILTER_PARAMS.map((k) => `${k}=x`).join("&")), "");
   });
 

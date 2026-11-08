@@ -56,6 +56,31 @@ export function viewsPerDay(video: Pick<Video, "viewsByDay">, now = Date.now(), 
   });
 }
 
+/** A shared folder as Home's card reads it: its link's id, the folder, the page's heading, and its opens per UTC day. */
+export interface FolderOpensInput {
+  id: string;
+  folder: string;
+  title?: string | null;
+  viewsByDay?: Record<string, number>;
+}
+
+/**
+ * Home's shared folders card: opens of every shared folder's page in the last `days` UTC days (today included), and the
+ * `top` folders opened most in them (more opens first, then by name), each with its count. A folder not opened in them is
+ * left out of the top list but still counts toward `shared`.
+ */
+export function folderOpens(collections: FolderOpensInput[], now = Date.now(), days = 14, top = 3): { shared: number; total: number; top: Array<{ id: string; folder: string; label: string; opens: number }> } {
+  const counted = collections.map((c) => ({ id: c.id, folder: c.folder, label: c.title || c.folder, opens: viewsInLast({ viewsByDay: c.viewsByDay }, days, now) }));
+  return {
+    shared: collections.length,
+    total: counted.reduce((n, c) => n + c.opens, 0),
+    top: counted
+      .filter((c) => c.opens > 0)
+      .sort((a, b) => b.opens - a.opens || a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }))
+      .slice(0, top),
+  };
+}
+
 /** Views in the last `days` UTC days including today. */
 export function viewsInLast(video: Pick<Video, "viewsByDay">, days: number, now = Date.now()): number {
   return viewsPerDay(video, now, days).reduce((n, d) => n + d.count, 0);

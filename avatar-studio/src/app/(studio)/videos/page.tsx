@@ -41,6 +41,8 @@ const countOf = (counts: Record<string, number>, folder: string) => (Object.hasO
 
 /** The presenter or voice filter the address asks for (`?presenter=<avatar id>`, `?voice=<voice id>`), or "all"; a blank one is no filter. */
 const presenterFrom = (asked: string | null) => asked?.trim().slice(0, 120) || "all";
+/** A folder named in the address (`?folder=`, as Home's shared folders card links): its name as the library's folder select holds it, or every folder. */
+const folderFrom = (asked: string | null) => asked?.trim().slice(0, MAX_FOLDER_NAME) || "all";
 
 /** A time as a datetime-local field holds it: the browser's local date and time, to the minute. */
 function localMinute(d: Date): string {
@@ -72,7 +74,7 @@ function VideosInner() {
   // not know is ignored.
   const askedFilters = LIBRARY_FILTER_PARAMS.map((k) => params.get(k) ?? "").join("\u0000");
   const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
-  const [folder, setFolder] = useState<string>("all"); // "all" | "unfiled" | folder name
+  const [folder, setFolder] = useState<string>(() => folderFrom(params.get("folder"))); // "all" | "unfiled" | folder name
   // Only the videos one presenter appears in, by avatar id: "all" for any.
   const [presenter, setPresenter] = useState<string>(() => presenterFrom(params.get("presenter")));
   // Only the videos that speak in one voice, by voice id: "all" for any.
@@ -116,6 +118,7 @@ function VideosInner() {
     setCommentFilter(commentFilterFrom(params.get("comments")));
     setPresenter(presenterFrom(params.get("presenter")));
     setVoice(presenterFrom(params.get("voice")));
+    setFolder(folderFrom(params.get("folder")));
   }
   // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
   const [layout, setLayout] = useState<"grid" | "list">("grid");
@@ -1197,7 +1200,8 @@ function VideosInner() {
             }}
             onBlur={() => (slashHeld.current = false)}
           />
-          {folders.length > 0 && (
+          {/* Shown with no folders too while the address names one, so the filter in use can be seen and changed. */}
+          {(folders.length > 0 || folder !== "all") && (
             <select aria-label="Folder" value={folder} onChange={(e) => setFolder(e.target.value)} className={`${inputClass} w-auto max-w-[14rem]`}>
               {/* Each with how many videos it holds in this view, whatever the other filters, so an empty pick is not a surprise. */}
               <option value="all">All folders{withCount(trash ? trashed : (data?.total ?? 0))}</option>
@@ -1208,6 +1212,13 @@ function VideosInner() {
                   {withCount(countOf(folderCounts, f))}
                 </option>
               ))}
+              {/* A folder named in the address that no video is in any more (renamed or emptied since the link was made): still the one shown. */}
+              {folder !== "all" && folder !== "unfiled" && !folders.includes(folder) && (
+                <option value={folder}>
+                  {folder}
+                  {withCount(0)}
+                </option>
+              )}
             </select>
           )}
           {/* Offered once the videos in this view have more than one presenter, or while one is chosen (from the address, say). */}

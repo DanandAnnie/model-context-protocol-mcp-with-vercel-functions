@@ -62,6 +62,26 @@ describe("tags on a video", () => {
     assert.equal(cleared.tags, undefined);
   });
 
+  it("are put on and taken off one at a time, keeping the tags set meanwhile and refusing one past ten", async () => {
+    const v = await createVideo(request("Deltas"), OWNER);
+    await updateVideo(v.id, videoPatchSchema.parse({ addTags: ["Spring"] }), OWNER);
+    // Another tab adds one while a slower edit (a password) that read the video earlier is under way.
+    const slow = updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "open sesame" }), OWNER);
+    await updateVideo(v.id, videoPatchSchema.parse({ addTags: ["Porch"] }), OWNER);
+    await slow;
+    const removed = await updateVideo(v.id, videoPatchSchema.parse({ removeTags: ["SPRING"] }), OWNER);
+    assert.deepEqual(removed.tags, ["Porch"]);
+    await updateVideo(v.id, videoPatchSchema.parse({ addTags: Array.from({ length: 9 }, (_, i) => `t${i}`) }), OWNER);
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ addTags: ["one more"] }), OWNER), /at most 10 tags/);
+    assert.equal((await getVideo(v.id, OWNER)).tags?.length, 10);
+    // Refused before anything else in the request is written: the password stays on.
+    await updateVideo(v.id, videoPatchSchema.parse({ sharePassword: "open sesame" }), OWNER);
+    await assert.rejects(updateVideo(v.id, videoPatchSchema.parse({ addTags: ["another"], sharePassword: null }), OWNER), /at most 10 tags/);
+    assert.equal((await getVideo(v.id, OWNER)).shareLocked, true);
+    assert.equal(videoPatchSchema.safeParse({ tags: ["a"], addTags: ["b"] }).success, false, "a whole list and changes are not sent together");
+    assert.equal(videoPatchSchema.safeParse({ addTags: [] }).success, false, "nothing to update");
+  });
+
   it("refuses too many or too long, with what is wrong", () => {
     assert.throws(() => videoPatchSchema.parse({ tags: Array.from({ length: 11 }, (_, i) => `tag ${i}`) }), /at most 10 tags/);
     assert.throws(() => videoPatchSchema.parse({ tags: ["x".repeat(25)] }), /at most 24 characters/);
@@ -137,8 +157,8 @@ describe("tags on many videos at once", () => {
   });
 
   it("leaves the rest of each video as stored: its approval, star, and counts, and others' videos alone", async () => {
-    const v = await createVideo(request("Approved"), OWNER);
-    await getStore().put("video", { ...(await getVideo(v.id, OWNER)), starred: true, views: 7, review: { status: "approved", requestedById: "u", requestedAt: "2026-11-01T00:00:00.000Z" } } as Video);
+    // Stored as finished, so no render of its own is still writing it while the test runs.
+    const v = await getStore().put("video", made("approved-one", { ownerId: OWNER, starred: true, views: 7, review: { status: "approved", requestedById: "u", requestedAt: "2026-11-01T00:00:00.000Z" } } as Partial<Video>));
     const theirs = await createVideo(request("Theirs"), "someone_else");
     const result = await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [v.id, theirs.id], add: ["Spring"] }), OWNER);
     assert.deepEqual(result, { done: 1, missing: [theirs.id], refused: [] });

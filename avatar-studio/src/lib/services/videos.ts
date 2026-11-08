@@ -1109,6 +1109,12 @@ export const videoPatchSchema = z
     folder: z.string().trim().max(MAX_FOLDER_NAME).optional(),
     /** The video's tags, all of them (an empty list removes them): tidied, the same tag twice kept once. */
     tags: videoTagsSchema.optional(),
+    /**
+     * Tags to put on (`addTags`) or take off (`removeTags`), case aside, the video keeping the rest as stored when it is
+     * written, so two people tagging at once do not undo each other; not with `tags`.
+     */
+    addTags: videoTagsSchema.optional(),
+    removeTags: videoTagsSchema.optional(),
     /** Marked to find again in the library (the Starred filter); not part of what the share page shows. */
     starred: z.boolean().optional(),
     /** Whether the public share page offers a download link. */
@@ -1147,6 +1153,8 @@ export const videoPatchSchema = z
       p.description !== undefined ||
       p.folder !== undefined ||
       p.tags !== undefined ||
+      !!p.addTags?.length ||
+      !!p.removeTags?.length ||
       p.starred !== undefined ||
       p.shareDownload !== undefined ||
       p.shareGate !== undefined ||
@@ -1157,7 +1165,8 @@ export const videoPatchSchema = z
       p.shareCta !== undefined ||
       p.cover !== undefined,
     "Nothing to update",
-  );
+  )
+  .refine((p) => p.tags === undefined || (p.addTags === undefined && p.removeTags === undefined), "Send tags, or tags to add and remove, not both");
 
 /** Scene names from a patch, keyed by scene index; refused before anything is written when the video has no such scene. */
 function sceneRenames(video: Video, names: Record<string, string | null | undefined>): Map<number, string | undefined> {
@@ -1187,6 +1196,12 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (purgeDue(existing, Date.now())) throw new NotFoundError(`Video ${id} not found`);
   // Checked before the cover or password is written, so a refused request changes nothing.
   const renames = patch.sceneNames ? sceneRenames(existing, patch.sceneNames) : undefined;
+  // An add that would take the video past the limit is refused here too, before a cover or password is written; the
+  // same check runs again on the tags as stored when the video is written.
+  if (patch.addTags?.length) {
+    const tags = retagged(existing.tags, patch.addTags, patch.removeTags ?? []);
+    if (tags.length > VIDEO_TAGS_MAX && tags.length > (existing.tags?.length ?? 0)) throw new ValidationError(`A video takes at most ${VIDEO_TAGS_MAX} tags`);
+  }
   const next: Video = { ...existing, updatedAt: nowIso() };
   if (patch.title !== undefined) next.title = patch.title;
   // Not a field a client can set: a batch rename keeps what its videos are titled after (see renameBatch).
@@ -1266,7 +1281,18 @@ export async function updateVideo(id: string, patch: z.infer<typeof videoPatchSc
   if (next.folder && next.folder !== existing.folder && !internal.keepShares) await dropEmptyShares(ownerId, [next.folder]);
   const saved = await putKeepingCounters(next, {
     ...(patch.starred !== undefined ? { starred: patch.starred } : {}),
-    ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
+    ...(patch.tags !== undefined
+      ? { tags: patch.tags }
+      : patch.addTags?.length || patch.removeTags?.length
+        ? {
+            // Worked out from the tags as stored at the write, under the video's lock, so tags set meanwhile stay.
+            tags: (stored: string[] | undefined) => {
+              const tags = retagged(stored, patch.addTags ?? [], patch.removeTags ?? []);
+              if (tags.length > VIDEO_TAGS_MAX && tags.length > (stored?.length ?? 0)) throw new ValidationError(`A video takes at most ${VIDEO_TAGS_MAX} tags`);
+              return tags;
+            },
+          }
+        : {}),
     dropApproval: (stored) => publicChange || (!!renames && [...renames].some(([i, name]) => stored.scenes?.[i]?.name !== name)),
     ...(renames ? { scenes: (stored) => renamedScenes(stored, renames) } : {}),
   });
@@ -1326,7 +1352,7 @@ const RENDER_FIELDS = ["status", "providerJobId", "agentSessionId", "agentWaitin
  */
 function putKeepingCounters(
   base: Video,
-  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined; starred?: boolean; tags?: string[] } = {},
+  opts: { dropApproval?: boolean | ((stored: Video) => boolean); scenes?: (stored: Scene[] | undefined) => Scene[] | undefined; starred?: boolean; tags?: string[] | ((stored: string[] | undefined) => string[]) } = {},
 ): Promise<Video> {
   return withCounterLock(base.id, async () => {
     const stored = await getStore().get<Video>("video", base.id);
@@ -1345,7 +1371,7 @@ function putKeepingCounters(
     else delete next.scenes;
     if (opts.starred ?? stored.starred) next.starred = true;
     else delete next.starred;
-    const tags = opts.tags ?? stored.tags;
+    const tags = typeof opts.tags === "function" ? opts.tags(stored.tags) : (opts.tags ?? stored.tags);
     if (tags?.length) next.tags = tags;
     else delete next.tags;
     return getStore().put("video", { ...next, ...theirs });

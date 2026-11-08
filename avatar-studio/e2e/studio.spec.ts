@@ -16221,8 +16221,25 @@ test("tags on a video: added and removed on its page, shown on its card, and fou
   await page.keyboard.press("Enter");
   await expect(note).toHaveText("Tag “yard” removed");
   await expect(editor.getByRole("button", { name: `Remove tag ${tag} spring` })).toBeFocused();
+  // Typed straight on while each save is still on its way (held here for a moment), every tag lands whole.
+  await page.route(`**/api/videos/${tagged.id}`, async (route) => {
+    if (route.request().method() === "PATCH") await new Promise((r) => setTimeout(r, 300));
+    await route.continue();
+  });
+  await field.focus();
+  await page.keyboard.type("deck, shed, garden,", { delay: 20 });
+  await expect(editor.getByTestId("video-tag")).toHaveText([`${tag} spring`, "deck", "shed", "garden"]);
+  await expect(field).toHaveValue("");
+  await page.unroute(`**/api/videos/${tagged.id}`);
   await page.reload();
-  await expect(page.getByTestId("video-tags").getByTestId("video-tag")).toHaveText([`${tag} spring`]);
+  await expect(page.getByTestId("video-tags").getByTestId("video-tag")).toHaveText([`${tag} spring`, "deck", "shed", "garden"]);
+  // With ten tags on, the field stays (so keys typed on land nowhere harmful) but takes no more, and says why.
+  expect((await page.request.patch(`/api/videos/${tagged.id}`, { data: { addTags: Array.from({ length: 6 }, (_, i) => `${tag} n${i}`) } })).status()).toBe(200);
+  expect((await page.request.patch(`/api/videos/${tagged.id}`, { data: { addTags: ["one more"] } })).status()).toBe(400);
+  await page.reload();
+  const fullField = page.getByTestId("video-tags").getByLabel("Add a tag");
+  await expect(fullField).toHaveAttribute("readonly", "");
+  await expect(fullField).toHaveAccessibleDescription("10 tags, the most a video takes");
   // Another tag on the other video, and one named "all", through the API.
   expect((await page.request.patch(`/api/videos/${other.id}`, { data: { tags: [`${tag} harbor`, "all"] } })).status()).toBe(200);
   // The library filters by tag, with its count, in the address too; the card shows its tag.

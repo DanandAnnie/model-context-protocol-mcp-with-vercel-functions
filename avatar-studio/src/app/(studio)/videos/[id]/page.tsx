@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { videoPresenters, videoVoices } from "@/lib/presenters";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, ArrowLeft, Captions, Check, Clock, Code2, Copy, Download, Eye, Film, FolderOpen, Languages, LayoutTemplate, Link2, Lock, Mail, Pencil, RotateCcw, Sparkles, Star, Trash2 } from "lucide-react";
 import { Button, Card, ErrorBanner, SectionTitle, Skeleton, StatusBadge, inputClass } from "@/components/ui";
 import { LANGUAGES } from "@/lib/stock";
@@ -52,6 +52,11 @@ function flatImage(ctx: CanvasRenderingContext2D, width: number, height: number)
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
+  // The video the page shows, as committed (not as a render that may be thrown away), for a save's response to check.
+  const shownId = useRef(id);
+  useLayoutEffect(() => {
+    shownId.current = id;
+  }, [id]);
   const router = useRouter();
   const [deleting, setDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -169,11 +174,16 @@ export default function VideoDetailPage() {
   const [folderErr, setFolderErr] = useState<string | null>(null);
   // Tags already used in the library (all of it, as the server counts them, not only the first page), most used first.
   const tagSuggestions = useMemo(() => (libraryData?.tags ?? []).map((t) => t.name), [libraryData]);
-  async function saveTags(tags: string[]) {
-    if (!video) return;
-    const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ tags }) });
-    applyServer(res.video);
-    void refetch();
+  // Tags go on and come off as changes the server makes to the tags it holds, so another tab's tags are not undone.
+  async function saveTags(change: { add?: string[]; remove?: string[] }): Promise<string[]> {
+    if (!video) return [];
+    const res = await api<{ video: Video }>(`/api/videos/${video.id}`, { method: "PATCH", body: JSON.stringify({ addTags: change.add, removeTags: change.remove }) });
+    // The page moved on to another video meanwhile: nothing of this one's goes into it.
+    if (shownId.current === res.video.id) {
+      applyServer(res.video);
+      void refetch();
+    }
+    return res.video.tags ?? [];
   }
   /**
    * Folds a PATCH response into the page's record. Merging (rather than replacing) means two saves
@@ -184,6 +194,8 @@ export default function VideoDetailPage() {
   const OPTIONAL_KEYS = ["description", "folder", "tags", "cover", "subtitles", "captionCues", "review", "starred", "shareGate", "shareDisabled", "shareDownload", "shareLocked", "shareCta", "shareExpiresAt", "shareStartsAt"] as const;
   function applyServer(next: Video) {
     setData((d) => {
+      // A response for a video the page has since left is not this video's.
+      if (d?.video && d.video.id !== next.id) return d;
       const merged = { ...d?.video, ...next } as Video;
       for (const key of OPTIONAL_KEYS) if (!(key in next)) delete merged[key];
       return { video: merged };
@@ -1184,7 +1196,7 @@ export default function VideoDetailPage() {
                     )}
                   </Row>
                   <Row label="Tags" wrap>
-                    <VideoTags tags={video.tags ?? []} canEdit={canEdit === true && !video.deletedAt} suggestions={tagSuggestions} onSave={saveTags} />
+                    <VideoTags key={video.id} tags={video.tags ?? []} canEdit={canEdit === true && !video.deletedAt} suggestions={tagSuggestions} onSave={saveTags} />
                   </Row>
                   {video.studioTemplate && <Row label="HeyGen template">{video.studioTemplate.name}</Row>}
                   {video.directed && (

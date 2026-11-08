@@ -29,6 +29,15 @@ export function tagsProblem(tags: string[]): string | null {
   return long ? `A tag is at most ${VIDEO_TAG_MAX} characters (“${Array.from(long).slice(0, VIDEO_TAG_MAX).join("")}…”)` : null;
 }
 
+/**
+ * A video's tags with `remove` taken off and `add` put on (each case aside): the ones it keeps stay in their order and
+ * spelling, new ones go at the end in the spelling given. A tag both added and removed is added.
+ */
+export function retagged(current: string[] | undefined, add: string[], remove: string[]): string[] {
+  const kept = (current ?? []).filter((t) => !remove.some((r) => sameTag(r, t)) || add.some((a) => sameTag(a, t)));
+  return cleanTags([...kept, ...add]);
+}
+
 export interface TagCount {
   name: string;
   count: number;

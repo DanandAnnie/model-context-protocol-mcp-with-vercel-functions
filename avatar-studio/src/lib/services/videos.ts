@@ -6,7 +6,7 @@ import { newId, nowIso } from "../ids";
 import { getAvatarProvider, getAvatarProviderByName, getScriptProvider } from "../providers";
 import { getStore } from "../store";
 import { dropEmptyShares, followFolderRename } from "./collections";
-import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, sameTag, tagsProblem, type TagCount } from "../tags";
+import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, retagged, sameTag, tagsProblem, type TagCount } from "../tags";
 import { shareCtaSchema } from "../share-cta";
 import { ASPECT_RATIOS, FOUR_K_ENGINE, FOUR_K_MOTION, RESOLUTIONS, renders4k, BULK_MAX, EMPTY_TRASH_MAX, EMPTY_WATCH, LIBRARY_PAGE_MAX, MAX_FOLDER_NAME, RESTORE_ALL_MAX, MAX_AGENT_MESSAGE, MAX_SCENES, MAX_SCENE_EDITS, MAX_SCENE_EDIT_CHARS, TRASH_RETENTION_DAYS, backdropIdOf, footageIdOf, isDefaultCaptionStyle, framingFor, isDefaultLayout } from "../types";
 import { videoNeeds, videoPresenters, videoVoices } from "../presenters";
@@ -1519,6 +1519,13 @@ export const bulkVideoSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cta"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), shareCta: shareCtaSchema }),
   /** Give many videos one cover picture, in place of any they had (each video keeps its own copy), or remove theirs with `null`. */
   z.object({ action: z.literal("cover"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), cover: coverDataUrlSchema }),
+  /**
+   * Put tags on many videos (`add`) or take them off (`remove`), case aside, each video keeping its other tags. A video
+   * the added tags would take past `VIDEO_TAGS_MAX` is reported in `refused` and left as it was.
+   */
+  z
+    .object({ action: z.literal("tags"), ids: z.array(z.string().min(1)).min(1).max(BULK_MAX), add: videoTagsSchema.optional(), remove: videoTagsSchema.optional() })
+    .refine((v) => !!v.add?.length || !!v.remove?.length, { message: "Name a tag to add or remove" }),
 ]);
 
 /**
@@ -1559,6 +1566,36 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
       await updateVideo(id, { folder: input.folder }, ownerId, { keepShares: true });
     }
     else if (input.action === "share") await updateVideo(id, { shareDisabled: input.shareDisabled }, ownerId);
+    else if (input.action === "tags") {
+      const add = input.add ?? [];
+      const remove = input.remove ?? [];
+      let full = false;
+      try {
+        // Worked out from the record as stored at the write, under its lock, so tags another request set meanwhile stay.
+        await updateKeepingCounters(id, ownerId, (stored) => {
+          const tags = retagged(stored.tags, add, remove);
+          // Only an add can take a video past the limit; one already over it (an older limit) can still have tags taken off.
+          if (tags.length > VIDEO_TAGS_MAX && tags.length > (stored.tags?.length ?? 0)) {
+            full = true;
+            return stored;
+          }
+          if (JSON.stringify(tags) === JSON.stringify(stored.tags ?? [])) return stored;
+          const next: Video = { ...stored, updatedAt: nowIso() };
+          if (tags.length) next.tags = tags;
+          else delete next.tags;
+          return next;
+        });
+      } catch (err) {
+        // Deleted for good between the check above and the write: reported like the others not there.
+        if (!(err instanceof NotFoundError)) throw err;
+        missing.push(id);
+        continue;
+      }
+      if (full) {
+        refused.push(id);
+        continue;
+      }
+    }
     else if (input.action === "password" || input.action === "settings" || input.action === "star" || input.action === "cta" || input.action === "cover") {
       try {
         await updateVideo(
@@ -1595,7 +1632,7 @@ export async function bulkVideos(input: z.infer<typeof bulkVideoSchema>, ownerId
     done += 1;
   }
   if (left.size) await dropEmptyShares(ownerId, [...left]);
-  return input.action === "schedule" || input.action === "expire" ? { done, missing, refused } : { done, missing };
+  return input.action === "schedule" || input.action === "expire" || input.action === "tags" ? { done, missing, refused } : { done, missing };
 }
 
 export const folderRenameSchema = z.object({

@@ -4,9 +4,10 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { MemoryStore } from "../store/memory";
-import { createVideo, filterVideos, getVideo, queryVideos, updateVideo, videoPatchSchema, videoQuerySchema, videoRequestSchema } from "../services";
+import { getStore } from "../store";
+import { bulkVideoSchema, bulkVideos, createVideo, filterVideos, getVideo, queryVideos, updateVideo, videoPatchSchema, videoQuerySchema, videoRequestSchema } from "../services";
 import { STOCK_AVATARS, STOCK_VOICES } from "../stock";
-import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, sameTag, tagsProblem } from "../tags";
+import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, countTags, retagged, sameTag, tagsProblem } from "../tags";
 import type { Video } from "../types";
 
 const OWNER = "user_video_tags";
@@ -104,5 +105,64 @@ describe("tags on a video", () => {
     const videos = [made("a", { tags: ["Spring"] }), made("bb", { tags: ["Fall"] }), made("ccc")];
     assert.deepEqual(filterVideos(videos, videoQuerySchema.parse({ tag: "spring" })).map((v) => v.id), ["a"]);
     assert.deepEqual(filterVideos(videos, videoQuerySchema.parse({ tag: "winter" })), []);
+  });
+});
+
+describe("tags on many videos at once", () => {
+  const request = (title: string) => videoRequestSchema.parse({ title, avatarId: STOCK_AVATARS[0].id, voiceId: STOCK_VOICES[0].id, script: "Doors open Saturday." });
+
+  it("adds and removes case aside, keeping each video's other tags in their order and spelling", () => {
+    assert.deepEqual(retagged(["Spring", "Kitchen"], ["spring", "Listing"], []), ["Spring", "Kitchen", "Listing"]);
+    assert.deepEqual(retagged(["Spring", "Kitchen"], [], ["SPRING"]), ["Kitchen"]);
+    assert.deepEqual(retagged(undefined, ["Tour"], ["Tour"]), ["Tour"], "a tag both added and removed is added");
+  });
+
+  it("puts tags on and takes them off the selected videos, reporting those already full and those not there", async () => {
+    const a = await createVideo(request("Kitchen"), OWNER);
+    const b = await createVideo(request("Garden"), OWNER);
+    const full = await createVideo(request("Full"), OWNER);
+    await updateVideo(a.id, videoPatchSchema.parse({ tags: ["Kitchen"] }), OWNER);
+    await updateVideo(full.id, videoPatchSchema.parse({ tags: Array.from({ length: VIDEO_TAGS_MAX }, (_, i) => `t${i}`) }), OWNER);
+    const added = await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [a.id, b.id, full.id, "nope"], add: [" Open  house", "spring"] }), OWNER);
+    assert.deepEqual(added, { done: 2, missing: ["nope"], refused: [full.id] });
+    assert.deepEqual((await getVideo(a.id, OWNER)).tags, ["Kitchen", "Open house", "spring"]);
+    assert.deepEqual((await getVideo(b.id, OWNER)).tags, ["Open house", "spring"]);
+    assert.equal((await getVideo(full.id, OWNER)).tags?.length, VIDEO_TAGS_MAX, "a full video is left as it was");
+    // A tag a full video already has is no new tag, so it is fine.
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [full.id], add: ["T0"] }), OWNER), { done: 1, missing: [], refused: [] });
+    const removed = await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [a.id, b.id], remove: ["SPRING", "open house"] }), OWNER);
+    assert.equal(removed.done, 2);
+    assert.deepEqual((await getVideo(a.id, OWNER)).tags, ["Kitchen"]);
+    assert.equal((await getVideo(b.id, OWNER)).tags, undefined, "no key is kept for a video left with no tags");
+  });
+
+  it("leaves the rest of each video as stored: its approval, star, and counts, and others' videos alone", async () => {
+    const v = await createVideo(request("Approved"), OWNER);
+    await getStore().put("video", { ...(await getVideo(v.id, OWNER)), starred: true, views: 7, review: { status: "approved", requestedById: "u", requestedAt: "2026-11-01T00:00:00.000Z" } } as Video);
+    const theirs = await createVideo(request("Theirs"), "someone_else");
+    const result = await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [v.id, theirs.id], add: ["Spring"] }), OWNER);
+    assert.deepEqual(result, { done: 1, missing: [theirs.id], refused: [] });
+    const after = await getVideo(v.id, OWNER);
+    assert.deepEqual([after.tags, after.starred, after.views, after.review?.status], [["Spring"], true, 7, "approved"], "tags are not part of what the share page shows");
+    assert.equal((await getVideo(theirs.id, "someone_else")).tags, undefined);
+    // Nothing changed, nothing written.
+    const before = (await getVideo(v.id, OWNER)).updatedAt;
+    await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [v.id], add: ["SPRING"], remove: ["Fall"] }), OWNER);
+    assert.equal((await getVideo(v.id, OWNER)).updatedAt, before);
+  });
+
+  it("still takes tags off a video kept with more than the limit, and only refuses one an add would grow", async () => {
+    const v = await createVideo(request("Old"), OWNER);
+    const many = Array.from({ length: VIDEO_TAGS_MAX + 2 }, (_, i) => `old${i}`);
+    await getStore().put("video", { ...(await getVideo(v.id, OWNER)), tags: many } as Video);
+    assert.deepEqual(await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [v.id], remove: ["old0"] }), OWNER), { done: 1, missing: [], refused: [] });
+    assert.equal((await getVideo(v.id, OWNER)).tags?.length, VIDEO_TAGS_MAX + 1);
+    assert.deepEqual((await bulkVideos(bulkVideoSchema.parse({ action: "tags", ids: [v.id], add: ["new"] }), OWNER)).refused, [v.id]);
+  });
+
+  it("refuses a request that names no tag, or one past the limits", () => {
+    assert.equal(bulkVideoSchema.safeParse({ action: "tags", ids: ["a"] }).success, false);
+    assert.equal(bulkVideoSchema.safeParse({ action: "tags", ids: ["a"], add: ["  "] }).success, false);
+    assert.equal(bulkVideoSchema.safeParse({ action: "tags", ids: ["a"], add: ["x".repeat(VIDEO_TAG_MAX + 1)] }).success, false);
   });
 });

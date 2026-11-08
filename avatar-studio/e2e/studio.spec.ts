@@ -16139,6 +16139,53 @@ test("saved views name the library's search and filters, reopen them in one clic
   await expect(page.getByTestId("saved-view")).toHaveCount(0);
 });
 
+test("tags on many videos at once: the library's Tags field adds and removes them, and says which were too full", async ({ page }) => {
+  const tag = `B${Date.now().toString(36)}`;
+  const one = await createVideoViaApi(page, `${tag} one`);
+  const two = await createVideoViaApi(page, `${tag} two`);
+  // Nine tags already on the first, so two more would take it past ten.
+  expect((await page.request.patch(`/api/videos/${one.id}`, { data: { tags: Array.from({ length: 9 }, (_, i) => `${tag} n${i}`) } })).status()).toBe(200);
+  const tagsOf = async (id: string) => ((await (await page.request.get(`/api/videos/${id}`)).json()) as { video: { tags?: string[] } }).video.tags ?? [];
+  await page.goto(`/videos?q=${tag}`);
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  const bar = page.getByTestId("bulk-bar");
+  await expect(page.locator("button[aria-pressed][aria-label^='Select ']")).toHaveCount(2);
+  await page.keyboard.press("Control+a");
+  await expect(bar.getByText(/selected$/)).toHaveText("2 selected");
+  // Escape puts the field away, back on its button.
+  await bar.getByRole("button", { name: "Tags", exact: true }).click();
+  const field = page.getByLabel("Tags for the selected videos");
+  await expect(field).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(bar.getByRole("button", { name: "Tags", exact: true })).toBeFocused();
+  await bar.getByRole("button", { name: "Tags", exact: true }).click();
+  await field.fill(`${tag} spring, ${tag} porch`);
+  await field.press("Enter");
+  // The full one is named and stays selected with the field open; the other is tagged.
+  await expect(page.getByText(/1 selected video would have more than 10 tags, so it was not tagged and is still selected/)).toBeVisible();
+  await expect(bar.getByText(/selected$/)).toHaveText("1 selected");
+  expect(await tagsOf(two.id)).toEqual([`${tag} spring`, `${tag} porch`]);
+  expect(await tagsOf(one.id)).toHaveLength(9);
+  // A tag none of them has is not sent for removal; the bar says so.
+  await field.fill(`${tag} nothing`);
+  await page.getByTestId("bulk-tags").getByRole("button", { name: "Remove tag" }).click();
+  await expect(page.getByText("None of the selected videos has that tag")).toBeVisible();
+  // Taking a tag off it (case aside) leaves room, and the same field then adds one.
+  await field.fill(`${tag} N0`);
+  await page.getByTestId("bulk-tags").getByRole("button", { name: "Remove tag" }).click();
+  await expect(bar).toHaveCount(0);
+  expect(await tagsOf(one.id)).toHaveLength(8);
+  expect(await tagsOf(one.id)).not.toContain(`${tag} n0`);
+  // Both now carry the tag, so the library's tag filter counts them.
+  await page.getByRole("button", { name: "Select", exact: true }).click();
+  await page.keyboard.press("Control+a");
+  await bar.getByRole("button", { name: "Tags", exact: true }).click();
+  await field.fill(`${tag} spring`);
+  await page.getByTestId("bulk-tags").getByRole("button", { name: "Add tag" }).click();
+  await expect(bar).toHaveCount(0);
+  await expect(page.getByLabel("Filter by tag").locator("option", { hasText: `${tag} spring` })).toHaveText(`${tag} spring (2)`);
+});
+
 test("tags on a video: added and removed on its page, shown on its card, and found by the library's tag filter and search", async ({ page }) => {
   const tag = `T${Date.now().toString(36)}`;
   const tagged = await createVideoViaApi(page, `${tag} kitchen`);

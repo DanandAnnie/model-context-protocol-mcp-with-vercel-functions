@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArchiveRestore, AtSign, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
+import { ArchiveRestore, AtSign, Tag, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
 import { CREATED_WITHIN_DAYS, LENGTH_FILTERS, LIBRARY_SEARCH_MAX, SHAPE_FILTERS, SHARE_FILTERS, VIEWED_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, libraryAddress, libraryFilterKey, withoutLibraryFilters } from "@/lib/client";
 import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { useMobileNav } from "@/components/MobileNav";
@@ -10,7 +10,7 @@ import { fileToCover } from "@/lib/image-upload";
 import { isApple } from "@/components/QuickFind";
 import { VideoCard, VideoRow } from "@/components/VideoCard";
 import { FolderShare } from "@/components/FolderShare";
-import { VIDEO_TAG_MAX, sameTag } from "@/lib/tags";
+import { VIDEO_TAGS_MAX, VIDEO_TAG_MAX, cleanTags, sameTag, tagText } from "@/lib/tags";
 import { SavedViews } from "@/components/SavedViews";
 import { Button, EmptyState, ErrorBanner, SectionTitle, Skeleton, inputClass } from "@/components/ui";
 import { useApi } from "@/hooks/useApi";
@@ -62,7 +62,7 @@ function localMinute(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes" | "captions" | "scripts" | "cover" | "nocover";
+type BulkAction = "delete" | "move" | "share-off" | "share-on" | "schedule" | "golive" | "expire" | "noexpiry" | "restore" | "purge" | "links" | "password" | "nopassword" | "settings" | "retry" | "star" | "unstar" | "empty" | "restoreall" | "unfile" | "cta" | "nocta" | "copylinks" | "qrcodes" | "captions" | "scripts" | "cover" | "nocover" | "tag" | "untag";
 
 export default function VideosPage() {
   return (
@@ -330,7 +330,7 @@ function VideosInner() {
   const [bulkErr, setBulkErr] = useState<string | null>(null);
   // "Schedule go-live" and "Set expiry" open a date and time field in the bar, one at a time; it is a local time, sent as an instant.
   // The share password, link settings, and folder fields take the same place in the bar, so only one of them is open at a time.
-  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | "cta" | "cover" | null>(null);
+  const [timeField, setTimeField] = useState<"golive" | "expiry" | "password" | "settings" | "folder" | "cta" | "cover" | "tags" | null>(null);
   // The call-to-action button's text and link, for every selected video's share page.
   const [ctaDraft, setCtaDraft] = useState({ label: "", url: "" });
   // The picture chosen for every selected video's cover, made ready to send (a JPEG fitted in 1280px) when it is picked.
@@ -521,6 +521,7 @@ function VideosInner() {
     const over = overSelection(ids.length, BULK_MAX);
     if (over) return setBulkErr(over);
     let targetFolder: string | undefined;
+    let bulkTags: string[] = [];
     if (action === "move" || action === "unfile") {
       // A name that only differs from an existing folder in case or spacing goes into that folder. The length is checked
       // after trimming, as the server does, so spaces pasted around a full-length name do not cut it short.
@@ -529,6 +530,16 @@ function VideosInner() {
       if (targetFolder.length > MAX_FOLDER_NAME) {
         setBulkErr(`Keep the folder name to ${MAX_FOLDER_NAME} characters`);
         return;
+      }
+    } else if (action === "tag" || action === "untag") {
+      // A comma ends a tag, as on the video page, so "spring, open house" names two.
+      bulkTags = cleanTags(timeDraft.split(",").map(tagText));
+      if (!bulkTags.length) return;
+      if (bulkTags.length > VIDEO_TAGS_MAX) return setBulkErr(`Name at most ${VIDEO_TAGS_MAX} tags at once`);
+      if (bulkTags.some((t) => Array.from(t).length > VIDEO_TAG_MAX)) return setBulkErr(`A tag is at most ${VIDEO_TAG_MAX} characters`);
+      // Nothing to take off: said here, and nothing is sent, as "No cover" does.
+      if (action === "untag" && !videos.some((v) => selected.has(v.id) && v.tags?.some((t) => bulkTags.some((b) => sameTag(b, t))))) {
+        return setBulkErr(`None of the selected videos has ${bulkTags.length === 1 ? "that tag" : "those tags"}`);
       }
     } else if (action === "delete" && !window.confirm(`Move ${ids.length} ${ids.length === 1 ? "video" : "videos"} to the trash? You can restore ${ids.length === 1 ? "it" : "them"} for ${TRASH_RETENTION_DAYS} days.`)) {
       return;
@@ -613,6 +624,8 @@ function VideosInner() {
                     ? { action: "cta", ids, shareCta: action === "nocta" ? null : { label: ctaDraft.label.trim(), url: ctaDraft.url.trim() } }
                   : action === "cover" || action === "nocover"
                     ? { action: "cover", ids, cover: action === "nocover" ? null : coverDraft!.dataUrl }
+                  : action === "tag" || action === "untag"
+                    ? { action: "tags", ids, [action === "tag" ? "add" : "remove"]: bulkTags }
                   : action === "settings"
                     ? {
                         action,
@@ -628,7 +641,9 @@ function VideosInner() {
       if (refused.length) {
         const one = refused.length === 1;
         notes.push(
-          action === "expire"
+          action === "tag" || action === "untag"
+            ? `${one ? "1 selected video" : `${refused.length} selected videos`} would have more than ${VIDEO_TAGS_MAX} tags, so ${one ? "it was" : "they were"} not tagged and ${one ? "is" : "are"} still selected; take a tag off ${one ? "it" : "them"} first.`
+            : action === "expire"
             ? `${one ? "1 selected video goes" : `${refused.length} selected videos go`} live at or after that time, so ${one ? "it was" : "they were"} not given that expiry and ${one ? "is" : "are"} still selected; set an earlier go-live time on ${one ? "it" : "them"} first.`
             : `${one ? "1 selected video expires" : `${refused.length} selected videos expire`} at or before that time, so ${one ? "it was" : "they were"} not scheduled and ${one ? "is" : "are"} still selected; set a later expiry on ${one ? "it" : "them"} first.`,
         );
@@ -896,7 +911,7 @@ function VideosInner() {
   }
 
   // The banner stays: after a refusal it says which of the two times to move, which may be the field being opened.
-  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder" | "cta" | "cover") {
+  function openTimeField(kind: "golive" | "expiry" | "password" | "settings" | "folder" | "cta" | "cover" | "tags") {
     setCtaDraft({ label: "", url: "" });
     setCoverDraft(null);
     coverPick.current += 1;
@@ -994,6 +1009,61 @@ function VideosInner() {
           onClick={closeTimeField}
           disabled={busy !== null}
           aria-label="Close share password"
+          className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+    );
+  }
+  // Tags put on, or taken off, every selected video (a comma between two), the library's tags suggested as it is typed.
+  function tagsForm() {
+    const named = timeDraft.split(",").some((t) => tagText(t));
+    // Suggested for the tag being typed, after the last comma, with the ones before it kept in front.
+    const cut = timeDraft.lastIndexOf(",");
+    const before = cut < 0 ? "" : `${timeDraft.slice(0, cut + 1)} `;
+    const typed = timeDraft.slice(0, cut + 1).split(",").map(tagText);
+    return (
+      <form
+        className="inline-flex flex-wrap items-center gap-1.5"
+        data-testid="bulk-tags"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void bulk("tag");
+        }}
+      >
+        <input
+          autoFocus
+          list="bulk-tag-names"
+          aria-label="Tags for the selected videos"
+          placeholder="Tag, or tags with commas"
+          maxLength={VIDEO_TAGS_MAX * (VIDEO_TAG_MAX + 2)}
+          className={`${inputClass} w-44 py-1 text-xs`}
+          value={timeDraft}
+          onChange={(e) => {
+            setTimeDraft(e.target.value);
+            setBulkErr(null);
+          }}
+        />
+        <datalist id="bulk-tag-names">
+          {tagsUsed
+            .filter((t) => !typed.some((x) => sameTag(x, t.name)))
+            .map((t) => (
+              <option key={t.name} value={`${before}${t.name}`} />
+            ))}
+        </datalist>
+        <Button type="submit" variant="secondary" className="px-2.5 py-1 text-xs" disabled={!selected.size || !named || busy !== null} loading={busy === "tag"} title="Put these tags on the selected videos, keeping the tags they have">
+          Add tag
+        </Button>
+        <Button type="button" variant="ghost" className="px-2.5 py-1 text-xs" onClick={() => bulk("untag")} disabled={!selected.size || !named || busy !== null} loading={busy === "untag"} title="Take these tags off the selected videos that have them">
+          Remove tag
+        </Button>
+        <button
+          type="button"
+          onClick={closeTimeField}
+          disabled={busy !== null}
+          aria-label="Close tags"
           className="rounded p-1 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
         >
           <X className="h-3.5 w-3.5" />
@@ -1421,6 +1491,13 @@ function VideosInner() {
               ) : (
                 <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="folder" onClick={() => openTimeField("folder")} disabled={!selected.size || busy !== null}>
                   <FolderInput className="h-3.5 w-3.5" /> Move to folder
+                </Button>
+              )}
+              {timeField === "tags" ? (
+                tagsForm()
+              ) : (
+                <Button variant="secondary" className="px-2.5 py-1 text-xs" data-opens="tags" onClick={() => openTimeField("tags")} disabled={!selected.size || busy !== null} title="Put a tag on the selected videos, or take one off">
+                  <Tag className="h-3.5 w-3.5" /> Tags
                 </Button>
               )}
               <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => bulk("share-off")} disabled={!selected.size || busy !== null} loading={busy === "share-off"} title="The share pages and embeds of the selected videos answer “not found” until turned back on">

@@ -8,7 +8,7 @@ const BULK_ACTIVITY: Partial<Record<string, ActivityKind>> = { delete: "video.tr
 
 export const dynamic = "force-dynamic";
 
-/** Bulk trash, restore, purge, move-to-folder, star, share-link switch, go-live schedule, link expiry, link password, link settings (download, email gate), call-to-action button, or cover picture for the library's multi-select. */
+/** Bulk trash, restore, purge, move-to-folder, star, tags, share-link switch, go-live schedule, link expiry, link password, link settings (download, email gate), call-to-action button, or cover picture for the library's multi-select. */
 export async function POST(req: Request) {
   try {
     const owner = await requireEditor();

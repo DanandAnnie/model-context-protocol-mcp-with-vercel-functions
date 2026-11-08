@@ -2495,3 +2495,19 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Tests.**
     - A unit test counts opens on either side of midnight UTC, an embedded one, and one the window refuses. It also checks the days through a rename, and the dropping of days past the history kept.
     - The folder opens e2e test checks that there is no chart before the first open, the day kept, and the chart's total, its accessible name, and "1 in 14 days".
+- Home "Shared folders" card, and the library reading `?folder=` (`f885760`).
+  - **What it does.** Under Insights, once a folder is shared, Home shows how many times the shared folders' pages were opened in the last 14 days and how many folders are shared. It names the three opened most, by page heading, each with its opens. Each opens My videos at that folder.
+  - **The library's address.**
+    - The library reads a folder's name from `?folder=` as it does `?presenter=` and `?voice=`, and follows Back and Forward.
+    - Clear filters takes it off the address.
+    - A folder that no video is in any more stays picked as "Name (0)". The folder picker shows while the address names a folder, even when the library has no folders.
+  - **How it counts.** It adds up each share's opens kept by UTC day (363) over the last 14 days, today included. It lists only folders opened in that window: most opens first, then page heading A–Z with numbers in order.
+  - **Review findings fixed before commit.**
+    - The e2e test left its share in place, so on a local rerun against a server still running, older runs' folders could tie it out of the top three. It now removes the share when it ends.
+    - The folder picker was hidden when the library had no folders, so a folder from the address applied with no picker to change it.
+    - Long headings are cut off with an ellipsis and now show in full on hover. The list's accessible name uses the card's day count.
+    - API.md now says an empty `?folder=` on the page is no filter (the API reads it as unfiled).
+  - **Tests.**
+    - Unit tests for the 14-day window's edges, the order and ties, the top three, and shares with no days kept.
+    - A Clear filters test checks that `folder` comes off the address.
+    - An e2e test: six visitors open a folder's page, and Home names it with "6 opens". Its link opens the library at that folder, showing its video but not one outside it, and Clear filters puts the library back.

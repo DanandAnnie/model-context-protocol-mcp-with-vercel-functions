@@ -2569,3 +2569,28 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - At 390 pixels the chips wrap without spilling sideways.
     - No console errors or failed requests.
   - **Fixed.** A long name cut at 40 characters could end on the comma before the words it lost ("…the spring campaign,"). A name cut short now drops trailing commas, dashes, and spaces. A name that fits keeps its own ending. Unit tests cover both.
+- Tags on videos (`fc2c60b`).
+  - **What it does.**
+    - A video takes up to 10 tags of up to 24 characters each, to find it by. They are edited on the video page, shown as chips on library cards (the first three, then "+N") and in list rows, and matched by the library's search.
+    - The library has a "Filter by tag" select with a count for each tag, most used first, kept in the address as `?tag=` (case aside). Clear filters and saved views include it.
+    - Tags are kept through the trash, by a retry of a failed render, by Make other sizes, and by the edited cut of a directed video. They are never shown on the share page, an embed, or a shared folder's page.
+  - **API.**
+    - `PATCH /api/videos/:id { tags }` sets the whole list (an empty list removes them). Each tag has its spaces folded, and the same tag twice, case aside, is kept once in its first spelling. Too many or too long is a `400` naming the limit.
+    - `GET /api/videos` takes `tag` and returns `tags` counts for the view, whatever the other filters.
+  - **On the video page.**
+    - Enter or a comma adds a tag. A pasted list with commas adds each. The tags used across the library are offered.
+    - Each chip has a remove button. Adding, removing, and an already-used tag are said aloud.
+    - After a removal the focus goes to the next tag's button, the one before, or the field. After an add it stays in the field.
+    - Viewers see the chips only. The editor is hidden in the trash.
+  - **Review findings fixed before commit.**
+    - Changing the tag filter kept a selection of videos the filter had hidden.
+    - An edit held up by a cover upload or a password could put back the tags as it had read them. Tags are now kept as stored unless the edit sets them, as the star is.
+    - The field was disabled while saving, so the focus dropped after each add. It is now read-only while saving, and focus moves once the chips show the result.
+    - A tag longer than 12 emoji could be saved but not filtered by. The filter now counts characters as storage does.
+    - A tag named "all" could not be filtered by, since "all" also meant any tag.
+    - A pasted comma list became one tag.
+    - Suggestions came from the library's first page only.
+    - The edited cut of a directed video dropped its tags.
+  - **Tests.**
+    - Unit tests for tidying, limits (an emoji tag at the limit included), counts, updates, the filter and search, a slower edit not undoing tags, and the query's character count.
+    - An e2e test adds tags with Enter, a typed comma, and a pasted list. It checks the field keeps the focus, removes tags by keyboard with the focus moving on, and reloads. It filters the library by a tag (with its count and address, any case, and a tag named "all") and finds a video by its tag.

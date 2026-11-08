@@ -16004,3 +16004,68 @@ test("home names the shared folders opened most in two weeks, each opening the l
     await page.request.delete(`/api/collections/${collection.id}`);
   }
 });
+
+test("the library keeps its filters in its address: a reload and Back from a video open it as it was left", async ({ page }) => {
+  const tag = `Kept ${Date.now().toString(36)}`;
+  const kept = await createVideoViaApi(page, `${tag} starred`);
+  const other = await createVideoViaApi(page, `${tag} plain`);
+  for (const v of [kept, other]) await expect.poll(async () => (await (await page.request.get(`/api/videos/${v.id}`)).json()).video.status, { timeout: 30_000 }).toBe("completed");
+  expect((await page.request.patch(`/api/videos/${kept.id}`, { data: { folder: tag, starred: true } })).status()).toBe(200);
+  expect((await page.request.patch(`/api/videos/${other.id}`, { data: { folder: tag } })).status()).toBe(200);
+  await page.goto("/videos");
+  const folder = page.getByLabel("Folder", { exact: true });
+  const search = page.getByLabel("Search videos");
+  const starred = page.getByTestId("starred-toggle");
+  const param = (k: string) => new URL(page.url()).searchParams.get(k);
+  await folder.selectOption(tag);
+  await page.getByRole("button", { name: "Completed", exact: true }).click();
+  await starred.click();
+  await search.fill(tag);
+  // Written once typing pauses, in place of the page's entry.
+  await expect.poll(() => param("q")).toBe(tag);
+  expect([param("folder"), param("status"), param("starred")]).toEqual([tag, "completed", "1"]);
+  await expect(page.locator(`a[href="/videos/${kept.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${other.id}"]`)).toHaveCount(0);
+  // A reload opens the library as it was left.
+  await page.reload();
+  await expect(folder).toHaveValue(tag);
+  await expect(search).toHaveValue(tag);
+  await expect(starred).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(`a[href="/videos/${kept.id}"]`).first()).toBeVisible();
+  await expect(page.locator(`a[href="/videos/${other.id}"]`)).toHaveCount(0);
+  // So does Back from a video.
+  await page.locator(`a[href="/videos/${kept.id}"]`).first().click();
+  await page.waitForURL(`**/videos/${kept.id}`);
+  await page.goBack();
+  await expect(folder).toHaveValue(tag);
+  await expect(search).toHaveValue(tag);
+  await expect(starred).toHaveAttribute("aria-pressed", "true");
+  // Turning a filter off takes it off the address.
+  await starred.click();
+  await expect.poll(() => new URL(page.url()).searchParams.has("starred")).toBe(false);
+  await expect(page.locator(`a[href="/videos/${other.id}"]`).first()).toBeVisible();
+  // Typing on with pauses longer than the search's own: each pause writes the address, and nothing typed is undone.
+  await search.press("End");
+  await search.pressSequentially(" plain", { delay: 300 });
+  await expect(search).toHaveValue(`${tag} plain`);
+  await expect.poll(() => param("q")).toBe(`${tag} plain`);
+  await expect(page.locator(`a[href="/videos/${kept.id}"]`)).toHaveCount(0);
+  // Unfiled is an empty folder in the address, as the API reads it, and reads back as Unfiled.
+  await folder.selectOption("unfiled");
+  await expect.poll(() => param("folder")).toBe("");
+  // The sidebar's My videos goes back to every video, and Back to the address the page wrote, Unfiled again.
+  await page.getByRole("link", { name: "My videos", exact: true }).filter({ visible: true }).first().click();
+  await expect(page).toHaveURL(/\/videos$/);
+  await expect(folder).toHaveValue("all");
+  await expect(search).toHaveValue("");
+  await page.goBack();
+  await expect.poll(() => param("folder")).toBe("");
+  await expect(folder).toHaveValue("unfiled");
+  await expect(search).toHaveValue(`${tag} plain`);
+  await page.reload();
+  await expect(folder).toHaveValue("unfiled");
+  // Clear filters takes them all off.
+  await page.getByTestId("clear-filters").click();
+  await expect(page).toHaveURL(/\/videos$/);
+  await expect(search).toHaveValue("");
+});

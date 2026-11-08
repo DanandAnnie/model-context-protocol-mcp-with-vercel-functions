@@ -424,7 +424,35 @@ export function shareSummary(video: { shareDisabled?: boolean; shareExpiresAt?: 
 }
 
 /** The library address's filter parameters (the ones the library reads, and a batch's results), which Clear filters takes off. */
-export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length", "viewed", "folder"] as const;
+export const LIBRARY_FILTER_PARAMS = ["batch", "skipped", "failed", "share", "status", "created", "review", "comments", "presenter", "voice", "shape", "length", "viewed", "folder", "starred", "q"] as const;
+
+/**
+ * The library address's filters as one string to compare, one part per parameter in LIBRARY_FILTER_PARAMS order: a
+ * parameter that is there (`?folder=` included, which is Unfiled) apart from one that is not.
+ */
+export function libraryFilterKey(params: URLSearchParams): string {
+  return LIBRARY_FILTER_PARAMS.map((k) => (params.has(k) ? `=${params.get(k)}` : "")).join("\u0000");
+}
+
+/** The longest search the library keeps in its address: the server refuses a longer one. */
+export const LIBRARY_SEARCH_MAX = 200;
+
+/**
+ * The library address's query with the filters it writes set as given (a value, `""` included, or null to take one off),
+ * every other parameter kept where it is: "?…", "" when nothing is left, or null when the address would not change (so a
+ * page loaded from a link keeps that link's spelling).
+ */
+export function libraryAddress(search: string, filters: Partial<Record<(typeof LIBRARY_FILTER_PARAMS)[number], string | null>>): string | null {
+  const before = new URLSearchParams(search);
+  const params = new URLSearchParams(search);
+  for (const [k, v] of Object.entries(filters)) {
+    if (v === null || v === undefined) params.delete(k);
+    else if (params.get(k) !== v || params.getAll(k).length > 1) params.set(k, v);
+  }
+  const after = params.toString();
+  if (after === before.toString()) return null;
+  return after ? `?${after}` : "";
+}
 
 /**
  * The library address's query without its filter parameters, as "?…" or "" when nothing else is left, or null when it

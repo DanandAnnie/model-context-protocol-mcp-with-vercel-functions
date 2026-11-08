@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArchiveRestore, AtSign, Captions, ImageIcon, CheckSquare, FileText, Clapperboard, Clock, Copy, LayoutGrid, List, Download, FolderInput, KeyRound, MousePointerClick, QrCode, SlidersHorizontal, FolderMinus, FolderPen, Link2, Link2Off, MessageSquare, RotateCcw, Star, StarOff, TimerOff, Trash2, X } from "lucide-react";
-import { CREATED_WITHIN_DAYS, LENGTH_FILTERS, LIBRARY_FILTER_PARAMS, SHAPE_FILTERS, SHARE_FILTERS, VIEWED_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, withoutLibraryFilters } from "@/lib/client";
+import { CREATED_WITHIN_DAYS, LENGTH_FILTERS, LIBRARY_SEARCH_MAX, SHAPE_FILTERS, SHARE_FILTERS, VIEWED_FILTERS, api, clickSelect, folderFor, nextShareChange, overSelection, libraryAddress, libraryFilterKey, withoutLibraryFilters } from "@/lib/client";
 import { isSearchKey, libraryKey, readSingleKeyShortcuts, typesText } from "@/lib/shortcuts";
 import { useMobileNav } from "@/components/MobileNav";
 import { fileToCover } from "@/lib/image-upload";
@@ -41,8 +41,13 @@ const countOf = (counts: Record<string, number>, folder: string) => (Object.hasO
 
 /** The presenter or voice filter the address asks for (`?presenter=<avatar id>`, `?voice=<voice id>`), or "all"; a blank one is no filter. */
 const presenterFrom = (asked: string | null) => asked?.trim().slice(0, 120) || "all";
-/** A folder named in the address (`?folder=`, as Home's shared folders card links): its name as the library's folder select holds it, or every folder. */
-const folderFrom = (asked: string | null) => asked?.trim().slice(0, MAX_FOLDER_NAME) || "all";
+/**
+ * The folder the address asks for (`?folder=`, as Home's shared folders card links): its name as the library's folder
+ * select holds it, "unfiled" for an empty one (as the API reads it), or every folder when there is none.
+ */
+const folderFrom = (asked: string | null) => (asked === null ? "all" : asked.trim().slice(0, MAX_FOLDER_NAME) || "unfiled");
+/** The search the address asks for (`?q=`), cut to the length the server takes. */
+const searchFrom = (asked: string | null) => (asked ?? "").slice(0, LIBRARY_SEARCH_MAX);
 
 /** A time as a datetime-local field holds it: the browser's local date and time, to the minute. */
 function localMinute(d: Date): string {
@@ -65,14 +70,14 @@ function VideosInner() {
   const batch = params.get("batch");
   const skipped = Number(params.get("skipped") ?? 0);
   const failedCount = Number(params.get("failed") ?? 0);
-  const [q, setQ] = useState("");
-  const [needle, setNeedle] = useState("");
+  const [q, setQ] = useState(() => searchFrom(params.get("q")));
+  const [needle, setNeedle] = useState(() => searchFrom(params.get("q")).trim());
   // Home's notices open the library at `?share=`, `?status=`, `?created=`, `?review=`, and `?comments=` (`open` or `mentions`), `?shape=`
   // (landscape, portrait, or square), `?length=` (short, medium, or long), and `?viewed=` (yes or no) work the same way, and
   // the video page's presenter and voice links at `?presenter=` (an avatar id) and `?voice=` (a voice id), read
-  // too), again whenever the address changes (the sidebar's My videos goes back to every video); a value the library does
-  // not know is ignored.
-  const askedFilters = LIBRARY_FILTER_PARAMS.map((k) => params.get(k) ?? "").join("\u0000");
+  // too), as are `?folder=`, `?starred=1`, and `?q=`, again whenever the address changes (the sidebar's My videos goes
+  // back to every video); a value the library does not know is ignored. The page writes them back as they change (below).
+  const askedFilters = libraryFilterKey(params);
   const [status, setStatus] = useState<"all" | VideoStatus>(() => fromAddress(params.get("status"), STATUSES));
   const [folder, setFolder] = useState<string>(() => folderFrom(params.get("folder"))); // "all" | "unfiled" | folder name
   // Only the videos one presenter appears in, by avatar id: "all" for any.
@@ -93,7 +98,7 @@ function VideosInner() {
   // The trash is its own view of the same page: same search, status, and folder filters, different bulk actions.
   const [trash, setTrash] = useState(false);
   // Only the starred videos (in the trash view too, where a star is kept for when a video comes back).
-  const [starred, setStarred] = useState(false);
+  const [starred, setStarred] = useState(() => params.get("starred") === "1");
   // Only the videos with a review note no one has resolved yet (what the team still has to act on), or only those with an
   // open thread that names the reader (what is waiting on them); one or the other.
   const [commentFilter, setCommentFilter] = useState<CommentFilter>(() => commentFilterFrom(params.get("comments")));
@@ -106,19 +111,49 @@ function VideosInner() {
   // Whether a finished video's share page has been viewed: with a batch, the recipients still to follow up.
   const [viewed, setViewed] = useState<VideoQuery["viewed"]>(() => fromAddress(params.get("viewed"), VIEWED_FILTERS));
   const [filtersAsked, setFiltersAsked] = useState(askedFilters);
+  // The filters as the page writes them into its address (below): the search once typing pauses, Unfiled as an empty folder.
+  const filtersInAddress = {
+    q: needle ? needle.slice(0, LIBRARY_SEARCH_MAX) : null,
+    status: status === "all" ? null : status,
+    folder: folder === "all" ? null : folder === "unfiled" ? "" : folder,
+    presenter: presenter === "all" ? null : presenter,
+    voice: voice === "all" ? null : voice,
+    review: review === "all" ? null : review,
+    share: share === "all" ? null : share,
+    comments: commentFilter === "all" ? null : commentFilter,
+    created: created === "all" ? null : created,
+    shape: shape === "all" ? null : shape,
+    length: lengthFilter === "all" ? null : lengthFilter,
+    viewed: viewed === "all" ? null : viewed,
+    starred: starred ? "1" : null,
+  };
+  // The page's own writes to its address (below) still to come back through the router, oldest first.
+  const ownWrites = useRef<string[]>([]);
   if (askedFilters !== filtersAsked) {
     setFiltersAsked(askedFilters);
-    setShare(fromAddress(params.get("share"), SHARE_FILTERS));
-    setStatus(fromAddress(params.get("status"), STATUSES));
-    setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
-    setShape(fromAddress(params.get("shape"), SHAPE_FILTERS));
-    setLengthFilter(fromAddress(params.get("length"), LENGTH_FILTERS));
-    setViewed(fromAddress(params.get("viewed"), VIEWED_FILTERS));
-    setReview(fromAddress(params.get("review"), REVIEW_FILTERS));
-    setCommentFilter(commentFilterFrom(params.get("comments")));
-    setPresenter(presenterFrom(params.get("presenter")));
-    setVoice(presenterFrom(params.get("voice")));
-    setFolder(folderFrom(params.get("folder")));
+    // One of the page's own writes coming back is not read again (that would undo what is typed in the search box while
+    // its pause runs, or a filter changed since an earlier write); it and any earlier ones are done with. Anything else
+    // (a link, the sidebar's My videos, Back) is read when it says something else than the filters on the page.
+    const own = ownWrites.current.lastIndexOf(askedFilters);
+    // An address from elsewhere ends any wait for the page's own: writes that came back together with it are not looked for.
+    if (own < 0) ownWrites.current = [];
+    if (own >= 0) ownWrites.current.splice(0, own + 1);
+    else if (libraryAddress(params.toString(), filtersInAddress) !== null) {
+      setQ(searchFrom(params.get("q")));
+      setNeedle(searchFrom(params.get("q")).trim());
+      setStarred(params.get("starred") === "1");
+      setShare(fromAddress(params.get("share"), SHARE_FILTERS));
+      setStatus(fromAddress(params.get("status"), STATUSES));
+      setCreated(fromAddress(params.get("created"), CREATED_FILTERS));
+      setShape(fromAddress(params.get("shape"), SHAPE_FILTERS));
+      setLengthFilter(fromAddress(params.get("length"), LENGTH_FILTERS));
+      setViewed(fromAddress(params.get("viewed"), VIEWED_FILTERS));
+      setReview(fromAddress(params.get("review"), REVIEW_FILTERS));
+      setCommentFilter(commentFilterFrom(params.get("comments")));
+      setPresenter(presenterFrom(params.get("presenter")));
+      setVoice(presenterFrom(params.get("voice")));
+      setFolder(folderFrom(params.get("folder")));
+    }
   }
   // Cards or compact rows; remembered by this browser only (read after mounting, so the server render stays the grid).
   const [layout, setLayout] = useState<"grid" | "list">("grid");
@@ -142,6 +177,25 @@ function VideosInner() {
     const t = setTimeout(() => setNeedle(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
+  // The filters go into the page's address as they change (the search once typing pauses), in place of the entry rather
+  // than as a new one, so a reload, a copied link, or Back from a video opens the library as it was left. Whatever else
+  // the address holds (a batch's results, say) stays.
+  useEffect(() => {
+    const next = libraryAddress(window.location.search, filtersInAddress);
+    if (next === null) return;
+    // Once the router has caught up with the address, nothing written earlier is still to come back (several writes can
+    // come back as one, the last).
+    if (askedFilters === libraryFilterKey(new URLSearchParams(window.location.search))) ownWrites.current = [];
+    try {
+      // Written to the history directly, as Clear filters does: Next keeps the page's search params in step with it.
+      window.history.replaceState(null, "", `${window.location.pathname}${next}${window.location.hash}`);
+      ownWrites.current = [...ownWrites.current.slice(-19), libraryFilterKey(new URLSearchParams(next))];
+    } catch {
+      // Some browsers refuse a burst of history writes; the filters still hold on the page.
+    }
+    // filtersInAddress is made from these on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needle, status, folder, presenter, voice, review, share, commentFilter, created, shape, lengthFilter, viewed, starred]);
   // "Show more" extends the page for the current filters only: a new filter starts again
   // from the first page in the same render, with no extra request for the old extent.
   const filterKey = [needle, status, folder, batch ?? "", sort, trash ? "trash" : "", review, share, starred ? "starred" : "", commentFilter === "all" ? "" : commentFilter, created, shape, lengthFilter, viewed, presenter, voice].join("\u0000");

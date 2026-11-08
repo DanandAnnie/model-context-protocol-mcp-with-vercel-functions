@@ -2520,3 +2520,20 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
     - No console errors or failed requests.
   - **Fixed.** On a phone, a long page heading stretched the card past the screen, pushing the open counts out of sight; the card is a grid item that grew to its content. The card now keeps to the screen and cuts the heading off with an ellipsis. The Home card e2e test now uses a long heading and checks, at 390 pixels wide, that the card and the count stay on the screen. It failed before the fix (the card's right edge at 553 px) and passes after.
   - **Noted for next.** The library reads its filters from the address but does not write them back. After picking another folder (or presenter, or voice), a reload brings back the one the address named.
+- The library's address follows its filters (`7f32166`).
+  - **What it does.** The search, Starred, and every filter in My videos are now written into the page's address as they change. The search is written once typing pauses. Each write replaces the page's own history entry rather than adding one, so a reload, a copied link, or Back from a video opens the library as it was left. Before this, the library only read filters from links, and a reload brought back the filter a link had named after another was picked.
+  - **How it is kept.**
+    - Other parameters stay where they are, such as a batch's results.
+    - Unfiled is written as an empty `?folder=`, as the API reads it, and is told apart from every folder (no parameter).
+    - The page now reads `?q=` and `?starred=1` too. Clear filters takes them off.
+    - A pure helper, `libraryAddress`, sets and removes the filters, keeping a link's own spelling when nothing changes. `libraryFilterKey` compares two addresses' filters.
+    - The page keeps a short list of its own writes still coming back through the router. These are not read again, so typing in the search box is never undone. Any other address is read again when it says something else than the filters on the page: a link, the sidebar's My videos, or Back.
+  - **Review findings fixed before commit.**
+    - An empty `?folder=` and no folder compared the same, so My videos could leave the library on Unfiled. The comparison now tells them apart.
+    - Back to an address the page had written earlier was not read again, so the list stayed on every video under that address. Now only writes still to come back are skipped. The e2e test failed on the earlier code at this step.
+    - A first rework compared with `window.location`, but the router renders a navigation before it moves the address, so My videos stopped clearing the filters. Three e2e tests caught it, and the pending-writes list replaced that comparison.
+    - Several writes that come back as one could leave stale entries that would hide a later navigation. The list now empties on any address from elsewhere, and whenever the router has caught up.
+  - **Not changed.** Clicking My videos within the search's 250 ms pause keeps the words typed (the address then shows them too). A write during a cold fetch of the library could cancel that click. That needs the click inside the pause on a route the browser has not cached, so it is left as is.
+  - **Tests.**
+    - Unit tests for setting, changing, and taking off filters, for keeping other parameters in place, for a repeated filter, and for the key telling Unfiled from every folder.
+    - An e2e test picks a folder, Completed, Starred, and a search, then checks the address, a reload, and Back from a video. It turns Starred off and types on with pauses longer than the search's own, checking nothing typed is undone. It covers Unfiled through the sidebar's My videos, Back, and a reload, then Clear filters.

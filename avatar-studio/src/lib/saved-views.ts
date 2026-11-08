@@ -25,9 +25,14 @@ function characters(text: string): string[] {
   return Array.from(text);
 }
 
-/** A view name as kept: spaces folded, cut to SAVED_VIEW_NAME_MAX characters (not halfway through one). */
+/**
+ * A view name as kept: spaces folded, cut to SAVED_VIEW_NAME_MAX characters (not halfway through one), and a name cut
+ * short does not end on the comma or dash before the words it lost.
+ */
 export function viewName(raw: string): string {
-  return characters(raw.replace(/\s+/g, " ").trim()).slice(0, SAVED_VIEW_NAME_MAX).join("").trim();
+  const all = characters(raw.replace(/\s+/g, " ").trim());
+  const kept = all.slice(0, SAVED_VIEW_NAME_MAX).join("");
+  return (all.length > SAVED_VIEW_NAME_MAX ? kept.replace(/[\s,;:–—-]+$/u, "") : kept).trim();
 }
 
 /** A query with only the library's own search and filters, in the order given. */

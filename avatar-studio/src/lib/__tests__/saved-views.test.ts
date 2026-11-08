@@ -15,6 +15,9 @@ describe("saved views", () => {
     assert.equal(viewName("  Failed\n this   week "), "Failed this week");
     assert.equal(Array.from(viewName("é".repeat(60))).length, SAVED_VIEW_NAME_MAX);
     assert.equal(viewName("   "), "");
+    // A name cut short drops the comma it was cut after; one that fits keeps its own ending.
+    assert.equal(viewName("Portrait reels for the spring campaign, the long name"), "Portrait reels for the spring campaign");
+    assert.equal(viewName("Ends with a dash -"), "Ends with a dash -");
     // A flag or a family emoji is one character, never cut in half.
     const family = "👨‍👩‍👧";
     assert.equal(viewName("x".repeat(SAVED_VIEW_NAME_MAX - 1) + family + "tail"), "x".repeat(SAVED_VIEW_NAME_MAX - 1) + family);

@@ -4793,6 +4793,9 @@ test("a shared folder's link can expire: the panel sets and removes it, and the 
   await expect.poll(() => Date.now() > Date.parse(soon) + 200, { timeout: 30_000 }).toBe(true);
   const gone = await guest.goto(collection.url);
   expect(gone?.status()).toBe(404);
+  // In plain words, not a bare 404, and naming no reason a made-up link would not share.
+  await expect(guest.getByRole("heading", { name: "This link isn't available" })).toBeVisible();
+  await expect(guest.getByTestId("not-found")).toContainText("set it to expire, switched it off, or not made it live yet");
   expect((await guest.goto(`${collection.url}?embed=1`))?.status()).toBe(404);
   // A fresh visitor (whose window would count an open) and the button's beacon are refused too.
   const stranger = await browser.newContext();

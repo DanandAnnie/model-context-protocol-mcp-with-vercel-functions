@@ -2612,3 +2612,21 @@ The route reference is in [API.md](./API.md); the setup and feature overview is 
   - **Tests.**
     - Unit tests: adding and removing case aside; a full video refused and left alone; ids not there or someone else's reported as missing; approval, star, and views kept; no write when nothing changes; a video over the limit can still have tags removed; requests with no tag or too long a tag refused.
     - An e2e test selects two videos, checks Escape returns to the Tags button, and adds two tags. The full video is named and stays selected. It checks "Remove tag" with a tag none has, removes one case aside, and confirms the library's tag filter counts both.
+- QA pass 48: tags in a browser (`64213a9`).
+  - **What was walked.**
+    - On desktop and phone widths: the video page's tag editor (Enter, a typed comma, a pasted list, an emoji tag, a 24-character tag, one too long, filling to ten, removing by keyboard).
+    - Also: tag chips on cards, the library's tag filter and its address, the bulk Tags field (suggestions after a comma, the note for a full video, Escape back to its button), and the share page (no tags shown). Nothing overflowed sideways at 390 pixels, and no console errors.
+  - **Found and fixed.**
+    - Typing on after a comma lost keystrokes while the tag saved: "porch, yard" became "porch" and "ard". The field no longer stops typing while a save runs. Tags typed on are saved one after another, in order, and a tag that cannot be saved comes back into the field, in the order typed.
+  - **Found by review of that fix, and fixed.**
+    - At ten tags the field disappeared and the focus fell on a remove button, so a typed space could remove tags. The field now stays, read-only, with the "10 tags" note.
+    - The video page now sends tag changes as `addTags` and `removeTags`. The server works them out from the tags it holds when it writes the video, under its lock, so a tag added in another tab is not removed. An add past ten is a `400`.
+    - A later tag saving no longer hides an earlier tag's error. The error clears when the user tries again.
+    - Moving to another video while a save runs no longer mixes the two videos.
+    - After a removal the focus moves only if it is still on the pressed button, never out of the field.
+    - In a list where one tag is too long, or past the ten, the others are still saved. Only the refused one comes back into the field.
+    - An add past ten is refused before anything else in the same request is written, such as a cover or a password change.
+  - **Tests.**
+    - A unit test for `addTags` and `removeTags`: changes are kept beside a slower edit, removal ignores case, an add past ten is refused and leaves the video (and a password sent with it) as it was, and `tags` cannot be sent with either. The no-write check in the bulk test no longer races the mock renderer.
+    - The e2e test now types three tags on while each save is held back for 300 ms, and checks all three land whole.
+    - It then fills the video to ten through the API, checks an eleventh is refused, and checks the field stays read-only with the note as its description.
